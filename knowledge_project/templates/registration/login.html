@@ -1,0 +1,259 @@
+<!-- knowledge_project/templates/registration/login.html (最终美化版) -->
+{% extends 'base.html' %}
+
+{% block title %}用户登录{% endblock %}
+
+{% block content %}
+
+<style>
+    /* 登录框的整体容器和背景 */
+    #login-app {
+        max-width: 400px;
+        width: 90%;
+        padding: 3em;
+        border: 1px solid rgba(255, 255, 255, 0.2); /* 边框也用半透明，更柔和 */
+        border-radius: 15px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+
+        /* 核心美化：毛玻璃/磨砂效果 */
+        background-color: rgba(255, 255, 255, 0.15); /* 背景色调得更透明 */
+        backdrop-filter: blur(1px); /* 模糊背景，产生磨砂玻璃效果 */
+        -webkit-backdrop-filter: blur(10px); /* 兼容Safari */
+
+        text-align: center;
+        color: #333; /* 让标题和文字颜色更深，对比更清晰 */
+    }
+
+    /* 动态浮动标签的核心样式 */
+    .form-group {
+        position: relative; /* 这是浮动标签能够定位的关键 */
+        margin-bottom: 2em;
+    }
+    .form-input:focus { outline: none; border-bottom-color: #007bff; }
+     /* 图标的样式 */
+    .input-icon {
+        position: absolute; top: 0.9em; left: 0.5em; width: 1.2em;
+        font-size: 1.2em; /* 调整图标大小 */
+        /* 1. 将控制颜色的属性从 fill 改回 color */
+        color: #333;
+        transition: color 0.2s ease-in-out;
+    }
+    /* 2. 当输入框聚焦时，改变其兄弟.input-icon的color */
+    .form-input:focus ~ .input-icon {
+        color: #007bff;
+    }
+    .form-input:focus ~ .input-passwd {
+        color: #007bff;
+    }
+    .floating-label {
+        position: absolute;
+        top: 1em;
+        left: 3em; /* 为左侧图标留出空间 */
+        font-size: 1em;
+        olor: hsl(205deg, 30%, 15%);
+        pointer-events: none; /* 让鼠标可以“穿透”标签，点击到输入框 */
+        transition: all 0.2s ease-in-out; /* 平滑过渡动画 */
+    }
+
+    .form-input {
+        width: 100%;
+        padding: 1em 1em 1em 3em; /* 左侧内边距加大，为图标留出空间 */
+        box-sizing: border-box;
+        border: none;
+        border-bottom: 2px solid #ccc; /* 使用下划线代替边框，更简洁 */
+        background-color: transparent; /* 输入框背景透明 */
+        font-size: 1em;
+        color: #333;
+    }
+    .form-input:focus {
+        outline: none;
+        border-bottom-color: #007bff; /* 聚焦时下划线变色 */
+    }
+    .input-passwd {
+    position: absolute;
+    top: 0.9em;
+    right: 0.5em;
+    width: 1.2em;
+    font-size: 1.2em;
+    transition: fill 0.2s ease-in-out;
+    }
+    /* 当输入框被聚焦或已有内容时，触发标签的浮动效果 */
+    .form-input:focus + .floating-label,
+    .form-input:not(:placeholder-shown) + .floating-label {
+        top: -1em;
+        left: 3em;
+        font-size: 0.8em;
+        color: #007bff;
+    }
+
+     /* --- 图标样式 (用户名和锁) --- */
+    .input-icon {
+        position: absolute;
+        top: 0.9em;
+        left: 0.5em;
+        font-size: 1.2em;
+        color: #6c757d; /* 初始颜色 */
+        transition: color 0.2s ease-in-out;
+        z-index: 2; /* 确保图标在输入框之上 */
+    }
+    /*
+     * 关键修正：使用通用同级选择器 (~)
+     * .form-input:focus ~ .input-icon 会选中与被聚焦的 input 同级的所有 .input-icon
+     */
+    .form-input:focus ~ .input-icon,
+    .form-input:not(:placeholder-shown) ~ .input-icon {
+        color: #007bff; /* 聚焦或有内容时，图标变色 */
+    }
+        /* --- 密码眼睛图标样式 --- */
+    .input-passwd {
+        position: absolute;
+        top: 0.9em;
+        right: 0.5em;
+        font-size: 1.2em;
+        color: #6c757d;
+        cursor: pointer;
+        transition: color 0.2s ease-in-out;
+        z-index: 2000;
+    }
+
+        /* 鼠标悬停时也改变图标颜色（可选） */
+    .form-group input:hover + .fa-user {
+    fill: #007bff;
+    color: #007bff;
+}
+
+    /* 按钮和其他样式 */
+    .submit-btn { width: 100%; padding: 0.8em; background-color: #007bff; color: white; border: none; border-radius: 25px; cursor: pointer; font-size: 1.1em; margin-top: 1em;}
+    .signup-link { text-align: center; margin-top: 1.5em; }
+    .signup-link a { color: #555; text-decoration: none; }
+    .form-error-message {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+        padding: 0.75rem 1.25rem;
+        margin-bottom: 1.5rem;
+        border-radius: .25rem;
+        text-align: left;
+    }
+</style>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<div id="login-app">
+    <h2>[[ pageTitle ]]</h2>
+
+    <!-- 修改1: 添加 @submit.prevent 指令 -->
+<form method="post" @submit.prevent="handleLogin">
+    {% csrf_token %}
+    <!-- 修改2: 使用 v-if 显示Vue中的错误信息 -->
+    <div v-if="loginError" class="form-error-message">
+        <p>[[ loginError ]]</p>
+    </div>
+    <!-- 用户名输入框 -->
+    <div class="form-group">
+        <!-- 修改3: 添加 v-model 来进行数据绑定 -->
+        <input type="text" name="username" id="id_username" class="form-input" placeholder=" " required
+               v-model="form.username">
+        <label for="id_username" class="floating-label">用户名</label>
+        <i class="fa-regular fa-user input-icon"></i>
+    </div>
+    <!-- 密码输入框 -->
+    <div class="form-group">
+        <!-- 修改4: 绑定密码字段并修改 type -->
+        <input :type="passwordFieldType" name="password" id="id_password" class="form-input" placeholder=" " required
+               v-model="form.password">
+        <label for="id_password" class="floating-label">密码</label>
+        <i class="fa fa-lock input-icon"></i>
+        <!-- 修改5: 添加 @click 事件 -->
+        <i class="fas input-passwd" :class="passwordFieldType === 'password' ? 'fa-eye' : 'fa-eye-slash'"
+           @click="togglePasswordVisibility"></i>
+    </div>
+    <button type="submit" class="submit-btn"><i class="fa fa-sign-in-alt "></i> 登录</button>
+</form>
+
+<!--    <p class="signup-link">-->
+<!--        <a href="{% url 'signup' %}">还没有账户？点此注册</a>-->
+<!--    </p>-->
+</div>
+
+<script>
+    const { createApp, ref, reactive } = Vue;
+
+    // CSRF Token 辅助函数
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    createApp({
+        setup() {
+            const pageTitle = ref('欢迎来到, 知识协作平台');
+            const form = reactive({
+                username: '',
+                password: ''
+            });
+            const loginError = ref('');
+            const passwordFieldType = ref('password');
+
+            const togglePasswordVisibility = () => {
+                passwordFieldType.value = passwordFieldType.value === 'password' ? 'text' : 'password';
+            };
+
+            const handleLogin = async () => {
+                loginError.value = ''; // 清空旧错误
+
+                const formData = new FormData();
+                formData.append('username', form.username);
+                formData.append('password', form.password);
+                formData.append('csrfmiddlewaretoken', getCookie('csrftoken'));
+
+                try {
+                    const response = await fetch("{% url 'login' %}", {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.includes("application/json")) {
+                        const data = await response.json();
+                        if (data.status === 'success') {
+                            // 登录成功，执行跳转！
+                            window.location.href = data.redirect_url || '/';
+                        } else {
+                            loginError.value = data.message || '登录失败，请重试。';
+                        }
+                    } else {
+                        // 后端返回的不是JSON，说明登录失败（例如，AuthenticationForm验证失败会重新渲染页面）
+                        // 在这种情况下，我们给出一个通用的错误提示
+                        loginError.value = '用户名或密码不正确。';
+                    }
+                } catch (error) {
+                    console.error('登录请求失败:', error);
+                    loginError.value = '网络错误，请稍后重试。';
+                }
+            };
+
+            return {
+                pageTitle,
+                form,
+                loginError,
+                passwordFieldType,
+                togglePasswordVisibility,
+                handleLogin
+            };
+        },
+        delimiters: ['[[', ']]']
+    }).mount('#login-app');
+</script>
+
+{% endblock %}
+
+

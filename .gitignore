@@ -1,0 +1,13 @@
+# .gitignore
+
+# ... other ignored files ...
+Team_Project/.env
+.venv
+knowledge_project/uploads/*
+.idea/
+venv/
+.venv/
+db.sqlite3
+media/
+uploads/
+.env

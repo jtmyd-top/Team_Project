@@ -1,0 +1,67 @@
+<!-- knowledge_project/templates/base.html (已修复布局) -->
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="zh-hans">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}知识协作平台{% endblock %}</title>
+
+    <link href="{% static 'fontawesome-free-6.7.2/css/all.css' %}" rel="stylesheet">
+
+     <link href="{% static 'css/base.css' %}" rel="stylesheet">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="{% static 'css/contents.css' %}" rel="stylesheet">
+    <!-- 2. CKEditor 5 核心和 Vue 组件 -->
+
+
+    <!-- 3. 其他库，如 FontAwesome -->
+    <script src="{% static 'fontawesome-free-6.7.2/js/all.js' %}"></script>
+
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="{% url 'home' %}">首页</a>
+            {% if user.is_authenticated %}
+                <a href="{% url 'knowledge_list' %}">知识笔记</a>
+                <a href="#">我的项目</a>
+                <span style="float: right;">
+                    <div class="user-info">
+                        <span class="username">你好, {{ user.username }}!</span>
+                        <form action="{% url 'logout' %}" method="post">
+                            {% csrf_token %}
+                            <button type="submit" class="logout-button">退出登录</button>
+                        </form>
+                    </div>
+                </span>
+            {% else %}
+                <a href="{% url 'login' %}">登录</a>
+                <a href="{% url 'signup' %}">注册</a>
+            {% endif %}
+        </nav>
+    </header>
+
+    <main>
+        {% block content %}
+        <!-- 子模板的内容将在这里被居中显示 -->
+        {% endblock %}
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+
+
+    <!-- 【关键修复】这里使用了您需要的 v4.1.0 版本 -->
+     <!-- 2. 【核心】引入 CKEditor 4 脚本 -->
+
+    <!-- 3. 其他库，如 FontAwesome -->
+    <script src="{% static 'fontawesome-free-6.7.2/js/all.js' %}"></script>
+
+    <!-- 4. 为子模板预留一个可以插入自己脚本的位置 -->
+    {% block scripts %}{% endblock %}
+    </main>
+
+</body>
+</html>

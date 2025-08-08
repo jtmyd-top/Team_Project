@@ -1,0 +1,702 @@
+    <!-- knowledge_project/templates/signup.html -->
+    {% extends 'base.html' %}
+    {% block title %}注册新用户{% endblock %}
+    {% block content %}
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        /* 主容器样式 */
+        #signup-app {
+            max-width: 450px;
+            width: 90%;
+            padding: 2.5em;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            background-color: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(1px);
+            text-align: center;
+            color: #333;
+        }
+
+        /* 输入框聚焦时图标变色 */
+        .form-input:focus ~ .input-icon,
+        .form-input:not(:placeholder-shown) ~ .input-icon {
+            color: #007bff; /* 聚焦或有内容时，图标变色 */
+        }
+
+        /* 表单组基础样式 */
+        .form-group {
+            position: relative;
+            margin-bottom: 2em;
+        }
+
+        /* 悬浮标签样式 */
+        .floating-label {
+            position: absolute;
+            top: 1em;
+            left: 2.8em;
+            font-size: 1em;
+            color: #7e7a7a;
+            pointer-events: none;
+            transition: all 0.2s ease-in-out;
+        }
+
+        /* 输入框样式 */
+        .form-input {
+            width: 100%;
+            padding: 1em 1em 1em 2.8em;
+            box-sizing: border-box;
+            border: none;
+            border-bottom: 2px solid #ccc;
+            background-color: transparent;
+            font-size: 1em;
+            color: #333;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-bottom-color: #007bff;
+        }
+
+        /* 输入框聚焦或非空时悬浮标签动画 */
+        .form-input:focus + .floating-label,
+        .form-input:not(:placeholder-shown) + .floating-label {
+            top: -1em;
+            left: 2.8em;
+            font-size: 0.8em;
+            color: #007bff;
+        }
+
+        /* 图标通用样式 */
+        .input-icon {
+            position: absolute;
+            top: 0.9em;
+            left: 0.5em;
+            font-size: 1.2em;
+            color: #6c757d; /* 初始颜色 */
+            transition: color 0.2s ease-in-out;
+            z-index: 2; /* 确保图标在输入框之上 */
+        }
+
+        /* 验证规则列表样式 */
+        .validation-rules {
+            list-style-type: none;
+            padding: 0;
+            margin: 0.8em 0 0 0.5em;
+            text-align: left;
+            font-size: 0.85em;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+        }
+
+        /* 输入框聚焦时显示验证规则 */
+        .form-input:focus ~ .validation-rules {
+            max-height: 200px;
+            opacity: 1;
+        }
+
+        /* 验证项样式 */
+        .validation-rules li {
+            margin-bottom: 0.5em;
+            transition: color 0.3s;
+        }
+
+        .validation-rules li.invalid {
+            color: #d9534f;
+        }
+
+        .validation-rules li.valid {
+            color: #28a745;
+            text-decoration: line-through;
+        }
+
+        /* 验证项前缀图标 */
+        .validation-rules li::before {
+            display: inline-block;
+            width: 1.5em;
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            transition: content 0.3s;
+        }
+
+        .validation-rules li.invalid::before {
+            content: "\f00d"; /* Font Awesome 的红色叉号 */
+        }
+
+        .validation-rules li.valid::before {
+            content: "\f00c"; /* Font Awesome 的绿色对勾 */
+        }
+
+        /* 字段错误提示 */
+        .field-error {
+            color: #d9534f;
+            font-size: 0.85em;
+            text-align: left;
+            margin-top: 0.5em;
+        }
+
+        /* 验证码组布局 */
+        .captcha-group {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+        }
+
+        /* 提交按钮样式 */
+        .submit-btn {
+            width: 100%;
+            padding: 0.8em;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1.1em;
+            margin-top: 1em;
+        }
+
+        /* 登录链接样式 */
+        .login-link {
+            text-align: center;
+            margin-top: 1.5em;
+        }
+
+        .login-link a {
+            color: #555;
+            text-decoration: none;
+        }
+
+        /* 【任务三】服务器错误提示样式 */
+        .server-errors {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 1em;
+            margin-bottom: 1.5em;
+            text-align: left;
+        }
+
+        .server-errors ul {
+            list-style-type: none;
+            padding-left: 0;
+            margin: 0;
+        }
+
+        .server-errors li {
+            margin-bottom: 0.5em;
+        }
+
+        /* 密码可见性切换图标样式 */
+        .input-passwd {
+            position: absolute;
+            top: 0.9em;
+            right: 0.5em;
+            font-size: 1.2em;
+            color: #6c757d;
+            cursor: pointer;
+            transition: color 0.2s ease-in-out;
+            z-index: 2;
+        }
+        /* 新增：模态框样式 */
+    .modal-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1050;
+    }
+    .modal-content {
+        background: white; padding: 2em; border-radius: 15px; width: 90%; max-width: 400px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    .modal-actions { margin-top: 1.5em; text-align: right; }
+    .modal-actions button { margin-left: 1em; }
+    /* --- 弹窗美化样式 --- */
+
+/* 遮罩层：半透明黑色背景 */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5); /* 更深的遮罩，突出弹窗 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050;
+    animation: fadeIn 0.3s ease-in-out; /* 淡入动效 */
+}
+
+/* 弹窗内容区：核心的毛玻璃效果 */
+.modal-content {
+    width: 90%;
+    max-width: 420px;
+    padding: 2.5em;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.87); /* 更柔和的阴影 */
+
+    /* 核心：毛玻璃效果 */
+    background: rgba(255, 255, 255, 0.75); /* 半透明白色背景 */
+    backdrop-filter: blur(8px); /* 模糊背景 */
+    -webkit-backdrop-filter: blur(8px); /* 兼容Safari */
+    border: 1px solid rgba(255, 255, 255, 0.18); /* 微妙的边框 */
+
+    animation: scaleUp 0.3s ease-in-out; /* 放大+淡入动效 */
+}
+
+.modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+    color: #333;
+    font-size: 1.5em;
+}
+
+.modal-content h3 .fas {
+    margin-right: 0.5em;
+    color: #007bff;
+}
+
+.modal-description {
+    color: #555;
+    margin-bottom: 2em;
+}
+
+/* 弹窗内的输入框也需要美化 */
+.modal-content .form-input {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+}
+
+.modal-content .form-input:focus {
+    background-color: rgba(255, 255, 255, 0.8);
+}
+
+.captcha-image {
+    cursor: pointer;
+    border-radius: 8px; /* 图片也加圆角 */
+    height: 48px; /* 调整高度以匹配输入框 */
+    border: 1px solid rgba(255, 255, 255, 0.95);
+    transition: transform 0.2s;
+}
+
+.captcha-image:hover {
+    transform: scale(1.05); /* 悬停时轻微放大 */
+}
+
+.modal-error {
+    color: #d9534f;
+    font-weight: 500;
+    background-color: rgba(248, 215, 218, 0.8);
+    padding: 0.5em 1em;
+    border-radius: 8px;
+    margin-top: 1em;
+    text-align: center;
+}
+
+/* 按钮区域 */
+.modal-actions {
+    margin-top: 2em;
+    display: flex;
+    justify-content: flex-end; /* 按钮靠右 */
+    gap: 1em; /* 按钮间距 */
+}
+
+.modal-actions button {
+    padding: 0.8em 1.5em;
+    border: none;
+    border-radius: 25px; /* 胶囊形状 */
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+/* 取消按钮（次要按钮） */
+.btn-cancel {
+    background: transparent;
+    color: #555;
+    box-shadow: inset 0 0 0 2px #ccc;
+}
+
+.btn-cancel:hover {
+    background: #f0f0f0;
+    color: #333;
+}
+
+/* 确认按钮（主要按钮） */
+.btn-confirm {
+    background-color: #28a745; /* 使用您主页的绿色 */
+    color: white;
+}
+
+.btn-confirm:hover {
+    background-color: #218838; /* 悬停时颜色加深 */
+    transform: translateY(-2px); /* 悬停时轻微上浮 */
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+}
+
+
+/* --- 动效定义 --- */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+    from { transform: scale(0.9) translateY(20px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+}
+    </style>
+
+    <div id="signup-app">
+        <h2>[[ pageTitle ]]</h2>
+
+        <!-- 【任务三】后端错误将显示在这里 -->
+        <div v-if="serverErrors.length > 0" class="server-errors">
+            <ul>
+                <li v-for="error in serverErrors">[[ error ]]</li>
+            </ul>
+        </div>
+
+        <!-- 关键改动：@submit.prevent 将提交事件交给Vue处理 -->
+        <form id="signup-form" method="post" @submit.prevent="submitForm">
+            {% csrf_token %}
+
+            <!-- 用户名 -->
+            <div class="form-group">
+                 <!-- 关键改动：@blur现在调用 checkUsernameOnServer -->
+                <input type="text" name="username" id="id_username" class="form-input" placeholder=" "
+                       v-model.trim="username" @blur="checkUsernameOnServer" required value="{{ form.username.value|default_if_none:'' }}">
+                <label for="id_username" class="floating-label">用户名</label>
+                <i class="fa-regular fa-user input-icon"></i>
+                <ul class="validation-rules">
+                    <li v-for="rule in usernameRules" :class="{ valid: rule.valid, invalid: !rule.valid }">[[ rule.text ]]</li>
+                </ul>
+                <p v-if="usernameError" class="field-error">[[ usernameError ]]</p>
+            </div>
+
+            <!-- 密码 -->
+            <div class="form-group">
+    <input type="password" name="password1" class="form-input" placeholder=" "
+           v-model="password" @blur="checkFinalPassword" required>
+    <label class="floating-label">密码</label>
+    <i class="fa-solid fa-lock input-icon"></i>
+    <i class="fas fa-eye input-passwd" id="toggle-password" ></i>
+    <ul class="validation-rules">
+        <li v-for="rule in passwordRules" :class="{ valid: rule.valid, invalid: !rule.valid }">[[ rule.text ]]</li>
+    </ul>
+    <p v-if="passwordError" class="field-error">[[ passwordError ]]</p>
+</div>
+
+<!-- 确认密码 -->
+<div class="form-group">
+    <input type="password" name="password2" class="form-input" placeholder=" "
+           v-model="password2" @blur="checkFinalPasswordMatch" required>
+    <label class="floating-label">确认密码</label>
+    <i class="fa-solid fa-check-double input-icon"></i>
+    <i class="fas fa-eye input-passwd" id="toggle-password" ></i>
+    <p v-if="password2Error" class="field-error">[[ password2Error ]]</p> <!-- 修复了变量名 -->
+    <p v-if="formErrors.password2" class="field-error">[[ formErrors.password2[0] ]]</p>
+</div>
+
+            <!-- 新增: 邮箱输入框 -->
+        <div class="form-group">
+            <input type="email" name="email" id="id_email" class="form-input" placeholder=" " v-model.trim="email" required>
+            <label for="id_email" class="floating-label">邮箱</label>
+            <i class="fa-regular fa-envelope input-icon"></i>
+            <p v-if="formErrors.email" class="field-error">[[ formErrors.email[0].message ]]</p>
+        </div>
+
+        <!-- 新增: 邮箱验证码输入框 -->
+        <div class="captcha-group">
+            <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
+                <input type="text" name="emailCode" id="id_email_code" class="form-input" placeholder=" " v-model.trim="emailCode" required>
+                <label for="id_email_code" class="floating-label">邮箱验证码</label>
+                <i class="fa-solid fa-shield-halved input-icon"></i>
+            </div>
+            <!-- 修改：此按钮现在会打开模态框 -->
+            <button type="button" @click="openCaptchaModal" :disabled="isCountdownActive" class="submit-btn" style="width: auto; margin-top:0; white-space: nowrap;">
+                [[ getCodeButtonText ]]
+            </button>
+        </div>
+        <!-- 错误信息显示的位置调整到了整个组的下方，并且居中显示 -->
+        <p v-if="formErrors.emailCode" class="field-error" style="text-align:center; width: 100%;">
+            [[ formErrors.emailCode[0].message ]]
+        </p>
+<!--            &lt;!&ndash; 验证码 &ndash;&gt;-->
+<!--            <div class="captcha-group">-->
+<!--                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">-->
+<!--                    <input type="text" name="captcha" id="id_captcha" class="form-input" placeholder=" " required>-->
+<!--                    <label for="id_captcha" class="floating-label">验证码</label>-->
+<!--                    <i class="fa-solid fa-shield-halved input-icon"></i>-->
+<!--                </div>-->
+<!--                 &lt;!&ndash; 关键改动：@click 将刷新事件交给Vue处理 &ndash;&gt;-->
+<!--                <img id="captcha-image"-->
+<!--                     :src="captchaUrl"-->
+<!--                     @click="refreshCaptcha"-->
+<!--                     alt="点击刷新验证码" title="点击刷新验证码" style="cursor: pointer; border-radius: 5px; height: 40px;">-->
+<!--            </div>-->
+
+            <button type="submit" class="submit-btn">立即注册</button>
+        </form>
+        <div class="login-link">
+            <p><a href="{% url 'login' %}">已有账户？点此登录</a></p>
+        </div>
+          <!-- 新增：图片验证码模态框 -->
+    <!-- 新增：图片验证码模态框 (美化版) -->
+        <div v-if="isModalVisible" class="modal-overlay" @click.self="isModalVisible = false">
+            <div class="modal-content">
+                <h3><i class="fas fa-shield-alt"></i> 安全验证</h3>
+                <p class="modal-description">为了您的账户安全，请输入下图中的字符。</p>
+
+                <div class="captcha-group">
+                    <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
+                        <input type="text" class="form-input" placeholder=" " v-model.trim="imageCaptchaInput" @keyup.enter="verifyImageAndSendEmail">
+                        <label class="floating-label">图片验证码</label>
+                        <i class="fas fa-image input-icon"></i>
+                    </div>
+                    <img :src="captchaUrl" @click="refreshCaptcha" alt="点击刷新" title="点击刷新" class="captcha-image">
+                </div>
+
+                <p v-if="modalError" class="modal-error">[[ modalError ]]</p>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" @click="isModalVisible = false">取消</button>
+                    <!-- ↓↓↓ 修改这个按钮 ↓↓↓ -->
+                    <button type="button" class="btn-confirm" @click="verifyImageAndSendEmail" :disabled="isSending">
+                        <!-- 根据 isSending 状态显示不同的文本 -->
+                        <span v-if="isSending">发送中...</span>
+                        <span v-else>验证并发送</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+</div>
+
+    <script>
+    const { createApp } = Vue;
+
+    // 辅助函数：获取CSRF令牌 (保持不变)
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // 辅助函数：Levenshtein 距离算法 (保持不变)
+    function levenshteinDistance(a, b){if(a.length==0)return b.length;if(b.length==0)return a.length;var c=Array(a.length+1).fill(null).map(()=>Array(b.length+1).fill(null));for(let d=0;d<=a.length;d+=1){c[d][0]=d}for(let d=0;d<=b.length;d+=1){c[0][d]=d}for(let d=1;d<=a.length;d+=1){for(let e=1;e<=b.length;e+=1){c[d][e]=b[e-1]===a[d-1]?c[d-1][e-1]:Math.min(c[d][e-1]+1,c[d-1][e]+1,c[d-1][e-1]+1)}}return c[a.length][b.length]};
+
+    createApp({
+        data() {
+            return {
+                // --- 通用状态 ---
+                pageTitle: '创建您的新账户',
+                serverErrors: [],
+                formErrors: {},
+
+                // --- 表单字段 ---
+                username: '',
+                password: '',
+                password2: '',
+                email: '',
+                emailCode: '',
+                passwordFieldType: 'password', // 用于密码可见性切换
+
+                // --- 客户端验证 ---
+                usernameError: '',
+                passwordError: '',
+                password2Error: '',
+                usernameRules: [
+                    { text: '至少包含 6 个字符', valid: false, test: (u) => u.length >= 6 },
+                    { text: '必须以小写字母开头', valid: false, test: (u) => /^[a-z]/.test(u) },
+                    { text: '只能包含小写字母、数字和下划线', valid: false, test: (u) => /^[a-z][a-z0-9_]*$/.test(u) },
+                ],
+                passwordRules: [
+                    { text: '至少包含 8 个字符', valid: false, test: (p) => p.length >= 8 },
+                    { text: '至少包含一个数字', valid: false, test: (p) => /\d/.test(p) },
+                    { text: '至少包含一个字母', valid: false, test: (p) => /[a-zA-Z]/.test(p) },
+                    { text: '不能与用户名太相似', valid: false, test: (p, u) => u ? (1 - levenshteinDistance(p, u) / Math.max(p.length, u.length)) <= 0.7 : true },
+                ],
+
+                // --- 邮箱验证流程状态 ---
+                isModalVisible: false,
+                imageCaptchaInput: '',
+                modalError: '',
+                captchaUrl: "{% url 'captcha_image' %}",
+                countdown: 0,
+                isSending: false,      // 防重发标志
+                clickTracker: {        // 防恶意点击
+                    count: 0,
+                    timer: null
+                }
+            };
+        },
+        computed: {
+            isCountdownActive() {
+                return this.countdown > 0;
+            },
+            getCodeButtonText() {
+                return this.isCountdownActive ? `${this.countdown}秒后重试` : '获取验证码';
+            },
+            sendButtonText() {
+                return this.isSending ? '发送中...' : '验证并发送';
+            }
+        },
+        watch: {
+            username(newUsername) {
+                this.updateUsernameRules(newUsername);
+                this.updatePasswordRules(this.password, newUsername); // 密码规则可能依赖用户名
+            },
+            password(newPassword) {
+                this.updatePasswordRules(newPassword, this.username);
+                this.checkFinalPasswordMatch(); // 确认密码可能需要重新验证
+            },
+            password2() {
+                this.checkFinalPasswordMatch();
+            }
+        },
+        methods: {
+            // --- 客户端验证方法 ---
+            updateUsernameRules(username) { this.usernameRules.forEach(rule => rule.valid = rule.test(username)); },
+            updatePasswordRules(password, username) { this.passwordRules.forEach(rule => rule.valid = rule.test(password, username)); },
+            checkFinalPassword() { this.passwordError = this.passwordRules.every(rule => rule.valid) ? "" : "密码未满足所有安全要求。"; },
+            checkFinalPasswordMatch() { this.password2Error = (!this.password || !this.password2 || this.password === this.password2) ? "" : "两次输入的密码不一致。"; },
+            checkFinalUsername() {
+                if (!this.username) { this.usernameError = ""; return; }
+                const firstInvalidRule = this.usernameRules.find(rule => !rule.valid);
+                this.usernameError = firstInvalidRule ? firstInvalidRule.text + '。' : "";
+            },
+
+            // --- 与后端交互的方法 ---
+            checkUsernameOnServer() {
+                this.checkFinalUsername();
+                if (this.username && !this.usernameError) {
+                    fetch(`{% url 'check_username' %}?username=${this.username}`)
+                        .then(response => response.json())
+                        .then(data => { if (data.is_taken) { this.usernameError = '该用户名已被占用。'; } });
+                }
+            },
+
+            submitForm() {
+                this.serverErrors = [];
+                this.formErrors = {};
+                const formData = new FormData(document.getElementById('signup-form'));
+                // 确保Vue的数据模型被提交
+                Object.keys(this.$data).forEach(key => {
+                    if (['username', 'password', 'password2', 'email', 'emailCode'].includes(key)) {
+                        formData.set(key, this[key]);
+                    }
+                });
+
+                fetch("{% url 'signup' %}", {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') }
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (ok) {
+                        alert('注册成功！');
+                        window.location.href = data.redirect_url;
+                    } else {
+                        if (data.errors) { this.formErrors = data.errors; }
+                        else { this.serverErrors = [data.message || '发生未知错误。']; }
+                    }
+                })
+                .catch(error => { console.error('Error:', error); this.serverErrors = ['网络连接错误。']; });
+            },
+
+            // --- 邮箱验证流程的方法 ---
+            refreshCaptcha() { this.captchaUrl = `{% url 'captcha_image' %}?t=${new Date().getTime()}`; },
+
+            openCaptchaModal() {
+                if (!this.email || !/^\S+@\S+\.\S+$/.test(this.email)) {
+                    alert('请先输入有效的邮箱地址！'); return;
+                }
+                this.modalError = '';
+                this.imageCaptchaInput = '';
+                this.refreshCaptcha();
+                this.isModalVisible = true;
+            },
+
+            async verifyImageAndSendEmail() {
+                // 防快速点击逻辑保持不变
+                this.clickTracker.count++;
+                if (this.clickTracker.timer) clearTimeout(this.clickTracker.timer);
+                this.clickTracker.timer = setTimeout(() => { this.clickTracker.count = 0; }, 5000);
+
+                if (this.clickTracker.count > 3) {
+                    this.modalError = '您点击的太快了，请稍后再试。';
+                    this.refreshCaptcha();
+                    return;
+                }
+
+                // 防重复提交逻辑保持不变
+                if (this.isSending) return;
+
+                try {
+                    this.isSending = true;
+                    this.modalError = '';
+                    this.formErrors = {}; // 清空主页面的错误
+
+                    const response = await fetch("{% url 'send_email_code' %}", {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                        body: JSON.stringify({ email: this.email, image_captcha_code: this.imageCaptchaInput })
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        // 【关键修改】在这里处理不同类型的错误
+                        if (response.status === 429) { // 429 Too Many Requests
+                            // 这是后端返回的频率限制错误
+                            this.isModalVisible = false; // 1. 关闭弹窗
+                            // 2. 在主页面显示错误信息
+                            this.formErrors = { 'emailCode': [{ 'message': data.message }] };
+                        } else {
+                            // 其他错误（如图片验证码错误），仍在弹窗内显示
+                            throw new Error(data.message || '验证失败');
+                        }
+                    } else {
+                        // 成功发送
+                        this.isModalVisible = false;
+                        this.startCountdown();
+                        alert(data.message);
+                    }
+
+                } catch (error) {
+                    // 这个catch块现在主要处理弹窗内的错误
+                    this.modalError = error.message;
+                    this.refreshCaptcha();
+                } finally {
+                    this.isSending = false;
+                }
+            },
+
+            startCountdown() {
+                this.countdown = 60;
+                const timer = setInterval(() => {
+                    if (this.countdown > 0) this.countdown--; else clearInterval(timer);
+                }, 1000);
+            },
+
+            // --- UI 辅助方法 ---
+            togglePasswordVisibility() {
+                this.passwordFieldType = this.passwordFieldType === 'password' ? 'text' : 'password';
+            }
+        },
+        delimiters: ['[[', ']]']
+    }).mount('#signup-app');
+</script>
+    {% endblock %}

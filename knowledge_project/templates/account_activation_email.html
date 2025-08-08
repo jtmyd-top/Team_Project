@@ -1,0 +1,36 @@
+<!-- registration/account_activation_email.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-g">
+    <title>激活您的账户</title>
+</head>
+<body>
+    <p>你好, {{ user.username }},</p>
+    <p>欢迎加入我们的知识协作平台！请选择以下任一方式来完成您的账户激活：</p>
+
+    <hr>
+
+    <h4>方式一：使用验证码激活</h4>
+    <p>您的6位激活码是：</p>
+    <p style="font-size: 24px; font-weight: bold; letter-spacing: 5px; color: #333;">
+        {{ email_code }}
+    </p>
+    <p>您可以在注册后跳转的激活页面输入此验证码。</p>
+
+    <hr>
+
+    <h4>方式二：点击链接激活</h4>
+    <p>请点击下面的链接来直接激活您的账户：</p>
+    <p>
+        <a href="http://{{ domain }}{% url 'activate' uidb64=uid token=token %}">
+            http://{{ domain }}{% url 'activate' uidb64=uid token=token %}
+        </a>
+    </p>
+    <p>如果无法点击，请将以上链接复制到您的浏览器地址栏。</p>
+
+    <br>
+    <p>谢谢!</p>
+</body>
+</html>

@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}知识笔记{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.ckeditor.com/4.22.1/standard-all/ckeditor.js"></script>
+<script src="https://cdn.ckeditor.com/4.25.1-lts/full-all/ckeditor.js"></script>
+<link href="{% static 'css/contents.css' %}" rel="stylesheet">
+<style>
+    /* 您的通用布局样式 */
+    .knowledge-root{display:flex;transition:all .3s;max-width:100vw;position:absolute;min-height:95vh;gap:2.5rem;top:5%;left:0;width:100%;padding:0 1.5rem;box-sizing:border-box}
+    .sidebar{transition:all .3s cubic-bezier(.9,.02,.40,.99);width:20vw;min-width:70px;max-width:350px;background:rgba(255,255,255,0.70);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,0.08);backdrop-filter:blur(16px);padding:2rem 1.3rem 1rem 1.3rem;display:flex;flex-direction:column;position:relative}
+    .main-content{flex:1 1 0;min-width:280px;display:flex;background:rgba(255,255,255,0.75);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,0.08);backdrop-filter:blur(16px);padding:0}
+
+    /* 编辑和预览区域样式 */
+    .note-preview, .edit-mode {width:100%;height:100%;padding:2.5rem 3rem;overflow-y:auto;box-sizing:border-box}
+    .edit-mode{display:flex;flex-direction:column;gap:1.5rem}
+    .edit-mode input[type=text]{font-size:2.2rem;font-weight:700;color:#333;border:none;border-bottom:2px solid #e0e0e0;padding:.5rem .2rem;outline:0;transition:border-color .3s;background-color:transparent}
+    .edit-mode input[type=text]:focus{border-color:#4099ff}
+    .edit-actions{display:flex;justify-content:flex-end;gap:.75rem;flex-shrink: 0;}
+    .edit-actions button{border:none;padding:.6rem 1.5rem;border-radius:8px;font-size:.95rem;font-weight:500;cursor:pointer;transition:all .2s ease}
+
+    /* 【核心修改】让 CKEditor 4 的容器可以伸缩 */
+    .edit-mode .cke {
+        flex-grow: 1; /* 让编辑器填满剩余空间 */
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* 其他样式保持不变 */
+    .sidebar.collapsed{width:70px!important;min-width:70px!important;padding-left:.5rem;padding-right:.2rem}
+    .sidebar .sidebar-toggle{position:absolute;top:20px;right:-18px;width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#e0e9ff 40%,#bfd5fc 100%);box-shadow:0 2px 8px #bfd5fc66;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;transition:all .28s}
+    .sidebar .sidebar-toggle i{width:18px;height:18px;color:#2860b9;transition:transform .3s;transform:rotate(180deg)}
+    .sidebar.collapsed .sidebar-toggle i{transform:rotate(0deg)}
+    .new-note-btn{background:linear-gradient(90deg,#4099ff 60%,#2255af);color:#fff;border-radius:999px;padding:.7rem 0;font-weight:700;font-size:1.07rem;letter-spacing:1px;border:none;transition:all .2s;box-shadow:0 2px 8px rgba(64,153,255,0.07);display:block;margin-bottom:1.15rem;text-align:center;white-space:nowrap;text-decoration:none;}
+    .notes-nav-list{flex:1 1 auto;overflow-y:auto;margin-bottom:1rem;padding:0;list-style:none;}
+    .notes-nav-list li a{display:block;padding:.6rem 1rem;color:#287;font-size:.97rem;text-decoration:none;border-radius:8px;margin-bottom:.1rem;transition:background .18s,color .18s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .notes-nav-list li a:hover,.notes-nav-list li.active a{background:linear-gradient(90deg,#dbeafe,#60a5fa13 90%);color:#06519a;font-weight:500}
+    .sidebar-search{display:flex;align-items:center;position:relative}
+    .sidebar-search input{width:100%;padding:.7rem 1rem .7rem 2.3rem;border-radius:999px;background:#f3f7fb;border:1px solid #ededed}
+    .sidebar-search .fa-search{position:absolute;left:.9rem;top:50%;transform:translateY(-50%);color:#aaa}
+    .empty-state{text-align:center;padding:2rem;margin:auto}
+    .note-preview .note-content h1, .note-preview .note-content h2, .note-preview .note-content h3{margin-top:1.5em;margin-bottom:.5em;line-height:1.2;font-weight:600}
+    .note-preview .note-content p{margin-bottom:1em;line-height:1.7;color:#333}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="knowledge-app" class="knowledge-root" v-cloak>
+    <aside class="sidebar" :class="{ 'collapsed': isSidebarCollapsed }">
+        <button class="sidebar-toggle" title="展开/收起" @click="toggleSidebar" type="button"><i class="fas fa-chevron-left"></i></button>
+        <div class="sidebar-content">
+          <a href="#" class="new-note-btn" title="新建笔记"><i class="fas fa-plus"></i> <span class="btn-text">新建笔记</span></a>
+          <div class="list-header"><h3>我的笔记</h3></div>
+          <ul class="notes-nav-list">
+            <li v-for="note in sidebarNotes" :key="note.id" :class="{ 'active': selectedNoteId === note.id }">
+              <a href="#" @click.prevent="selectNote(note.id)" :title="note.title">[[ note.title ]]</a>
+            </li>
+          </ul>
+          <div class="sidebar-search" @click="handleSearchClick">
+            <i class="fas fa-search"></i>
+            <input ref="searchInput" type="text" placeholder="搜索我的笔记..." v-model="searchQuery" @blur="searchNotes" @click.stop @keyup.enter="searchNotes">
+          </div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div v-if="isLoading" class="loading-spinner" style="margin:auto;text-align:center;"><i class="fas fa-spinner fa-spin"></i> 正在加载...</div>
+
+        <div v-else-if="selectedNote && !isEditing" class="note-preview">
+            <h1>[[ selectedNote.title ]]</h1>
+            <div class="note-meta"><span>项目: [[ selectedNote.project.title ]]</span> | <span>创建于: [[ selectedNote.created_at ]]</span></div>
+            <div v-html="selectedNote.content" class="note-content"></div>
+            <div class="note-actions">
+                <button @click="startEditing">编辑</button>
+                <label><input type="checkbox" v-model="selectedNote.is_public" @change="updateNote(false)"> 公开分享</label>
+                <input v-if="selectedNote.is_public" type="text" :value="selectedNote.public_url" readonly>
+            </div>
+        </div>
+
+        <div v-else-if="selectedNote && isEditing" class="edit-mode">
+            <input type="text" v-model="selectedNote.title" placeholder="请输入笔记标题...">
+            <!-- 【核心修改】这里使用 ref 来让 Vue 控制 textarea -->
+            <textarea ref="editorTextarea"></textarea>
+            <div class="edit-actions">
+                <button @click="cancelEditing" class="btn-cancel">取消</button>
+                <button @click="updateNote(true)" class="btn-save">保存更改</button>
+            </div>
+        </div>
+
+        <div v-else class="empty-state">
+          <h2>选择一篇笔记开始阅读</h2>
+          <p>或者，点击左上角的“新建笔记”来记录新的灵感。</p>
+        </div>
+    </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    <!-- 步骤A: 将Django的初始数据传递给前端 -->
+    {{ initial_data|json_script:"initial-data" }}
+
+    <!-- 步骤B: 加载我们自己的业务逻辑脚本 -->
+    <script src="{% static 'JS/knowledge_app.js' %}"></script>
+{% endblock %}
