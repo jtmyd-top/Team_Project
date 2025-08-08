@@ -1,19 +1,29 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block title %}知识笔记{% endblock %}
-
 {% block head_extra %}
-<script src="https://cdn.ckeditor.com/4.22.1/standard-all/ckeditor.js"></script>
+<!-- CKEditor 5（经典构建）CDN -->
+<script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
 <link href="{% static 'css/contents.css' %}" rel="stylesheet">
 <style>
     /* --- 通用布局样式 --- */
     .knowledge-root { display: flex; transition: all .3s; max-width: 100vw; position: relative; min-height: 95vh; gap: 2.5rem; top: 0; left: 0; width: 100%; padding: 0rem; box-sizing: border-box; }
     .sidebar{transition:all .3s cubic-bezier(.9,.02,.40,.99);width:20vw;min-width:70px;max-width:350px;background:rgba(255,255,255,0.70);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,0.08);backdrop-filter:blur(16px);padding:2rem 1.3rem 1rem 1.3rem;display:flex;flex-direction:column;position:relative}
-    .main-content{flex:1 1 0;min-width:280px;display:flex;background:rgba(255,255,255,0.75);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,0.08);backdrop-filter:blur(16px);padding:0}
-
-   /* =================================================================== */
-    /* 【核心修改】编辑模式 (Edit Mode) 的样式调整                       */
-    /* =================================================================== */
+    .main-content{
+        flex: 1 1 0;
+    min-width: 280px;
+    display: flex;
+    background: rgba(255,255,255,0.75);
+    border-radius: 20px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+    backdrop-filter: blur(16px);
+    padding: 0;
+    /* 确保主内容区能正确伸展 */
+    transition: margin-left 0.3s ease;
+    }
+    .sidebar.collapsed ~ .main-content {
+    margin-left: 80px; /* 侧边栏折叠时，主内容区向右推移 */
+}/* 为折叠/展开添加动画 */    /* --- 编辑模式 (Edit Mode) 的样式调整 --- */
     .edit-mode {
         width: 100%;
         height: 100%;
@@ -23,9 +33,9 @@
         display: flex;
         flex-direction: column;
         gap: 1.5rem;
+        flex-grow: 1;/* 关键：让编辑器容器占据剩余空间 */
     }
-
-    /* 【新增】编辑模式的头部容器 */
+    /* 编辑模式的头部容器 */
     .edit-header {
         display: flex;
         justify-content: space-between; /* 左右对齐 */
@@ -33,8 +43,7 @@
         gap: 1rem;
         flex-shrink: 0; /* 防止头部被压缩 */
     }
-
-    /* 调整标题输入框以适应 flex 布局 */
+    /* 调整标题输入框 */
     .edit-header input[type=text] {
         flex-grow: 1; /* 占据剩余空间 */
         font-size: 2.2rem;
@@ -46,21 +55,18 @@
         outline: 0;
         transition: border-color .3s;
         background-color: transparent;
-        /* 移除可能存在的 margin */
         margin: 0;
     }
     .edit-header input[type=text]:focus {
         border-color: #4099ff;
     }
-
-    /* 编辑操作按钮区域，现在位于头部右侧 */
+    /* 编辑操作按钮区域 */
     .edit-actions {
         display: flex;
         justify-content: flex-end;
         gap: .75rem;
         flex-shrink: 0;
     }
-
     /* 美化按钮样式 */
     .edit-actions button {
         border: 1px solid transparent;
@@ -89,20 +95,15 @@
     .edit-actions .btn-save:hover {
         opacity: 0.85;
     }
+    /* CKEditor 5 容器 */
+    #editor {
 
-    /* CKEditor 编辑器容器 */
-    .edit-mode .cke {
-        flex-grow: 1; /* 让编辑器填满剩余垂直空间 */
-        display: flex;
-        flex-direction: column;
-    }
-    .edit-actions{display:flex;justify-content:flex-end;gap:.75rem;flex-shrink: 0;}
-    .edit-actions button{border:none;padding:.6rem 1.5rem;border-radius:8px;font-size:.95rem;font-weight:500;cursor:pointer;transition:all .2s ease}
-
-    /* --- 预览区域样式 (核心修改部分) --- */
+        min-height: 320px;
+        flex-grow: 1; /* 让编辑器填满剩余的垂直空间 */
+        width: 100%;
+    } /* 确保编辑器有足够高度 */
+    /* --- 预览区域样式 --- */
     .note-preview { width:100%; height:100%; padding:2.5rem 3rem; overflow-y:auto; box-sizing:border-box; }
-
-    /* 【新增】头部容器，用于放置标题和操作按钮 */
     .note-header {
         display: flex;
         justify-content: space-between; /* 让子元素左右对齐 */
@@ -113,16 +114,12 @@
     .note-header .note-title-meta {
         flex-grow: 1; /* 让标题区域占据多余空间 */
     }
-
-    /* 【新增】美化操作按钮区域 */
     .note-actions {
         display: flex;
         align-items: center;
         gap: 0.75rem; /* 按钮之间的间距 */
         flex-shrink: 0; /* 防止按钮被压缩 */
     }
-
-    /* 【新增】美化通用操作按钮样式 */
     .action-btn {
         display: inline-flex;
         align-items: center;
@@ -146,48 +143,26 @@
     .action-btn i {
         font-size: 0.9em;
     }
-
-    /* 【新增】公开分享的 label 也用按钮样式 */
     .share-toggle-label {
         cursor: pointer;
         user-select: none; /* 防止双击选中文本 */
     }
-    /* 公开状态下的特殊样式 */
     .share-toggle-label.is-public {
         background-color: #ecf5ff;
         color: #409eff;
         border-color: #b3d8ff;
     }
-    /* 隐藏原始的 checkbox */
     .share-toggle-checkbox {
         display: none;
     }
-
     .note-preview h1 { margin: 0; font-size: 2.2rem; line-height: 1.3; }
     .note-meta { color: #888; font-size: 0.9rem; margin-top: 0.5rem; margin-bottom: 2rem; }
     .note-content p { margin-bottom: 1em; line-height: 1.7; color: #333; }
-
-    /* 其他辅助样式 */
-    .cke_notification { display: none !important; }
-    .sidebar .sidebar-toggle{position:absolute;top:20px;right:-18px;width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#e0e9ff 40%,#bfd5fc 100%);box-shadow:0 2px 8px #bfd5fc66;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;transition:all .28s}
-    .sidebar .sidebar-toggle i{width:18px;height:18px;color:#2860b9;transition:transform .3s;transform:rotate(180deg)}
-    .sidebar.collapsed .sidebar-toggle i{transform:rotate(0deg)}
-    .new-note-btn{background:linear-gradient(90deg,#4099ff 60%,#2255af);color:#fff;border-radius:999px;padding:.7rem 0;font-weight:700;font-size:1.07rem;letter-spacing:1px;border:none;transition:all .2s;box-shadow:0 2px 8px rgba(64,153,255,0.07);display:block;margin-bottom:1.15rem;text-align:center;white-space:nowrap;text-decoration:none;}
-    .notes-nav-list{flex:1 1 auto;overflow-y:auto;margin-bottom:1rem;padding:0;list-style:none;}
-    .notes-nav-list li a{display:block;padding:.6rem 1rem;color:#287;font-size:.97rem;text-decoration:none;border-radius:8px;margin-bottom:.1rem;transition:background .18s,color .18s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .notes-nav-list li a:hover,.notes-nav-list li.active a{background:linear-gradient(90deg,#dbeafe,#60a5fa13 90%);color:#06519a;font-weight:500}
-    .sidebar-search{display:flex;align-items:center;position:relative}
-    .sidebar-search input{width:100%;padding:.7rem 1rem .7rem 2.3rem;border-radius:999px;background:#f3f7fb;border:1px solid #ededed}
-    .sidebar-search .fa-search{position:absolute;left:.9rem;top:50%;transform:translateY(-50%);color:#aaa}
-    .empty-state{text-align:center;padding:2rem;margin:auto}
-    .note-preview .note-content h1, .note-preview .note-content h2, .note-preview .note-content h3{margin-top:1.5em;margin-bottom:.5em;line-height:1.2;font-weight:600}
-     /* =================================================================== */
-    /* 【新增】吐司提示框 (Toast Notification) 的样式                     */
-    /* =================================================================== */
+    /* --- 吐司提示框 (Toast Notification) --- */
     .toast-notification {
-        position: fixed; /* 固定在视口位置 */
-        top: 25px;       /* 距离顶部25px */
-        right: 25px;      /* 距离右侧25px */
+        position: fixed;
+        top: 25px;
+        right: 25px;
         padding: 12px 20px;
         border-radius: 8px;
         color: #fff;
@@ -196,49 +171,26 @@
         display: inline-flex;
         align-items: center;
         gap: 10px;
-        z-index: 9999; /* 确保在最顶层 */
+        z-index: 9999;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        pointer-events: none; /* 提示框不应妨碍用户点击下层元素 */
+        pointer-events: none;
     }
-
-    /* 成功状态的样式 */
-    .toast-success {
-        background-color: #67c23a; /* 绿色 */
-    }
-
-    /* 失败状态的样式 */
-    .toast-error {
-        background-color: #f56c6c; /* 红色 */
-    }
-
-    /* 【新增】Vue transition 组件的动画效果 */
-    /* 进入动画的开始状态 */
-    .toast-fade-enter-from,
-    /* 离开动画的结束状态 */
-    .toast-fade-leave-to {
-        opacity: 0;
-        transform: translateY(-20px);
-    }
-
-    /* 进入和离开动画的过程 */
-    .toast-fade-enter-active,
-    .toast-fade-leave-active {
-        transition: opacity 0.4s ease, transform 0.4s ease;
-    }
-     /* =================================================================== */
-    /* 【新增】自定义确认框 (Confirm Dialog) 的样式                      */
-    /* =================================================================== */
+    .toast-success { background-color: #67c23a; }
+    .toast-error { background-color: #f56c6c; }
+    .toast-fade-enter-from, .toast-fade-leave-to { opacity: 0; transform: translateY(-20px); }
+    .toast-fade-enter-active, .toast-fade-leave-active { transition: opacity 0.4s ease, transform 0.4s ease; }
+    /* --- 自定义确认框 (Confirm Dialog) --- */
     .confirm-dialog {
         position: fixed;
         top: 50%;
         left: 50%;
-        transform: translate(-50%, -50%); /* 居中显示 */
+        transform: translate(-50%, -50%);
         background-color: #fff;
         border-radius: 12px;
         padding: 25px;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-        z-index: 10000; /* 确保在最顶层 */
-        width: 360px; /* 固定宽度 */
+        z-index: 10000;
+        width: 360px;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -248,50 +200,13 @@
         color: #333;
         font-weight: 500;
     }
-
-    /* 确认框的按钮样式 */
-    .confirm-dialog-actions {
-        display: flex;
-        gap: 15px;
-        margin-top: 10px;
-    }
-    .confirm-dialog-actions button {
-        padding: 10px 20px;
-        border-radius: 8px;
-        font-size: 1rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border: none;
-    }
-    .confirm-dialog-actions .btn-cancel-confirm { /* 取消按钮 */
-        background-color: #f5f7fa;
-        color: #606266;
-        border: 1px solid #dcdfe6;
-    }
-    .confirm-dialog-actions .btn-cancel-confirm:hover {
-        background-color: #e1e3e6;
-    }
-    .confirm-dialog-actions .btn-confirm-action { /* 确认按钮 */
-        background-color: #f56c6c; /* 红色，表示可能的操作 */
-        color: #fff;
-    }
-    .confirm-dialog-actions .btn-confirm-action:hover {
-        opacity: 0.85;
-    }
-
-    /* 【新增】Vue transition 组件的动画效果，用于确认框 */
-    .confirm-fade-enter-from,
-    .confirm-fade-leave-to {
-        opacity: 0;
-        transform: translate(-50%, -50%) scale(0.9); /* 稍微缩小 */
-    }
-
-    .confirm-fade-enter-active,
-    .confirm-fade-leave-active {
-        transition: opacity 0.3s ease, transform 0.3s ease;
-    }
-      /* --- 笔记列表 --- */
+    .confirm-dialog-actions { display: flex; gap: 15px; margin-top: 10px; }
+    .confirm-dialog-actions button { padding: 10px 20px; border-radius: 8px; font-size: 1rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; border: none; }
+    .confirm-dialog-actions .btn-cancel-confirm { background-color: #f5f7fa; color: #606266; border: 1px solid #dcdfe6; }
+    .confirm-dialog-actions .btn-confirm-action { background-color: #f56c6c; color: #fff; }
+    .confirm-fade-enter-from, .confirm-fade-leave-to { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+    .confirm-fade-enter-active, .confirm-fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+    /* --- 笔记列表 --- */
     .notes-nav-list {
         flex: 1 1 auto;
         overflow-y: auto;
@@ -314,90 +229,133 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .notes-nav-list li a:hover,
-    .notes-nav-list li.active a {
+    .notes-nav-list li a:hover, .notes-nav-list li.active a {
         background: linear-gradient(90deg, #e0e9ff, #dbeafe 90%);
         color: #06519a;
         font-weight: 600;
     }
-
     /* --- 搜索框 --- */
     .sidebar-search {
-        position: relative;
-    }
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
     .sidebar-search input {
-        width: 100%;
+        width: 80%;
         padding: .7rem 1rem .7rem 2.5rem;
         border-radius: 999px;
         background: #f0f4f9;
         border: 1px solid transparent;
         transition: all 0.2s;
     }
-    .sidebar-search input:focus {
-        border-color: #4099ff;
-        background-color: #fff;
-    }
-    .sidebar-search .fa-search {
-        position: absolute;
-        left: 1rem;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #aaa;
-    }
-
-    /* --- 折叠状态下的侧边栏 --- */
+    .sidebar-search input:focus { border-color: #4099ff; background-color: #fff; }
+    .sidebar-search .fa-search { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: #aaa; }
+     /* --- 侧边栏折叠状态下的样式调整 --- */
     .sidebar.collapsed {
-        width: 80px !important;
+        width: 80px !important; /* 固定宽度，比原先稍微宽一点，以容纳图标 */
         min-width: 80px !important;
-        padding: 2rem 0.5rem;
-        align-items: center;
+        padding: 2rem 0.5rem; /* 减少内边距 */
+        align-items: center; /* 居中图标 */
+        #overflow: auto;
     }
+    .sidebar .sidebar-toggle {
+    position: absolute; /* 保持绝对定位 */
+    top: 20px;         /* 距离顶部 20px */
+    right: -15px;       /* 距离右侧 15px （已调整到右上角） */
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #e0e9ff 40%, #bfd5fc 100%);
+    box-shadow: 0 2px 8px #bfd5fc66;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    transition: all .28s;
+    transform: rotate(180deg); /* 默认箭头指向左边，表示收起 */
+}
+    /* 折叠时，切换按钮的图标旋转 */
     .sidebar.collapsed .sidebar-toggle i {
-        transform: rotate(0deg);
-    }
+    transform: rotate(0deg); /* 箭头指向右边，表示展开 */
+}
+    /* 折叠时，新建笔记按钮变成一个图标 */
     .sidebar.collapsed .new-note-btn {
-        width: 48px;
+        width: 48px; /* 图标按钮大小 */
         height: 48px;
-        padding: 0;
-        font-size: 1.2rem;
-    }
-    .sidebar.collapsed .notes-nav-list li a {
+        padding: 0; /* 移除内边距 */
+        font-size: 1.2rem; /* 图标大小 */
+        display: flex; /* 使用 flex 居中图标 */
         justify-content: center;
-        padding: 0.8rem 0;
+        align-items: center;
+        margin-bottom: 1.15rem; /* 保持间距 */
     }
+    /* 折叠时，笔记列表项只显示图标 */
+    .sidebar.collapsed .notes-nav-list li a {
+        justify-content: center; /* 居中图标 */
+        padding-left: 0; /* 移除左侧内边距 */
+        padding-right: 0;
+    }
+    /* 折叠时，搜索框变成一个搜索图标 */
     .sidebar.collapsed .sidebar-search {
         display: flex;
         justify-content: center;
         align-items: center;
-        width: 48px;
+        width: 48px; /* 图标搜索框大小 */
         height: 48px;
-        background: #f0f4f9;
-        border-radius: 50%;
+        background: #f0f4f9; /* 保持背景色 */
+        border-radius: 50%; /* 圆形 */
         cursor: pointer;
     }
     .sidebar.collapsed .sidebar-search .fa-search {
-        position: static;
-        transform: none;
+        position: static; /* 移除绝对定位 */
+        transform: none; /* 移除移动 */
     }
-    /* =================================================================== */
+    /* 当侧边栏折叠时，隐藏搜索框的 input 元素，只显示图标 */
+    .sidebar.collapsed .sidebar-search input {
+        display: none;
+    }
+    /* --- 新增笔记按钮样式微调 --- */
+    .new-note-btn {
+        background:linear-gradient(90deg,#4099ff 60%,#2255af);
+        color:#fff;
+        border-radius:999px;
+        padding:.7rem 0;
+        font-weight:700;
+        font-size:1.07rem;
+        letter-spacing:1px;
+        border:none;
+        transition:all .2s;
+        box-shadow:0 2px 8px rgba(64,153,255,0.07);
+        display:flex; /* 使用flex布局，方便图标和文字对齐 */
+        align-items: center;
+        justify-content: center; /* 居中文本和图标 */
+        text-align:center;
+        white-space:nowrap;
+        text-decoration:none;
+    }
+    .new-note-btn i {
+        margin-right: 0.5rem; /* 图标和文字之间的间距 */
+    }
+    /* 当侧边栏折叠时，新建笔记按钮的图标样式 */
+    .sidebar.collapsed .new-note-btn i {
+        margin-right: 0; /* 折叠时移除图标和文字的间距 */
+    }
 </style>
 {% endblock %}
-
 {% block content %}
 <div id="knowledge-app" class="knowledge-root" v-cloak>
-     <!-- ======================================================= -->
-    <!-- 【新增】吐司提示框 (Toast Notification) 的 HTML 模板     -->
-    <!-- 它会根据 Vue 的状态自动显示和隐藏                      -->
-    <!-- ======================================================= -->
+     <!-- 吐司提示框 -->
     <transition name="toast-fade">
         <div v-if="toast.visible" class="toast-notification" :class="'toast-' + toast.type">
-            <!-- 根据类型显示不同图标 -->
             <i v-if="toast.type === 'success'" class="fas fa-check-circle"></i>
             <i v-if="toast.type === 'error'" class="fas fa-exclamation-circle"></i>
             <span>[[ toast.message ]]</span>
         </div>
     </transition>
-     <!-- 【新增】自定义确认对话框模板 -->
+    <!-- 确认对话框 -->
     <transition name="confirm-fade">
         <div v-if="confirmDialog.visible" class="confirm-dialog">
             <span>[[ confirmDialog.message ]]</span>
@@ -407,19 +365,21 @@
             </div>
         </div>
     </transition>
+   <!-- 侧边栏 -->
     <aside class="sidebar" :class="{ 'collapsed': isSidebarCollapsed }">
-        <button class="sidebar-toggle" title="展开/收起" @click="toggleSidebar" type="button"><i class="fas fa-chevron-left"></i></button>
-
+        <button class="sidebar-toggle" title="展开/收起" @click="toggleSidebar" type="button"><i :class="isSidebarCollapsed ? 'fas fa-chevron-right' : 'fas fa-chevron-left'"></i></button>
         <div class="sidebar-content">
-          <a href="#" class="new-note-btn" title="新建笔记">
+          <!-- 【修改】新建笔记按钮 -->
+          <a href="#" class="new-note-btn" title="新建笔记" @click.prevent="openNewNoteEditor">
+            <!-- 使用 Font Awesome 的加号图标 -->
             <i class="fas fa-plus"></i>
+            <!-- 文字只在侧边栏展开时显示 -->
             <span v-show="!isSidebarCollapsed">新建笔记</span>
           </a>
 
           <div class="list-header" v-show="!isSidebarCollapsed">
               <h3>我的笔记</h3>
           </div>
-
           <ul class="notes-nav-list">
             <li v-for="note in sidebarNotes" :key="note.id" :class="{ 'active': selectedNoteId === note.id }">
               <a href="#" @click.prevent="selectNote(note.id)" :title="note.title">
@@ -428,63 +388,49 @@
               </a>
             </li>
           </ul>
-
+          <!-- 搜索框 -->
           <div class="sidebar-search" title="搜索">
             <i class="fas fa-search"></i>
-            <input v-show="!isSidebarCollapsed" type="text" placeholder="搜索我的笔记..." v-model="searchQuery" @blur="searchNotes" @keyup.enter="searchNotes">
-          </div>
+            <!-- 输入框只在侧边栏展开时显示 placeholder -->
+                    <input v-show="!isSidebarCollapsed" type="text" placeholder="搜索我的笔记..." v-model="searchQuery" @blur="searchNotes" @keyup.enter="searchNotes" @click="handleSearchClickWhenCollapsed">
+                  </div>
         </div>
     </aside>
-
+    <!-- 主内容区域 -->
     <main class="main-content">
+        <!-- 加载状态 -->
         <div v-if="isLoading" class="loading-spinner" style="margin:auto;text-align:center;"><i class="fas fa-spinner fa-spin"></i> 正在加载...</div>
-
-        <!-- ========= 这是被修改的核心区域 (预览模式) ========= -->
+        <!-- 预览模式 -->
         <div v-else-if="selectedNote && !isEditing" class="note-preview">
-
-            <!-- 【新结构】头部容器 -->
             <div class="note-header">
-                <!-- 标题和元数据 -->
                 <div class="note-title-meta">
                     <h1>[[ selectedNote.title ]]</h1>
-                     <!-- 【【【 核心修复 】】】 -->
                     <div class="note-meta">
-                        <!-- 只有在 selectedNote.project 存在时，才显示项目标题 -->
                         <span v-if="selectedNote.project">项目: [[ selectedNote.project.title ]]</span>
-                        <!-- 否则，显示一个占位符 -->
                         <span v-else>项目: 未分配</span>
-
                         | <span>创建于: [[ selectedNote.created_at ]]</span>
                     </div>
                 </div>
-
-                <!-- 【新结构】操作按钮区域，已移动到此处并美化 -->
                 <div class="note-actions">
-                    <!-- 编辑按钮 -->
                     <button class="action-btn" @click="startEditing" title="编辑笔记" :disabled="isLoading">
                         <i class="fas fa-pen"></i>
                         <span>编辑</span>
                     </button>
-
-                    <!-- 公开分享切换 -->
                     <label :disabled="isLoading" class="action-btn share-toggle-label" :class="{ 'is-public': selectedNote.is_public }" title="设为公开或私密">
                         <input type="checkbox" class="share-toggle-checkbox" v-model="selectedNote.is_public" @change="updateNote(false)">
                         <i :class="selectedNote.is_public ? 'fas fa-lock-open' : 'fas fa-share-alt'"></i>
                         <span>[[ selectedNote.is_public ? '已公开' : '分享' ]]</span>
                     </label>
-
-                    <!-- 复制链接按钮 (仅在公开时显示) -->
                     <button v-if="selectedNote.is_public" class="action-btn" @click="copyPublicUrl" title="复制公开链接">
                          <i :class="copyStatus === 'copied' ? 'fas fa-check' : 'fas fa-copy'"></i>
                          <span>[[ copyStatus === 'copied' ? '已复制!' : '复制链接' ]]</span>
                     </button>
                 </div>
             </div>
-
             <!-- 笔记正文内容 -->
             <div v-html="selectedNote.content" class="note-content"></div>
         </div>
-         <!-- 编辑模式 (布局和按钮已调整) -->
+         <!-- 编辑模式 (CKEditor 5) -->
         <div v-else-if="selectedNote && isEditing" class="edit-mode">
             <div class="edit-header">
                 <input type="text" v-model="selectedNote.title" placeholder="请输入笔记标题...">
@@ -493,8 +439,10 @@
                     <button @click="updateNote(true)" class="btn-save">保存更改</button>
                 </div>
             </div>
-            <textarea ref="editorTextarea"></textarea>
+            <!-- CKEditor 5 容器，ref="editorContainer" 是关键 -->
+            <div id="editor" ref="editorContainer" style="min-height:320px;"></div>
         </div>
+        <!-- 默认空状态 -->
         <div v-else class="empty-state">
           <h2>选择一篇笔记开始阅读</h2>
           <p>或者，点击左上角的“新建笔记”来记录新的灵感。</p>
@@ -502,8 +450,9 @@
     </main>
 </div>
 {% endblock %}
-
 {% block scripts %}
+    <!-- 注入初始数据 -->
     {{ initial_data|json_script:"initial-data" }}
+    <!-- 引入已修复的 JS 文件 -->
     <script src="{% static 'JS/knowledge_app.js' %}"></script>
 {% endblock %}
