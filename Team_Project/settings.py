@@ -88,10 +88,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'knowledge_project',       # 确保你已在MySQL中创建了这个数据库
-        'USER': 'root',       # <-- 替换成你的MySQL用户名
-        'PASSWORD': 'qaz202019', # <-- 替换成你的MySQL密码
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
+        'USER': os.getenv('mysql_user') ,       # <-- 替换成你的MySQL用户名
+        'PASSWORD': os.getenv('mysql_passwd'), # <-- 替换成你的MySQL密码
+        'HOST': os.getenv('mysql_ip'),
+        'PORT': os.getenv('mysql_port'),
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
             #'mysql_version': '5.7',  # 设置数据库版本为 5.7
@@ -201,7 +201,7 @@ AUTH_PASSWORD_VALIDATORS = [
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://140.238.0.44:6879/1", # /1 表示使用Redis的1号数据库
+        "LOCATION": os.getenv('redis'), # /1 表示使用Redis的1号数据库
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
@@ -223,12 +223,12 @@ CACHES = {
         "BACKEND": "django_redis.cache.RedisCache",
         # 格式: redis://:密码@主机:端口/数据库编号
         # 如果Redis和Django运行在同一台服务器上，主机就是127.0.0.1
-        "LOCATION": "redis://:qaz202019@140.238.0.44:6879/1",
+        "LOCATION": os.getenv('redis1'),
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
             "CONNECTION_POOL_KWARGS": {"max_connections": 100},
             # 增加一个密码选项，更明确
-            "PASSWORD": "qaz202019",
+            "PASSWORD": os.getenv('mysql_passwd'),
         }
     }
 }
