@@ -1,6 +1,6 @@
 /**
  * static/JS/knowledge_app.js
- * Knowledge Notes: CKEditor 5 升级版核心逻辑 - 侧边栏交互与编辑器状态优化
+ * Knowledge Notes: CKEditor 5 升级版核心逻辑 - 侧边栏交互与状态持久化最终优化 (Focus on Sidebar State & Reactivity)
  */
 
 // 启用/禁用生产日志输出
@@ -13,7 +13,7 @@ if (IS_PRODUCTION) {
 }
 
 // 使用 Vue 3 的组合式 API
-const { createApp, ref, watch, nextTick, onMounted } = window.Vue;
+const { createApp, ref, watch, nextTick, onMounted, computed } = window.Vue;
 
 createApp({
   setup() {
@@ -37,6 +37,11 @@ createApp({
     // 编辑器相关
     const editorContainer = ref(null); // CKEditor 5 容器引用
     let editorInstance = null;          // CKEditor 5 实例
+
+    // --- computed property for icon class ---
+    const iconClass = computed(() => {
+      return isSidebarCollapsed.value ? 'fas fa-chevron-left':'fas fa-chevron-right' ;
+    });
 
     // 上传/提示/确认框
     const copyStatus = ref('copy');
@@ -69,20 +74,30 @@ createApp({
 
     // --- 侧边栏操作 ---
     const toggleSidebar = () => {
+      // 1. 更新 isSidebarCollapsed 的值
       isSidebarCollapsed.value = !isSidebarCollapsed.value;
-      // 保存侧边栏折叠状态到 localStorage
+      // 2. 保存到 localStorage
       localStorage.setItem('isSidebarCollapsed', isSidebarCollapsed.value);
 
-      // 侧边栏状态改变时，如果编辑器是打开的，需要处理
+      // 3. 处理编辑器和侧边栏折叠的联动
       if (isEditing.value) {
-        // 延迟执行，确保 DOM 更新完成
+        // 使用 nextTick 确保 DOM 更新后再操作
         nextTick(() => {
           if (isSidebarCollapsed.value) {
-            // 如果侧边栏被折叠了，且编辑器是打开的，我们不销毁它，而是让它可能被 CSS 隐藏
-            // 如果需要，可以在这里做一些清理工作，但通常不销毁实例
+            // 如果侧边栏被折叠了，且编辑器是打开的，销毁编辑器实例
+            // 这是为了避免折叠后编辑器显示异常或占用资源
+
+            if (editorInstance) {
+              editorInstance.destroy().catch(() => {});
+              // chevronElement.className = "fas fa-chevron-left";
+              editorInstance = null;
+              loadEditor();
+            }
           } else {
-            // 如果侧边栏展开了，且编辑器是关闭状态，重新初始化编辑器
+            // chevronElement.className = "fas fa-chevron-right";
+            // 如果侧边栏展开了，且编辑器不存在，则重新初始化
             if (!editorInstance && editorContainer.value) {
+
               loadEditor(); // 重新加载编辑器
             }
           }
@@ -296,7 +311,7 @@ createApp({
       searchQuery,
       isLoading,
       isEditing,
-      isSidebarCollapsed,
+      isSidebarCollapsed, // <--- 确保 isSidebarCollapsed 被暴露
       initialHasNotes,
       editorContainer, // 暴露编辑器容器的 ref
       copyStatus,
@@ -306,6 +321,7 @@ createApp({
       selectNote,
       searchNotes,
       updateNote,
+      iconClass,
       startEditing: () => { if (selectedNote.value) isEditing.value = true; }, // 只有选中笔记后才能编辑
       cancelEditing,
       copyPublicUrl,
@@ -366,3 +382,22 @@ createApp({
   },
   delimiters: ['[[', ']]'] // Vue 模板使用的分隔符
 }).mount('#knowledge-app');
+
+ function hasClassSubstring(element, substring) {
+       return element.className.indexOf(substring) !== -1;
+   }
+function test(){
+
+			const chevronElement = document.getElementById("chevron");
+            console.log(chevronElement.classList.contains('fa-chevron-right'));
+            if (chevronElement.classList.contains('fa-chevron-right')){
+                chevronElement.classList.remove('fa-chevron-right');
+                chevronElement.classList.add("fa-chevron-left");
+                // console.log(chevronElement.classList);
+            }else{
+                chevronElement.classList.remove('fa-chevron-left');
+                chevronElement.classList.add("fa-chevron-right");
+                // console.log(chevronElement.classList);
+
+            }
+		}
