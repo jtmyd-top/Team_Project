@@ -90,7 +90,7 @@ createApp({
             if (editorInstance) {
               editorInstance.destroy().catch(() => {});
               // chevronElement.className = "fas fa-chevron-left";
-              editorInstance = null;
+
               loadEditor();
             }
           } else {
