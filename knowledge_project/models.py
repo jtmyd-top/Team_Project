@@ -5,7 +5,7 @@ from django.db import models
 import uuid
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
-from ckeditor.fields import RichTextField
+from django_ckeditor_5.fields import CKEditor5Field
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -103,7 +103,7 @@ class ProjectMembership(models.Model):
 
 class Note(models.Model):
     title = models.CharField(max_length=255, verbose_name="笔记标题")
-    content = CKEditor5Field(verbose_name="笔记内容", null=True, blank=True)
+    content = CKEditor5Field(verbose_name="笔记内容", null=True, blank=True, config_name='full')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notes', verbose_name="作者")
     project = models.ForeignKey(
         Project,

@@ -1,12 +1,12 @@
 # knowledge_project/views.py
 from django.contrib.auth import login
-from knowledge_project.static.utils.code import check_code
+from .utils.code import check_code
 from django.http import HttpResponse
 from io import BytesIO
 from django.contrib.auth.forms import AuthenticationForm
 
 from django.urls import reverse
-
+from django.middleware.csrf import get_token
 from .forms import CustomUserCreationForm
 from django.contrib.auth.forms import UserCreationForm
 from django import forms
@@ -23,7 +23,9 @@ import time
 from django.http import JsonResponse, HttpResponseForbidden
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
-
+import json # 1. 导入 json 模块
+from django.conf import settings # 2. 导入 settings 模块
+from django.shortcuts import render
 from django.http import JsonResponse
 from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块

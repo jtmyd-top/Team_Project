@@ -8,7 +8,8 @@ from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
 # 【修改点】从 models.py 导入更新后的模型
 from .models import Project, ProjectMembership, Note, Asset, Profile
-
+from django_ckeditor_5.widgets import CKEditor5Widget
+from django import forms
 # ---------------------------------
 #  Inlines (内联模型)
 # ---------------------------------
@@ -95,27 +96,44 @@ class ProjectMembershipAdmin(admin.ModelAdmin):
     search_fields = ('project__title', 'user__username')
     autocomplete_fields = ['project', 'user']
 
+class NoteAdminForm(forms.ModelForm):
+    # 【核心】在这里，我们强制 content 字段使用 CKEditor5Widget
+    # 并指定使用我们之前在 settings.py 中定义的 'full' 配置
+    content = forms.CharField(
+        label="笔记内容",
+        widget=CKEditor5Widget(config_name='full'),
+        required=False  # 根据你的模型字段设置，如果允许为空则设为False
+    )
+
+    class Meta:
+        model = Note
+        fields = '__all__'
+        # 如果你的 Note 模型中有 JSONField，并且仍想使用 JSONEditorWidget，
+        # 请在这里配置，这是比 formfield_overrides 更好的方式。
+        # 例如，如果你的JSON字段名叫 'extra_data':
+        # widgets = {
+        #     'extra_data': JSONEditorWidget,
+        # }
+
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
-    # 【修改】在列表页添加 author
+    # 【新增】告诉 Admin 使用我们自定义的表单
+    form = NoteAdminForm
+
     list_display = ('title', 'author', 'project', 'is_public', 'display_public_link', 'created_at')
-    # 【修改】添加 author 作为筛选条件
     list_filter = ('is_public', 'project', 'author')
-    # 【修改】添加 author__username 作为搜索字段
     search_fields = ('title', 'project__title', 'author__username', 'content')
-    # 【修改】添加 author 作为自动完成字段
     autocomplete_fields = ['project', 'author']
     readonly_fields = ('public_id',)
 
-    # 保持不变
-    formfield_overrides = {
-        models.JSONField: {'widget': JSONEditorWidget},
-    }
+    # 【删除】删除这行，它的功能已经被我们移到 NoteAdminForm 的 Meta.widgets 中了
+    # formfield_overrides = {
+    #     models.JSONField: {'widget': JSONEditorWidget},
+    # }
 
     def save_model(self, request, obj, form, change):
-        """【新增】在后台创建笔记时，自动将作者设置为当前用户"""
-        if not change:  # 如果是新建对象
+        if not change:
             obj.author = request.user
         super().save_model(request, obj, form, change)
 

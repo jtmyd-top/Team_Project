@@ -3,8 +3,13 @@
 {% block title %}知识笔记{% endblock %}
 {% block head_extra %}
 <!-- CKEditor 5（经典构建）CDN -->
-<script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
+<!--<script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>-->
+<!--<script src="{%static 'ckeditor5/ckeditor5.js'%}"></script>-->
+<!-- <script src="{% static 'django_ckeditor_5/dist/bundle.js' %}"></script>-->
+<script src="{%static 'tinymce/tinymce.min.js'%}"></script>
+<script src="{%static 'tinymce/langs/zh_CN.js'%}"></script>
 <link href="{% static 'css/contents.css' %}" rel="stylesheet">
+<script src="https://unpkg.com/@npkg/tinymce-plugin@0.0.3-beta.22/tinymce-plugin.min.js"></script>
 
 <style>
     /* --- 通用布局样式 --- */
@@ -446,8 +451,9 @@
                     <button @click="updateNote(true)" class="btn-save">保存更改</button>
                 </div>
             </div>
-            <!-- CKEditor 5 容器，ref="editorContainer" 是关键 -->
-            <div id="editor" ref="editorContainer" style="min-height:320px;"></div>
+<!--            &lt;!&ndash; CKEditor 5 容器，ref="editorContainer" 是关键 &ndash;&gt;-->
+<!--            <div id="editor" ref="editorContainer" style="min-height:320px;"></div>-->
+            <textarea id="editor"></textarea>
         </div>
         <!-- 默认空状态 -->
         <div v-else class="empty-state">
@@ -460,6 +466,7 @@
 {% block scripts %}
     <!-- 注入初始数据 -->
     {{ initial_data|json_script:"initial-data" }}
+<!--    <script src="https://cdn.ckeditor.com/ckeditor5/46.0.0/ckeditor5.umd.js"></script>-->
     <!-- 引入已修复的 JS 文件 -->
     <script src="{% static 'JS/knowledge_app.js' %}"></script>
 

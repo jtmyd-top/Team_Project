@@ -12,3 +12,4 @@ media/
 uploads/
 .env
 .gitignore
+knowledge_project/static/ckeditor5
