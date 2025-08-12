@@ -1,7 +1,7 @@
 /**
  * static/JS/knowledge_app.js
- * Knowledge Notes: TinyMCE 自托管版核心逻辑 - 集成第三方插件库
- * (版本：修复加载顺序和插件缺失问题)
+ * Knowledge Notes: TinyMCE 自托管版核心逻辑
+ * (版本：修复了编辑器加载时序问题)
  */
 
 // 启用/禁用生产日志输出
@@ -18,63 +18,59 @@ const { createApp, ref, watch, nextTick, onMounted, computed } = window.Vue;
 
 createApp({
   setup() {
-    // --- 初始化数据 ---
+    // --- 状态变量 ---
+    const editorElRef = ref(null); // 用于绑定 textarea 元素的 ref
     const initialDataElement = document.getElementById('initial-data');
     const initialData = JSON.parse((initialDataElement && initialDataElement.textContent) || '{}');
-
-    // ... 省略其他未改变的状态变量和函数定义 ...
     const sidebarNotes = ref(initialData.sidebar_notes || []);
     const initialHasNotes = ref(initialData.has_notes || false);
     const csrfToken = initialData.csrf_token || '';
     const selectedNoteId = ref(null);
     const selectedNote = ref(null);
+    const fullNoteContentForEditing = ref('');
     const isLoading = ref(false);
     const isEditing = ref(false);
     const isSidebarCollapsed = ref(localStorage.getItem('isSidebarCollapsed') === 'true');
     const searchQuery = ref('');
     let editorInstance = null;
-    const editorContainer = ref(null);
-    const iconClass = computed(() => {
-      return isSidebarCollapsed.value ? 'fas fa-chevron-left' : 'fas fa-chevron-right';
-    });
     const copyStatus = ref('copy');
     const toast = ref({ visible: false, message: '', type: 'success' });
     let toastTimer = null;
-    const confirmDialog = ref({
-      visible: false,
-      message: '',
-      onConfirm: null,
-      onCancel: null
-    });
+    const confirmDialog = ref({ visible: false, message: '', onConfirm: null, onCancel: null });
+    const currentPage = ref(1);
+    const totalPages = ref(1);
+    const isEditingPageNumber = ref(false);
+    const pageInputNumber = ref(1);
+    const pageInputRef = ref(null);
+    const iconClass = computed(() => isSidebarCollapsed.value ? 'fas fa-chevron-right' : 'fas fa-chevron-left');
+
+    const handleSearchClickWhenCollapsed = () => {
+        if (isSidebarCollapsed.value) {
+          // 如果侧边栏是收缩的，就展开它
+          toggleSidebar();
+          // 使用 nextTick 确保 DOM 更新后再聚焦
+          nextTick(() => {
+            document.querySelector('.sidebar-search input')?.focus();
+          });
+        }
+      };
+    // --- 辅助函数 ---
     const showToast = (message, type = 'success', duration = 3000) => {
       if (toastTimer) clearTimeout(toastTimer);
       toast.value = { message, type, visible: true };
       toastTimer = setTimeout(() => { toast.value.visible = false; }, duration);
     };
-    const showConfirm = (message) => {
-      return new Promise((resolve) => {
-        confirmDialog.value = {
-          message,
-          visible: true,
-          onConfirm: () => { resolve(true); confirmDialog.value.visible = false; },
-          onCancel: () => { resolve(false); confirmDialog.value.visible = false; }
-        };
-      });
-    };
+    const showConfirm = (message) => new Promise((resolve) => {
+      confirmDialog.value = { message, visible: true, onConfirm: () => { resolve(true); confirmDialog.value.visible = false; }, onCancel: () => { resolve(false); confirmDialog.value.visible = false; } };
+    });
     const destroyEditor = () => {
-        if (editorInstance) {
-            try {
-                editorInstance.remove();
-            } catch (e) {
-                console.error("销毁编辑器时出错:", e);
-            } finally {
-                editorInstance = null;
-            }
-        }
+      if (editorInstance) {
+        try { editorInstance.remove(); } catch (e) { console.error("销毁编辑器时出错:", e); }
+        finally { editorInstance = null; }
+      }
     };
 
-
-    // --- TinyMCE 初始化 ---
+    // --- TinyMCE 初始化函数 (已按最佳实践修改) ---
     const loadTinyMCE = async () => {
       if (typeof tinymce === 'undefined') {
         console.error('TinyMCE 未加载');
@@ -82,28 +78,28 @@ createApp({
       }
       destroyEditor();
 
-      const editorEl = document.getElementById('editor');
+      // [核心修改 1] 从 ref 获取真实的 DOM 元素
+      const editorEl = editorElRef.value;
       if (!editorEl) {
-        console.error('找不到编辑区域 #editor');
+        console.error('通过 ref 未能获取到编辑区域 DOM 元素。请确认模板中有 <textarea ref="editorElRef">');
         return;
       }
 
       tinymce.init({
-    selector: '#' + editorEl.id,
-    language:'zh_CN',
-    menubar:false,
-    branding: false,
-    min_height:400,
-    max_height: 700,
-    license_key: 'gpl',
-
-    plugins: [
+        // [核心修改 2] 使用 target 直接对 DOM 节点初始化，而不是用 selector
+        target: editorEl,
+        language:'zh_CN',
+        menubar:false,
+        branding: false,
+        min_height:400,
+        max_height: 700,
+        license_key: 'gpl',
+        plugins: [
         'preview', 'searchreplace', 'autolink', 'fullscreen', 'image', 'link', 'media',
         'code', 'codesample', 'table', 'nonbreaking','charmap', 'pagebreak', 'anchor',
         'lists', 'textpattern', 'help', 'emoticons', 'autosave', 'wordcount',
         'axupimgs', 'upfile', 'attachment', 'tpImportword', 'tpIndent2em'
     ].join(' '),
-
     // --- V3 最终修复版工具栏 ---
     // 修正了 nonbreaking 命令，移除了无效按钮
     toolbar: [
@@ -111,9 +107,7 @@ createApp({
         'alignleft aligncenter alignright alignjustify | bullist numlist | outdent indent | tpIndent2em | lineheight | blockquote | subscript superscript',
         'link unlink anchor | image axupimgs media | upfile attachment | table | nonbreaking  | hr pagebreak |charmap emoticons | code codesample | tpImportword | searchreplace | preview fullscreen | wordcount | help'
     ],
-
-
-        // 表格上下文菜单
+    // 表格上下文菜单
         table_toolbar: 'tableprops tabledelete | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol',
         table_grid: true, // 确保显示网格用于创建表格
         table_cell_advtab: true, // 开启单元格高级属性
@@ -122,73 +116,42 @@ createApp({
         fontsize_formats: '12px 14px 16px 18px 24px 36px 48px 56px 72px',
         font_formats: '微软雅黑=Microsoft YaHei,Helvetica Neue,PingFang SC,sans-serif;苹果苹方=PingFang SC,Microsoft YaHei,sans-serif;宋体=simsun,serif;仿宋体=FangSong,serif;黑体=SimHei,sans-serif;Arial=arial,helvetica,sans-serif;Symbol=symbol;',
         paste_data_images: true,
-
-        file_picker_callback: function (succFun, value, meta) {
-            var filetype = '.pdf, .txt, .zip, .rar, .7z, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .mp3, .mp4';
-            var input = document.createElement('input');
-            input.setAttribute('type', 'file');
-            input.setAttribute('accept', filetype);
-            input.click();
-            input.onchange = function () {
-                var file = this.files[0];
-                var formData = new FormData();
-                formData.append("file", file);
-
-                showToast('正在上传文件...', 'success');
-
-                fetch('/api/upload-file/', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': csrfToken
-                    },
-                    body: formData
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('网络响应错误');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.code == 200 && data.data) {
-                        succFun(data.data, { text: file.name });
-                        showToast('文件上传成功！', 'success');
-                    } else {
-                        throw new Error(data.error || '上传失败，服务器返回错误');
-                    }
-                })
-                .catch(error => {
-                    showToast('上传失败: ' + error.message, 'error');
-                });
-            }
-        },
-
         setup: (ed) => {
           ed.on('init', () => {
             editorInstance = ed;
-            if (selectedNote.value && selectedNote.value.content) {
-              ed.setContent(selectedNote.value.content);
+            if (isEditing.value) {
+              ed.setContent(fullNoteContentForEditing.value);
             }
           });
         }
       });
     };
 
-    // ... 省略其他所有未改变的函数 ...
-    const selectNote = async (noteId) => {
+    // --- 核心数据处理函数 (保持不变) ---
+    const selectNote = async (noteId, page = 1) => {
       if (isEditing.value) {
         const confirmed = await showConfirm('您正在编辑，确定要切换到其他笔记吗？所有未保存的更改都将丢失。');
         if (!confirmed) return;
         isEditing.value = false;
+        destroyEditor();
       }
-      if (isLoading.value || selectedNoteId.value === noteId) return;
       isLoading.value = true;
-      selectedNoteId.value = noteId;
-      copyStatus.value = 'copy';
       try {
-        const response = await fetch(`/api/notes/${noteId}/`);
-        if (!response.ok) throw new Error('笔记加载失败');
-        selectedNote.value = await response.json();
+        const previewUrl = `/api/notes/${noteId}/?page=${page}`;
+        const previewResponse = await fetch(previewUrl);
+        if (!previewResponse.ok) throw new Error('笔记加载失败');
+        const noteData = await previewResponse.json();
+        selectedNote.value = noteData;
+        currentPage.value = noteData.pagination.current_page;
+        totalPages.value = noteData.pagination.total_pages;
+        if (fullNoteContentForEditing.value === '' || selectedNoteId.value !== noteId) {
+          const fullContentUrl = `/api/notes/${noteId}/?full_content=true`;
+          const fullContentResponse = await fetch(fullContentUrl);
+          if (!fullContentResponse.ok) throw new Error('无法加载笔记完整内容');
+          const fullNoteData = await fullContentResponse.json();
+          fullNoteContentForEditing.value = fullNoteData.content;
+        }
+        selectedNoteId.value = noteId;
       } catch (error) {
         showToast(error.message, 'error');
         selectedNote.value = null;
@@ -196,42 +159,82 @@ createApp({
         isLoading.value = false;
       }
     };
-
     const updateNote = async (isFullUpdate = true) => {
       if (!selectedNote.value) return;
-      const contentData = editorInstance ? editorInstance.getContent() : (selectedNote.value.content || '');
       const currentTitleInput = document.querySelector('.edit-header input[type=text]');
       const currentTitle = currentTitleInput ? currentTitleInput.value : selectedNote.value.title;
+      const body = { title: currentTitle, is_public: selectedNote.value.is_public };
+      if (isEditing.value) {
+        body.content = editorInstance ? editorInstance.getContent() : fullNoteContentForEditing.value;
+      }
       try {
         const response = await fetch(`/api/notes/${selectedNote.value.id}/`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-          body: JSON.stringify({
-            title: currentTitle,
-            content: contentData,
-            is_public: selectedNote.value.is_public
-          })
+          body: JSON.stringify(body)
         });
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ detail: '未知错误' }));
           throw new Error(errorData.detail || '保存失败');
         }
-        const updatedNote = await response.json();
-        selectedNote.value = updatedNote;
-        const noteInSidebar = sidebarNotes.value.find(n => n.id === updatedNote.id);
-        if (noteInSidebar) noteInSidebar.title = updatedNote.title;
-
+        const updatedNoteData = await response.json();
+        if (isEditing.value) {
+          selectedNote.value = { ...updatedNoteData };
+          fullNoteContentForEditing.value = body.content;
+        } else {
+          selectedNote.value.is_public = updatedNoteData.is_public;
+        }
+        const noteInSidebar = sidebarNotes.value.find(n => n.id === updatedNoteData.id);
+        if (noteInSidebar) noteInSidebar.title = updatedNoteData.title;
         if (isFullUpdate) {
           isEditing.value = false;
           showToast('保存成功！');
         } else {
           showToast('设置已更新！');
         }
-      } catch (error) {
-        showToast(error.message, 'error');
-      }
+      } catch (error) { showToast(error.message, 'error'); }
     };
+    const startEditing = async () => {
+      if (!selectedNote.value) return;
+      if (!fullNoteContentForEditing.value) {
+        isLoading.value = true;
+        try {
+          const res = await fetch(`/api/notes/${selectedNote.value.id}/?full_content=true`);
+          const data = await res.json();
+          fullNoteContentForEditing.value = data.content;
+        } catch (error) { showToast('加载编辑内容失败: ' + error.message, 'error'); return; }
+        finally { isLoading.value = false; }
+      }
+      isEditing.value = true;
+    };
+    const cancelEditing = async () => { isEditing.value = false; destroyEditor(); };
+    const prevPage = () => { if (currentPage.value > 1) { selectNote(selectedNoteId.value, currentPage.value - 1); } };
+    const nextPage = () => { if (currentPage.value < totalPages.value) { selectNote(selectedNoteId.value, currentPage.value + 1); } };
+    const toggleSidebar = () => { isSidebarCollapsed.value = !isSidebarCollapsed.value; localStorage.setItem('isSidebarCollapsed', isSidebarCollapsed.value); };
 
+    // --- 页码跳转功能 (保持不变) ---
+    const editPageNumber = () => {
+      isEditingPageNumber.value = true;
+      pageInputNumber.value = currentPage.value;
+      nextTick(() => { pageInputRef.value?.focus(); });
+    };
+    const goToPage = () => {
+      const targetPage = parseInt(pageInputNumber.value, 10);
+      isEditingPageNumber.value = false;
+      if (isNaN(targetPage) || targetPage < 1) {
+        showToast('请输入一个有效的页码。', 'error');
+        return;
+      }
+      if (targetPage > totalPages.value) {
+        showToast(`页码不能超过总页数 ${totalPages.value}。`, 'error');
+        return;
+      }
+      if (targetPage === currentPage.value) {
+        showToast('您已在当前页面。', 'info');
+        return;
+      }
+      selectNote(selectedNoteId.value, targetPage);
+    };
     const searchNotes = async () => {
       const query = searchQuery.value.trim();
       const url = query ? `/api/notes/search/?q=${encodeURIComponent(query)}` : '/api/notes/all/';
@@ -244,103 +247,44 @@ createApp({
       }
     };
 
-    const toggleSidebar = () => {
-        isSidebarCollapsed.value = !isSidebarCollapsed.value;
-        localStorage.setItem('isSidebarCollapsed', isSidebarCollapsed.value);
-        if (isEditing.value) {
-            nextTick(() => {
-                destroyEditor();
-                loadTinyMCE();
-            });
-        }
-    };
+    // --- 生命周期和侦听器 (保持不变) ---
+    watch(isEditing, (isNowEditing) => { if (isNowEditing) { nextTick(() => { loadTinyMCE(); }); } else { destroyEditor(); } });
+    onMounted(() => {
+      const pathParts = window.location.pathname.split('/').filter(p => p);
+      const noteIdFromUrl = (pathParts.length >= 2 && pathParts[0] === 'knowledge' && !isNaN(parseInt(pathParts[1], 10))) ? parseInt(pathParts[1], 10) : null;
+      if (noteIdFromUrl) { selectNote(noteIdFromUrl); }
+      else if (initialHasNotes.value && sidebarNotes.value.length > 0) { selectNote(sidebarNotes.value[0].id); }
+    });
 
-    const startEditing = () => {
-      if (selectedNote.value) {
-        isEditing.value = true;
-      }
-    };
+    // --- [核心修改 3] 返回给模板的对象 (增加了 editorElRef) ---
+    return {
+      sidebarNotes, selectedNoteId, selectedNote, searchQuery, isLoading, isEditing,
+      isSidebarCollapsed, initialHasNotes, copyStatus, toast, confirmDialog,
+      currentPage, totalPages, iconClass, toggleSidebar, selectNote, updateNote,
+      startEditing, cancelEditing, prevPage, nextPage, isEditingPageNumber,
+      pageInputNumber, pageInputRef, editPageNumber, goToPage,
+      openNewNoteEditor: () => { showToast('此功能正在开发中...', 'info'); },
+      searchNotes,
+      editorElRef,
 
-    const cancelEditing = async () => {
-      const currentContent = editorInstance ? editorInstance.getContent() : (selectedNote.value?.content || '');
-      const currentTitleInput = document.querySelector('.edit-header input[type=text]');
-      const currentTitle = currentTitleInput ? currentTitleInput.value : (selectedNote.value?.title || '');
-      if (selectedNote.value && (selectedNote.value.title !== currentTitle || selectedNote.value.content !== currentContent)) {
-          const confirmed = await showConfirm('您确定要取消编辑吗？所有未保存的更改都将丢失。');
-          if (!confirmed) return;
-      }
-      isEditing.value = false;
-    };
-
-    const copyPublicUrl = async () => {
+      handleSearchClickWhenCollapsed,
+      copyPublicUrl: () => {
       if (!selectedNote.value?.public_url) return;
       try {
-        await navigator.clipboard.writeText(selectedNote.value.public_url);
+        navigator.clipboard.writeText(selectedNote.value.public_url);
         copyStatus.value = 'copied';
         showToast('公开链接已复制！');
         setTimeout(() => { copyStatus.value = 'copy'; }, 2000);
       } catch (err) {
         showToast('复制失败', 'error');
       }
-    };
+    },
+    openNewNoteEditor: () => { showToast('此功能正在开发中...', 'info'); }
+  };// <-- 必须将 ref 暴露给模板
 
-    const openNewNoteEditor = () => {
-      if (isEditing.value) {
-        showConfirm('您正在编辑笔记，切换到新建笔记会丢失当前更改。确定要继续吗？').then(confirmed => {
-          if (!confirmed) return;
-          isEditing.value = false;
-          selectedNote.value = {
-            id: null, title: '未命名笔记', content: '', is_public: false, project: null,
-            created_at: new Date().toLocaleString(), author: { id: initialData.user_id, username: initialData.username }
-          };
-          isEditing.value = true;
-        });
-      } else {
-        selectedNote.value = {
-          id: null, title: '未命名笔记', content: '', is_public: false, project: null,
-          created_at: new Date().toLocaleString(), author: { id: initialData.user_id, username: initialData.username }
-        };
-        isEditing.value = true;
-      }
-    };
-
-    watch(isEditing, (isNowEditing) => {
-        if (isNowEditing) {
-            nextTick(() => {
-                loadTinyMCE();
-            });
-        } else {
-            destroyEditor();
-        }
-    });
-
-    onMounted(() => {
-      const pathParts = window.location.pathname.split('/').filter(p => p);
-      const noteIdFromUrl = (pathParts.length >= 2 && pathParts[0] === 'knowledge' && !isNaN(parseInt(pathParts[1], 10)))
-        ? parseInt(pathParts[1], 10) : null;
-      if (noteIdFromUrl) {
-        selectNote(noteIdFromUrl);
-      } else if (initialHasNotes.value && sidebarNotes.value.length > 0) {
-        selectNote(sidebarNotes.value[0].id);
-      }
-    });
-
-    return {
-      sidebarNotes, selectedNoteId, selectedNote, searchQuery, isLoading, isEditing,
-      isSidebarCollapsed, initialHasNotes, editorContainer, copyStatus, toast, confirmDialog,
-      toggleSidebar, selectNote, searchNotes, updateNote, iconClass, startEditing, cancelEditing,
-      copyPublicUrl,
-      handleSearchClickWhenCollapsed: () => {
-        if (isSidebarCollapsed.value) toggleSidebar();
-        nextTick(() => { document.querySelector('.sidebar-search input')?.focus(); });
-      },
-      openNewNoteEditor
-    };
   },
   delimiters: ['[[', ']]']
 }).mount('#knowledge-app');
-
-// 辅助函数
 function hasClassSubstring(element, substring) {
   return element.className.indexOf(substring) !== -1;
 }

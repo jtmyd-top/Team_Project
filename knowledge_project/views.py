@@ -16,16 +16,13 @@ from django.views import View
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.mail import send_mail
-
 import random
 import string
 import time
 from django.http import JsonResponse, HttpResponseForbidden
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
-import json # 1. 导入 json 模块
 from django.conf import settings # 2. 导入 settings 模块
-from django.shortcuts import render
 from django.http import JsonResponse
 from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
@@ -33,6 +30,8 @@ from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from .models import Project, Note
+from django.db.models import F # 导入 F 对象用于精细化内容切片
+import math # 导入 math 用于计算总页数
 class CustomUserCreationForm(UserCreationForm):
     email = forms.EmailField(required=True, help_text='必填项。')
 
@@ -281,54 +280,103 @@ def knowledge_list(request):
 @login_required
 @require_http_methods(["GET", "PUT"])
 def note_detail_api(request, note_id):
-    # 在获取笔记时，除了检查项目成员，还要检查是否为作者（以防笔记无项目）
     note = get_object_or_404(Note, pk=note_id)
 
-    # 权限检查：如果笔记有项目，检查用户是否为项目成员；如果笔记无项目，检查用户是否为作者
+    # --- 权限检查 (保持不变) ---
     has_project_permission = note.project and note.project.members.filter(pk=request.user.pk).exists()
     is_author_of_unassigned_note = not note.project and note.author == request.user
-
     if not (has_project_permission or is_author_of_unassigned_note):
         return HttpResponseForbidden("您没有权限访问此笔记。")
 
+    # --- GET 请求处理 ---
     if request.method == 'GET':
+        full_content = note.content if note.content else ""
+
+        # 【逻辑修复】检查前端是否请求完整内容
+        if request.GET.get('full_content') == 'true':
+            # 如果是，直接返回完整内容，不进行分页
+            return JsonResponse({
+                'id': note.id,
+                'title': note.title,
+                'content': full_content,
+                # ... 其他字段可以酌情返回或简化
+            })
+
+        # --- 如果不是请求完整内容，则执行分页逻辑 ---
+        CHARS_PER_PAGE = 2000
+        try:
+            page = int(request.GET.get('page', 1))
+            if page < 1: page = 1
+        except ValueError:
+            page = 1
+
+        total_content_length = len(full_content)
+        # 【BUG 修复】使用正确的变量名 total_content_length
+        total_pages = math.ceil(total_content_length / CHARS_PER_PAGE) if total_content_length > 0 else 1
+
+        # 确保请求的页码不超过总页数
+        if page > total_pages:
+            page = total_pages
+
+        start_index = (page - 1) * CHARS_PER_PAGE
+        end_index = start_index + CHARS_PER_PAGE
+        current_page_content = full_content[start_index:end_index]
+
         data = {
             'id': note.id,
             'title': note.title,
-            'content': note.content,
+            'content': current_page_content,
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
             'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
-            'author': {'id': note.author.id, 'username': note.author.username}  # 返回作者信息
+            'author': {'id': note.author.id, 'username': note.author.username},
+            'pagination': {
+                'current_page': page,
+                'total_pages': total_pages,
+            }
         }
         return JsonResponse(data)
 
+    # --- PUT 请求处理 ---
     if request.method == 'PUT':
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': '无效的JSON格式'}, status=400)
 
-        # 更新字段
         note.title = data.get('title', note.title)
-        note.content = data.get('content', note.content)
         note.is_public = data.get('is_public', note.is_public)
-        # 注意：这里我们不允许API直接修改作者或项目
+
+        # 【逻辑完善】如果请求中包含 content，说明是从编辑模式保存，需要更新完整内容
+        if 'content' in data:
+            note.content = data['content']
+
         note.save()
 
+        # 清理侧边栏缓存，以便标题更新能及时显示
         cache.delete(f"sidebar_notes_user_{request.user.id}")
 
-        # 返回更新后的完整数据
+        # --- 保存后，返回更新后的笔记数据（第一页的内容） ---
+        # 这使得前端在保存后能立即看到最新的预览，体验更好
+        full_content = note.content if note.content else ""
+        CHARS_PER_PAGE = 2000
+        total_content_length = len(full_content)
+        total_pages = math.ceil(total_content_length / CHARS_PER_PAGE) if total_content_length > 0 else 1
+
         updated_data = {
             'id': note.id,
             'title': note.title,
-            'content': note.content,
+            'content': full_content[:CHARS_PER_PAGE],  # 返回第一页的内容
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
             'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
-            'author': {'id': note.author.id, 'username': note.author.username}
+            'author': {'id': note.author.id, 'username': note.author.username},
+            'pagination': {
+                'current_page': 1,  # 保存后总是回到第一页
+                'total_pages': total_pages
+            }
         }
         return JsonResponse(updated_data)
 
