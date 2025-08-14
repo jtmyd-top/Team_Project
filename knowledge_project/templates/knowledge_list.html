@@ -4,14 +4,17 @@
 {% block title %}知识笔记{% endblock %}
 
 {% block head_extra %}
-<script src="{% static 'tinymce/tinymce.min.js' %}"></script>
-<script src="{% static 'tinymce/langs/zh_CN.js' %}"></script>
-<link href="{% static 'css/contents.css' %}" rel="stylesheet">
-<!-- !!! 关键：已移除不兼容的第三方插件 tinymce-plugin.min.js !!! -->
-<link href="{% static 'css/knowledge.css' %}" rel="stylesheet">
+{# 公开视图只需要基础样式，完整应用才需要JS和编辑器 #}
+
+        <script src="{% static 'tinymce/tinymce.min.js' %}"></script>
+        <script src="{% static 'tinymce/langs/zh_CN.js' %}"></script>
+        <link href="{% static 'css/contents.css' %}" rel="stylesheet">
+
+    <link href="{% static 'css/knowledge.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
+
 <div id="knowledge-app" class="knowledge-root" v-cloak>
     <!-- 吐司提示框 -->
     <transition name="toast-fade">
@@ -87,19 +90,21 @@
                          <i :class="copyStatus === 'copied' ? 'fas fa-check' : 'fas fa-copy'"></i>
                          <span>[[ copyStatus === 'copied' ? '已复制!' : '复制链接' ]]</span>
                     </button>
+                     <!-- 【新增】删除按钮 -->
+                    <button class="action-btn btn-danger" @click="deleteNote" title="删除笔记" :disabled="isLoading">
+                        <i class="fas fa-trash-alt"></i><span>删除</span>
+                    </button>
                 </div>
-            </div>
-
-            <!-- !!! 关键：添加此 div 用于显示笔记内容 !!! -->
-            <div class="note-content" v-html="selectedNote.content"></div>
+        </div>
+        <div class="note-content" v-html="selectedNote.content"></div>
 
             <!-- 找到这个 div 并用下面的代码块替换它 -->
-<div v-if="totalPages > 1" class="pagination-controls">
-    <!-- 上一页按钮 (保持不变) -->
-    <button @click="prevPage" :disabled="currentPage === 1" class="action-btn" style="margin-right: 10px;">
-        <i class="fas fa-chevron-left"></i>
-        <span>上一页</span>
-    </button>
+            <div v-if="totalPages > 1" class="pagination-controls">
+                <!-- 上一页按钮 (保持不变) -->
+                <button @click="prevPage" :disabled="currentPage === 1" class="action-btn" style="margin-right: 10px;">
+                    <i class="fas fa-chevron-left"></i>
+                    <span>上一页</span>
+                </button>
 
     <!-- !!! 关键修改：可编辑的页码区域 !!! -->
     <div class="page-selector">
@@ -127,12 +132,13 @@
 
          <!-- 编辑模式 -->
         <div v-else-if="selectedNote && isEditing" class="edit-mode">
-
             <div class="edit-header">
                 <input type="text" v-model="selectedNote.title" placeholder="请输入笔记标题...">
                 <div class="edit-actions">
                     <button @click="cancelEditing" class="btn-cancel">取消</button>
                     <button @click="updateNote(true)" class="btn-save">保存更改</button>
+                    <!-- 【新增】编辑模式下的删除按钮 -->
+                    <button @click="deleteNote" class="action-btn btn-danger btn-danger">删除笔记</button>
                 </div>
             </div>
             <textarea id="editor" ref="editorElRef"></textarea>
@@ -145,6 +151,8 @@
         </div>
        </main>
 </div>
+
+
 {% endblock %}
 
 {% block scripts %}

@@ -246,7 +246,59 @@ createApp({
         showToast(error.message, 'error');
       }
     };
+        const deleteNote = async () => {
+        const noteToDelete = selectedNote.value;
+        if (!noteToDelete) return;
 
+        //   【新增】删除笔记的函数弹出确认对话框
+        const confirmed = await showConfirm('此操作无法恢复，您确定要永久删除这篇笔记吗？');
+        if (!confirmed) {
+            showToast('操作已取消', 'info');
+            return;
+        }
+
+        // 2. 发送删除请求
+        isLoading.value = true;
+        try {
+            const response = await fetch(`/api/notes/${noteToDelete.id}/`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ detail: '删除失败，请重试' }));
+                throw new Error(errorData.detail || '删除失败');
+            }
+
+            showToast('笔记已成功删除。', 'success');
+
+            // 3. 更新前端UI状态
+            const deletedNoteId = noteToDelete.id;
+            // 从侧边栏列表中移除
+            sidebarNotes.value = sidebarNotes.value.filter(n => n.id !== deletedNoteId);
+
+            // 清空当前显示
+            selectedNote.value = null;
+            selectedNoteId.value = null;
+            isEditing.value = false; // 如果在编辑模式下删除，确保退出编辑
+
+            // 4. 决定下一步显示什么
+            if (sidebarNotes.value.length > 0) {
+                // 如果还有其他笔记，自动选择第一篇
+                await selectNote(sidebarNotes.value[0].id);
+            } else {
+                // 如果没有笔记了，更新空状态标记
+                initialHasNotes.value = false;
+            }
+
+        } catch (error) {
+            showToast(error.message, 'error');
+        } finally {
+            isLoading.value = false;
+        }
+    };
     // --- 生命周期和侦听器 (保持不变) ---
     watch(isEditing, (isNowEditing) => { if (isNowEditing) { nextTick(() => { loadTinyMCE(); }); } else { destroyEditor(); } });
     onMounted(() => {
@@ -268,6 +320,7 @@ createApp({
       editorElRef,
 
       handleSearchClickWhenCollapsed,
+      deleteNote,
       copyPublicUrl: () => {
       if (!selectedNote.value?.public_url) return;
       try {

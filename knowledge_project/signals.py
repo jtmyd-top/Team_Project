@@ -30,3 +30,9 @@ def create_personal_project_for_new_user(sender, instance, created, **kwargs):
             project=personal_project,
             role='owner' # 将用户在此项目中的角色设为 'owner'
         )
+# notes/utils.py
+
+# [新增] 辅助函数，用于生成统一的缓存键
+def get_sidebar_cache_key(user_id):
+    """生成侧边栏笔记列表的缓存键"""
+    return f"sidebar_notes_user_{user_id}"

@@ -30,7 +30,13 @@ from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from .models import Project, Note
-from django.db.models import F # 导入 F 对象用于精细化内容切片
+from django.db.models import F
+import uuid  # 确保导入 uuid
+from django.shortcuts import render, get_object_or_404
+import logging
+from .signals import get_sidebar_cache_key
+
+# 导入 F 对象用于精细化内容切片
 import math # 导入 math 用于计算总页数
 class CustomUserCreationForm(UserCreationForm):
     email = forms.EmailField(required=True, help_text='必填项。')
@@ -38,7 +44,7 @@ class CustomUserCreationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = User
         fields = UserCreationForm.Meta.fields + ('email',)
-
+logger = logging.getLogger(__name__)
 
 class SendEmailCodeView(View):
     """
@@ -243,6 +249,36 @@ class SignUpView(View):
             return JsonResponse({'status': 'error', 'errors': form.errors.get_json_data()}, status=400)
 
 
+# knowledge_project/views.py (public_note_view 部分)
+
+def public_note_view(request, public_id):  # <---【修正点 1】参数名从 note_id 改为 public_id
+    try:
+        # 使用正确的参数名 public_id 进行查询
+        note = Note.objects.get(public_id=public_id, is_public=True)  # <---【修正点 2】使用新的参数名查询
+
+        # 准备传递给模板的上下文数据
+        context = {
+            'note_data': {
+                'id': note.id,
+                'title': note.title,
+                'author': {'username': note.author.username if note.author else '匿名作者'},
+                'created_at': note.created_at.strftime('%Y-%m-%d %H:%M')  # 格式化时间
+            },
+            # 关键：一次性将完整内容传递给前端
+            'full_content_data': note.content or "",
+        }
+        # 【模板名称修正】确保您使用的模板是 public_note_page.html
+        return render(request, 'public_note_view.html', context)
+
+    except Note.DoesNotExist:
+        # 如果笔记不存在或非公开，返回一个提示页面
+        return render(request, 'public_note_view.html', {'error_message': '抱歉，这篇笔记不存在或未公开分享。'})
+    except Exception as e:
+        # 记录未预料到的错误
+        print(f"Error in public_note_view for public_id {public_id}: {e}")
+        return render(request, 'public_note_view.html', {'error_message': '加载笔记时发生了一个错误，请稍后重试。'})
+
+
 @login_required
 def knowledge_list(request):
     user = request.user
@@ -252,7 +288,6 @@ def knowledge_list(request):
     if sidebar_notes is None:
         # 使用 Q 对象来构建更灵活的查询
         user_projects = Project.objects.filter(members=user)
-
         # 条件A: 笔记在用户的项目中
         condition_in_project = Q(project__in=user_projects)
         # 条件B: 笔记没有项目，但作者是当前用户
@@ -273,36 +308,41 @@ def knowledge_list(request):
         'has_notes': bool(sidebar_notes),
         'csrf_token': request.COOKIES.get('csrftoken')
     }
-    context = {'initial_data': initial_data}
+    context = {
+               'initial_data': initial_data,
+               #'is_public_view': False
+               }
     return render(request, 'knowledge_list.html', context)
 
 
 @login_required
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["GET", "PUT", "DELETE"])
 def note_detail_api(request, note_id):
+    """
+    处理单个笔记的获取、更新和删除操作。
+    """
     note = get_object_or_404(Note, pk=note_id)
 
-    # --- 权限检查 (保持不变) ---
-    has_project_permission = note.project and note.project.members.filter(pk=request.user.pk).exists()
-    is_author_of_unassigned_note = not note.project and note.author == request.user
-    if not (has_project_permission or is_author_of_unassigned_note):
+    # --- 1. 权限检查 (已优化) ---
+    # [优化] 调用模型方法，使视图逻辑更清晰
+    if not note.has_permission(request.user):
         return HttpResponseForbidden("您没有权限访问此笔记。")
 
-    # --- GET 请求处理 ---
+    # --- 2. GET 请求处理 (已重构) ---
     if request.method == 'GET':
-        full_content = note.content if note.content else ""
-
-        # 【逻辑修复】检查前端是否请求完整内容
+        # 如果请求需要完整内容，则直接返回，不进行分页
         if request.GET.get('full_content') == 'true':
-            # 如果是，直接返回完整内容，不进行分页
             return JsonResponse({
                 'id': note.id,
                 'title': note.title,
-                'content': full_content,
-                # ... 其他字段可以酌情返回或简化
+                'content': note.content or "",
+                'is_public': note.is_public,
+                'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else ""
             })
 
-        # --- 如果不是请求完整内容，则执行分页逻辑 ---
+        # --- 分页逻辑 ---
+        # 注意：在内存中对大文本进行分页可能会消耗较多内存，但对于多数应用是可接受的。
+        full_content = note.content or ""
         CHARS_PER_PAGE = 2000
         try:
             page = int(request.GET.get('page', 1))
@@ -311,21 +351,16 @@ def note_detail_api(request, note_id):
             page = 1
 
         total_content_length = len(full_content)
-        # 【BUG 修复】使用正确的变量名 total_content_length
         total_pages = math.ceil(total_content_length / CHARS_PER_PAGE) if total_content_length > 0 else 1
-
-        # 确保请求的页码不超过总页数
-        if page > total_pages:
-            page = total_pages
+        if page > total_pages: page = total_pages
 
         start_index = (page - 1) * CHARS_PER_PAGE
         end_index = start_index + CHARS_PER_PAGE
-        current_page_content = full_content[start_index:end_index]
 
         data = {
             'id': note.id,
             'title': note.title,
-            'content': current_page_content,
+            'content': full_content[start_index:end_index],
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
@@ -338,7 +373,7 @@ def note_detail_api(request, note_id):
         }
         return JsonResponse(data)
 
-    # --- PUT 请求处理 ---
+    # --- 3. PUT 请求处理 (已修改) ---
     if request.method == 'PUT':
         try:
             data = json.loads(request.body)
@@ -347,39 +382,43 @@ def note_detail_api(request, note_id):
 
         note.title = data.get('title', note.title)
         note.is_public = data.get('is_public', note.is_public)
-
-        # 【逻辑完善】如果请求中包含 content，说明是从编辑模式保存，需要更新完整内容
         if 'content' in data:
             note.content = data['content']
 
+        # 如果笔记被设为公开，确保它有一个 public_id
+        if note.is_public and not note.public_id:
+            note.public_id = uuid.uuid4()
+
         note.save()
 
-        # 清理侧边栏缓存，以便标题更新能及时显示
-        cache.delete(f"sidebar_notes_user_{request.user.id}")
+        # [优化] 使用辅助函数清理缓存
+        cache.delete(get_sidebar_cache_key(request.user.id))
 
-        # --- 保存后，返回更新后的笔记数据（第一页的内容） ---
-        # 这使得前端在保存后能立即看到最新的预览，体验更好
-        full_content = note.content if note.content else ""
-        CHARS_PER_PAGE = 2000
-        total_content_length = len(full_content)
-        total_pages = math.ceil(total_content_length / CHARS_PER_PAGE) if total_content_length > 0 else 1
-
+        # [修改] 返回一个简洁的、更新后的对象，而不是带分页的复杂结构。
+        # 这更符合 RESTful 风格，也避免了前端状态错乱的风险。
         updated_data = {
             'id': note.id,
             'title': note.title,
-            'content': full_content[:CHARS_PER_PAGE],  # 返回第一页的内容
+            'content': note.content or "",  # 前端可能需要更新后的完整内容来刷新视图
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-            'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
-            'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
-            'author': {'id': note.author.id, 'username': note.author.username},
-            'pagination': {
-                'current_page': 1,  # 保存后总是回到第一页
-                'total_pages': total_pages
-            }
         }
         return JsonResponse(updated_data)
 
+    # --- 4. DELETE 请求处理 (已优化) ---
+    if request.method == 'DELETE':
+        try:
+            note_id_for_log = note.id  # 在删除前保存ID，用于日志记录
+            note.delete()
+            # [优化] 使用辅助函数清理缓存
+            cache.delete(get_sidebar_cache_key(request.user.id))
+            # 返回 200 OK 并附带成功信息是常见的做法。
+            # 另一种选择是返回 status=204 (No Content)，此时响应体必须为空。
+            return JsonResponse({'status': 'success', 'message': '笔记已成功删除'}, status=200)
+        except Exception as e:
+            # [优化] 使用 logging 记录错误，而不是 print
+            logger .error(f"删除笔记 {note_id_for_log} 时发生错误: {e}", exc_info=True)
+            return JsonResponse({'error': '删除过程中发生内部错误'}, status=500)
 
 @login_required
 def search_notes_api(request):

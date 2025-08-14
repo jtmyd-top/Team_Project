@@ -117,6 +117,22 @@ class Note(models.Model):
     is_public = models.BooleanField(default=False, verbose_name="是否公开")
     public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
 
+    # --- 👇👇👇 将下面的方法添加到这里 👇👇👇 ---
+    def has_permission(self, user):
+        """
+        检查用户是否有权访问此笔记。
+        这个方法包含了视图中所需的权限检查逻辑。
+        """
+        # 规则1: 如果笔记关联了项目，检查用户是否是该项目的成员。
+        # Project 模型中 'members' 字段的定义是 members = models.ManyToManyField(User, ...)
+        if self.project:
+            return self.project.members.filter(pk=user.pk).exists()
+
+        # 规则2: 如果笔记未关联任何项目（即 "随手记"），
+        # 那么只有笔记的作者有权访问。
+        return self.author == user
+
+    # --- 👆👆👆 添加结束 👆👆👆 ---
     def __str__(self):
         return self.title
 
