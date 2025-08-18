@@ -89,6 +89,9 @@ createApp({
         // [核心修改 2] 使用 target 直接对 DOM 节点初始化，而不是用 selector
         target: editorEl,
         language:'zh_CN',
+        relative_urls: false,
+        remove_script_host: false,
+        convert_urls: false,
         menubar:false,
         branding: false,
         min_height:400,
@@ -99,15 +102,53 @@ createApp({
         'code', 'codesample', 'table', 'nonbreaking','charmap', 'pagebreak', 'anchor',
         'lists', 'textpattern', 'help', 'emoticons', 'autosave', 'wordcount',
         'axupimgs', 'upfile', 'attachment', 'tpImportword', 'tpIndent2em'
-    ].join(' '),
-    // --- V3 最终修复版工具栏 ---
-    // 修正了 nonbreaking 命令，移除了无效按钮
-    toolbar: [
+          ].join(' '),
+        toolbar: [
         'undo redo | styles | bold italic underline strikethrough | forecolor backcolor | removeformat',
         'alignleft aligncenter alignright alignjustify | bullist numlist | outdent indent | tpIndent2em | lineheight | blockquote | subscript superscript',
         'link unlink anchor | image axupimgs media | upfile attachment | table | nonbreaking  | hr pagebreak |charmap emoticons | code codesample | tpImportword | searchreplace | preview fullscreen | wordcount | help'
-    ],
-    // 表格上下文菜单
+                  ],
+        automatic_uploads: true, // 2. 定义上传图片的 URL,允许通过粘贴、拖放等方式自动触发上传
+        // 2. 指定处理上传的函数 (这是最灵活和推荐的方式)
+        images_upload_handler: (blobInfo, progress) => new Promise((resolve, reject) => {
+            const formData = new FormData();
+            // `blobInfo.blob()` 获取图片文件本身
+            // `blobInfo.filename()` 获取原始文件名
+            formData.append('file', blobInfo.blob(), blobInfo.filename());
+
+            // 使用 fetch 发送到我们创建的 Django API
+            fetch('/api/upload/image/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken // 确保发送 CSRF Token
+                },
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    // 如果服务器返回错误，尝试解析错误信息
+                    response.json().then(errData => {
+                        reject(errData.error || `HTTP error: ${response.status}`);
+                    }).catch(() => {
+                        reject(`HTTP error: ${response.status}`);
+                    });
+                    return;
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data || typeof data.location !== 'string') {
+                    reject('从服务器返回了无效的 JSON 格式');
+                    return;
+                }
+                // 成功后，调用 resolve 并传入图片 URL
+                // TinyMCE 会自动将 <img src="URL"> 插入编辑器
+                resolve(data.location);
+            })
+            .catch(error => {
+                reject('图片上传失败: ' + error);
+            });
+        }),
         table_toolbar: 'tableprops tabledelete | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol',
         table_grid: true, // 确保显示网格用于创建表格
         table_cell_advtab: true, // 开启单元格高级属性
@@ -159,14 +200,30 @@ createApp({
         isLoading.value = false;
       }
     };
+    // --- 【已更新】的保存函数 ---
     const updateNote = async (isFullUpdate = true) => {
       if (!selectedNote.value) return;
+
       const currentTitleInput = document.querySelector('.edit-header input[type=text]');
       const currentTitle = currentTitleInput ? currentTitleInput.value : selectedNote.value.title;
       const body = { title: currentTitle, is_public: selectedNote.value.is_public };
+
       if (isEditing.value) {
-        body.content = editorInstance ? editorInstance.getContent() : fullNoteContentForEditing.value;
+        let content = editorInstance ? editorInstance.getContent() : fullNoteContentForEditing.value;
+
+        // --- 【新增】净化HTML内容，移除多余的CSS样式 ---
+        const styleToRemove = '.attachment>img{display:inline-block!important;max-width:30px!important;}.attachment>a{display:contents!important;}';
+        if (content.includes(styleToRemove)) {
+          // 使用正则表达式进行安全、全局的替换
+          const regex = new RegExp(styleToRemove.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+          content = content.replace(regex, '').trim(); // 替换并移除可能留下的前后空格
+          console.info("已净化内容，移除了多余的CSS。");
+        }
+        // --- 净化结束 ---
+
+        body.content = content; // 使用净化后的内容
       }
+
       try {
         const response = await fetch(`/api/notes/${selectedNote.value.id}/`, {
           method: 'PUT',
@@ -179,20 +236,25 @@ createApp({
         }
         const updatedNoteData = await response.json();
         if (isEditing.value) {
-          selectedNote.value = { ...updatedNoteData };
-          fullNoteContentForEditing.value = body.content;
+          // 更新当前笔记的预览和完整内容，确保状态同步
+          selectedNote.value.title = updatedNoteData.title;
+          selectedNote.value.content = updatedNoteData.content; // 假设后端返回了更新后的内容
+          fullNoteContentForEditing.value = updatedNoteData.content;
         } else {
           selectedNote.value.is_public = updatedNoteData.is_public;
         }
         const noteInSidebar = sidebarNotes.value.find(n => n.id === updatedNoteData.id);
         if (noteInSidebar) noteInSidebar.title = updatedNoteData.title;
+
         if (isFullUpdate) {
           isEditing.value = false;
           showToast('保存成功！');
         } else {
           showToast('设置已更新！');
         }
-      } catch (error) { showToast(error.message, 'error'); }
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
     };
     const startEditing = async () => {
       if (!selectedNote.value) return;

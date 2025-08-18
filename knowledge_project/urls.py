@@ -1,6 +1,6 @@
 # knowledge_project/urls.py
 from . import views
-from django.urls import path
+from django.urls import path,re_path
 from .views import home, SignUpView
 from .views import home, SignUpView, knowledge_list,captcha_image,check_username,CustomLoginView
 urlpatterns = [
@@ -18,6 +18,12 @@ urlpatterns = [
     path('api/notes/all/', views.get_all_notes_api, name='get_all_notes_api'),
     #path('api/notes/create/', views.note_create_api, name='note_create_api'),
     path('notes/public/<uuid:public_id>/', views.public_note_view, name='public_note_view'),
+    # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
+    path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),
+    re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
+# --- 【新增】图片上传的 API 路由 ---
+    path('api/upload/image/', views.image_upload_view, name='image_upload_view'),
+    re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
 
 ]
 

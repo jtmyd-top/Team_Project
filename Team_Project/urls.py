@@ -28,5 +28,10 @@ urlpatterns = [
     path('', include('knowledge_project.urls')),
     path("ckeditor5/", include('django_ckeditor_5.urls'), name="ck_editor_5_upload_file"),
 ]
+# --- 【核心新增代码】---
+# 只有在 DEBUG 模式下，才让 Django 开发服务器来处理媒体文件
 if settings.DEBUG:
+    # 这行代码会添加一个新的 URL 模式。
+    # 它会拦截以 settings.MEDIA_URL (即 '/uploads/') 开头的请求，
+    # 然后去 settings.MEDIA_ROOT (即 'D:\...\uploads') 文件夹下查找并返回对应的文件。
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

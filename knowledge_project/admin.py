@@ -1,4 +1,7 @@
 # knowledge_project/admin.py
+import hashlib
+import os
+
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
@@ -10,10 +13,20 @@ from django_json_widget.widgets import JSONEditorWidget
 from .models import Project, ProjectMembership, Note, Asset, Profile
 from django_ckeditor_5.widgets import CKEditor5Widget
 from django import forms
+from django.contrib import messages
 # ---------------------------------
 #  Inlines (内联模型)
 # ---------------------------------
-
+# 辅助函数，可以放在文件顶部
+def calculate_file_hash_for_admin(file):
+    """一个独立的、用于Admin的哈希计算函数，能处理多种上传文件类型"""
+    hasher = hashlib.sha256()
+    # 使用 file.chunks() 可以安全地处理内存中的文件和磁盘上的大文件
+    for chunk in file.chunks():
+        hasher.update(chunk)
+    # 计算完毕后，将文件指针移回开头，以便Django可以正常保存它
+    file.seek(0)
+    return hasher.hexdigest()
 class ProfileInline(admin.StackedInline):
     """在用户页面内联显示Profile信息"""
     model = Profile
@@ -154,54 +167,84 @@ class AssetAdmin(admin.ModelAdmin):
     list_filter = ('asset_type', 'project')
     search_fields = ('name', 'project__title', 'uploader__username')
     autocomplete_fields = ['project', 'uploader']
-    # 【修改点】将 'uploaded_at' 移到 readonly_fields 的基础设置中
-    readonly_fields = ('uploaded_at',)
+
+    # 【基础只读字段】将 image_hash 加入，方便在修改页面查看
+    readonly_fields = ('uploaded_at', 'image_hash')
 
     def get_fields(self, request, obj=None):
         """
-        【新增】动态控制表单显示的字段。
-        - 在添加页面 (obj is None)，不显示 'name' 字段。
-        - 在修改页面 (obj is not None)，显示 'name' 字段。
+        【保留】动态控制表单显示的字段。
+        - 在“增加”页面 (obj is None)，不显示 'name' 和 'image_hash'。
+        - 在“修改”页面 (obj is not None)，显示所有相关字段。
         """
         if obj is None:
-            # 添加页面字段顺序
+            # “增加”页面的字段顺序
             return ('project', 'uploader', 'file', 'asset_type', 'description')
         else:
-            # 修改页面字段顺序
-            return ('name', 'project', 'uploader', 'file', 'asset_type', 'description', 'uploaded_at')
+            # “修改”页面的字段顺序
+            return ('name', 'project', 'uploader', 'file', 'asset_type', 'description', 'uploaded_at', 'image_hash')
 
     def get_readonly_fields(self, request, obj=None):
         """
-        【新增】动态设置只读字段。
-        - 在修改页面，将 'name' 和 'uploaded_at' 设为只读。
+        【保留并完善】动态设置只读字段。
+        - 基础只读字段是 ('uploaded_at', 'image_hash')。
+        - 在“修改”页面，额外将 'name' 字段也设为只读。
         """
-        if obj:  # 如果是修改页面
-            return self.readonly_fields + ('name',)
-        return self.readonly_fields
+        # 从类属性获取基础的只读字段列表
+        base_readonly = list(self.readonly_fields)
+        if obj:  # 如果是“修改”页面
+            # 将 'name' 添加到只读列表中
+            base_readonly.append('name')
+        return tuple(base_readonly)
 
     def save_model(self, request, obj, form, change):
         """
-        【新增】重写保存逻辑。
+        【全新重构】的保存逻辑，集成了哈希计算和用户级去重。
         """
         # 1. 自动设置上传者 (如果为空)
-        if not obj.uploader:
+        if not obj.uploader_id:
             obj.uploader = request.user
 
-        # 2. 如果 name 字段为空，则使用文件名填充
-        #    注意：必须在 super().save_model 之前操作 obj，
-        #    但在文件真正保存后，obj.file.name 才会有值。
-        #    所以我们先调用 super().save_model 保存文件，再补充 name。
+        # 2. 检查是否有新文件上传或文件被更改
+        uploaded_file = form.cleaned_data.get('file')
+        if uploaded_file and 'file' in form.changed_data:
+            # a. 计算新文件的哈希值
+            file_hash = calculate_file_hash_for_admin(uploaded_file)
 
-        # 先执行默认的保存，这会处理文件上传
+            # b. 检查当前用户是否已上传过相同内容的文件 (排除当前对象自身)
+            existing_asset = Asset.objects.filter(
+                uploader=obj.uploader,
+                image_hash=file_hash
+            ).exclude(pk=obj.pk).first()
+
+            if existing_asset:
+                # c. 如果找到重复项，则不保存，并给出明确的错误提示
+                obj.pk = None  # 阻止保存当前对象，防止创建不完整的记录
+                existing_asset_url = reverse(
+                    'admin:knowledge_project_asset_change',
+                    args=[existing_asset.pk]
+                )
+                messages.set_level(request, messages.ERROR)
+                messages.error(
+                    request,
+                    format_html(
+                        '上传失败：您已上传过相同内容的文件。请访问 <a href="{}">这里</a> 查看已存在的资产。',
+                        existing_asset_url
+                    )
+                )
+                return  # 中断保存流程
+
+            # d. 如果是新文件，将计算出的哈希值赋给当前对象
+            obj.image_hash = file_hash
+
+        # 3. 先执行Django默认的保存流程，这会处理文件系统中的文件写入
         super().save_model(request, obj, form, change)
 
-        # 此时 obj.file.name 已经有值了
-        if not obj.name:
-            # os.path.basename 可以去掉 Django 可能添加的路径前缀
-            import os
+        # 4. 如果 name 字段为空，则使用文件名自动填充
+        # 这个操作必须在 super().save_model 之后，因为那时 obj.file.name 才会有值
+        if not obj.name and obj.file:
             obj.name = os.path.basename(obj.file.name)
-            # 再次保存以更新 name 字段
-            obj.save()
+            obj.save(update_fields=['name'])  # 只更新name字段，避免触发循环保存
 
 
 @admin.register(Profile)

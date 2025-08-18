@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from django_ckeditor_5.fields import CKEditor5Field
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-
+from django.urls import reverse
 from django_ckeditor_5.fields import CKEditor5Field
 # 架构已重构：移除了 Team 和 TeamMembership 模型。
 # 权限和成员管理现在直接在 Project 层级进行。
@@ -167,18 +167,29 @@ class Asset(models.Model):
         ('file', '普通文件'), ('image', '图片'), ('code', '代码片段'), ('doc', '文档'),
     ]
 
-    project = models.ForeignKey('Project', on_delete=models.CASCADE, related_name="assets", verbose_name="所属项目")
+    project = models.ForeignKey(
+        'Project',
+        on_delete=models.CASCADE,
+        related_name="assets",
+        verbose_name="所属项目",
+        null=True,  # <--- 允许数据库中该字段为 NULL
+        blank=True  # <--- 允许在表单（如Admin后台）中不填此项
+    )
     uploader = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="uploaded_assets",
                                  verbose_name="上传者")
 
     # 【修改点】在这里添加 blank=True，使其变为非必填字段
     name = models.CharField(max_length=255, verbose_name="文件名/资源名", blank=True)
 
-    file = models.FileField(upload_to=user_directory_path, verbose_name="上传文件")
+    file = models.FileField(upload_to=user_directory_path, verbose_name="上传文件", null=True)
     asset_type = models.CharField(max_length=10, choices=ASSET_TYPE_CHOICES, default='file', verbose_name="资源类型")
     description = models.TextField(blank=True, verbose_name="描述")
     uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="上传时间")
+    image_hash = models.CharField(max_length=64, blank=True, db_index=True, verbose_name="文件哈希值")
 
+    def get_protected_url(self):
+        """返回受保护的访问URL，而不是直接的文件URL"""
+        return reverse('protected_media_view', kwargs={'file_path': str(self.file)})
     def __str__(self):
         # 如果name为空，就显示文件名，避免显示空白
         return self.name or self.file.name
@@ -187,6 +198,10 @@ class Asset(models.Model):
         verbose_name = "项目资产"
         verbose_name_plural = "项目资产"
         ordering = ['-uploaded_at']
+        # --- 【新增】唯一性约束 ---
+        # 确保同一个用户不会上传具有相同哈希值的文件
+        # 注意：这里我们假设 image_hash 不为空时才需要唯一。更复杂的约束可能需要在 save 方法中实现
+        unique_together = ('uploader', 'image_hash')
 
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="关联用户")

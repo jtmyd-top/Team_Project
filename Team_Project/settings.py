@@ -5,6 +5,7 @@ from pathlib import Path
 from django.urls import reverse_lazy
 from dotenv import load_dotenv
 
+
 # --- 1. 修正 BASE_DIR 和环境变量加载 ---
 # BASE_DIR 应该指向项目的根目录，即 manage.py 所在的目录
 # 这将确保所有其他路径（如 static, media）都能正确解析
@@ -96,7 +97,7 @@ STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL = '/uploads/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'uploads')
+MEDIA_ROOT = os.path.join(BASE_DIR,'knowledge_project','uploads')
 
 
 # --- 8. 认证、缓存、邮件 (清理重复项) ---
@@ -129,19 +130,15 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-
-# ==============================================================================
-# 9. CKEditor 5 增强版完整配置 (现在是唯一的编辑器配置)
-# ==============================================================================
-
 # --- 指定使用我们自己下载的、包含高级功能的 JS 文件 ---
 CKEDITOR_5_CUSTOM_JS_URL = 'ckeditor5/ckeditor.js'
 
 # --- 上传相关配置 ---
-CKEDITOR_5_UPLOAD_URL = reverse_lazy("ckeditor_5_upload_file") # Django-ckeditor-5 自带上传处理
+# 【关键】确保这个 URL 指向我们为 CKEditor 5 专门创建的视图
+CKEDITOR_5_UPLOAD_URL = reverse_lazy("ckeditor_image_upload_view")
 CKEDITOR_5_CSRF_COOKIE_NAME = "csrftoken"
 
-# --- 自定义颜色面板 ---
+# --- 自定义颜色面板 (保持不变) ---
 customColorPalette = [
     {'color': 'hsl(4, 90%, 58%)', 'label': 'Red'}, {'color': 'hsl(340, 82%, 52%)', 'label': 'Pink'},
     {'color': 'hsl(291, 64%, 42%)', 'label': 'Purple'}, {'color': 'hsl(262, 52%, 47%)', 'label': 'Deep Purple'},
@@ -151,24 +148,55 @@ customColorPalette = [
     {'color': 'hsl(0, 0%, 60%)', 'label': 'Light Gray'},
 ]
 
+# --- 【核心修改】替换现有的 CKEDITOR_5_CONFIGS ---
 CKEDITOR_5_CONFIGS = {
-    'default': { # 保留一个简单的默认配置
+    'default': {
         'toolbar': ['heading', '|', 'bold', 'italic', 'link'],
     },
     'full': {
         'language': 'zh-cn',
-        # 【重要】这里的工具栏按钮必须与你下载的自定义 ckeditor.js 文件包含的插件完全对应
+
+        # 【关键】1. 强制加载 SimpleUploadAdapter 插件
+        # 这个插件是实现自定义上传的核心
+        'extraPlugins': ['SimpleUploadAdapter'],
+
+        # 【关键】2. 为 SimpleUploadAdapter 提供配置
+        # 明确告诉编辑器上传时应该将文件 POST 到哪个 URL
+        'simpleUpload': {
+            'uploadUrl': CKEDITOR_5_UPLOAD_URL,
+            # 'withCredentials': True, # 如果遇到跨域cookie问题可以尝试开启
+        },
+
+        # 3. 工具栏和原有其他配置保持不变
         'toolbar': [
             'sourceEditing', '|', 'findAndReplace', 'selectAll', '|',
             'heading', '|', 'bold', 'italic', 'underline', 'strikethrough', 'removeFormat', '|',
             'fontSize', 'fontFamily', 'fontColor', 'fontBackgroundColor', 'highlight', '|',
             'alignment', '|', 'outdent', 'indent', '|',
             'bulletedList', 'numberedList', 'todoList', 'blockQuote', '|',
+            # 确保 'imageUpload' 按钮存在
             'link', 'imageUpload', 'insertTable', 'mediaEmbed', 'horizontalLine', 'specialCharacters', 'pageBreak',
         ],
-        'image': {'toolbar': ['imageTextAlternative', '|', 'imageStyle:alignLeft', 'imageStyle:alignRight', 'imageStyle:alignCenter', 'imageStyle:side', '|', 'linkImage']},
-        'table': {'contentToolbar': ['tableColumn', 'tableRow', 'mergeTableCells', 'tableProperties', 'tableCellProperties'], 'tableProperties': {'borderColors': customColorPalette, 'backgroundColors': customColorPalette}, 'tableCellProperties': {'borderColors': customColorPalette, 'backgroundColors': customColorPalette}},
-        'heading': {'options': [{'model': 'paragraph', 'title': 'Paragraph', 'class': 'ck-heading_paragraph'}, {'model': 'heading1', 'view': 'h1', 'title': 'Heading 1', 'class': 'ck-heading_heading1'}, {'model': 'heading2', 'view': 'h2', 'title': 'Heading 2', 'class': 'ck-heading_heading2'}]},
+        'image': {
+            'toolbar': [
+                'imageTextAlternative', '|', 'imageStyle:alignLeft', 'imageStyle:alignRight',
+                'imageStyle:alignCenter', 'imageStyle:side', '|', 'linkImage'
+            ]
+        },
+        'table': {
+            'contentToolbar': [
+                'tableColumn', 'tableRow', 'mergeTableCells', 'tableProperties', 'tableCellProperties'
+            ],
+            'tableProperties': {'borderColors': customColorPalette, 'backgroundColors': customColorPalette},
+            'tableCellProperties': {'borderColors': customColorPalette, 'backgroundColors': customColorPalette}
+        },
+        'heading': {
+            'options': [
+                {'model': 'paragraph', 'title': 'Paragraph', 'class': 'ck-heading_paragraph'},
+                {'model': 'heading1', 'view': 'h1', 'title': 'Heading 1', 'class': 'ck-heading_heading1'},
+                {'model': 'heading2', 'view': 'h2', 'title': 'Heading 2', 'class': 'ck-heading_heading2'}
+            ]
+        },
         'fontColor': {'colors': customColorPalette},
         'fontBackgroundColor': {'colors': customColorPalette},
         'alignment': {'options': ['left', 'right', 'center', 'justify']},
