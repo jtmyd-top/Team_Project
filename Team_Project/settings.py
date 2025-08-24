@@ -84,7 +84,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 LANGUAGE_CODE = 'zh-hans'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 USE_I18N = True
 USE_TZ = True
 
@@ -121,7 +121,17 @@ CACHES = {
         }
     }
 }
+# --- 【核心新增配置】会话超时设置 ---
 
+# 1. 设置 Session 的 cookie 有效期为3小时（以秒为单位）
+#    3 小时 * 60 分钟/小时 * 60 秒/分钟 = 10800 秒
+SESSION_COOKIE_AGE = 10800
+
+# 2. 每次请求都保存并刷新 Session 的有效期
+#    这是实现“闲置”超时的关键。只要用户还在与网站交互（发起请求），
+#    3小时的倒计时就会被重置。
+SESSION_SAVE_EVERY_REQUEST = True
+#mail设定
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))

@@ -16,7 +16,7 @@ urlpatterns = [
     path('api/notes/search/', views.search_notes_api, name='api_search_notes'),
     path('api/notes/<int:note_id>/', views.note_detail_api, name='api_note_detail'),
     path('api/notes/all/', views.get_all_notes_api, name='get_all_notes_api'),
-    #path('api/notes/create/', views.note_create_api, name='note_create_api'),
+    path('api/notes/create/', views.create_note_api, name='create_note_api'),
     path('notes/public/<uuid:public_id>/', views.public_note_view, name='public_note_view'),
     # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
     path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),

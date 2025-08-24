@@ -19,12 +19,12 @@ from django.core.mail import send_mail
 import random
 import string
 import time
-
+from bs4 import BeautifulSoup, Tag,NavigableString
 from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
-
+from django.core.paginator import Paginator  # 添加这行导入
 from django.core.cache import cache
-from .models import Project, Note,Asset
+from .models import Project, Note,Asset,Tag
 
 import hashlib
 
@@ -39,9 +39,86 @@ import uuid  # 确保导入 uuid
 from django.shortcuts import render, get_object_or_404
 import logging
 from .signals import get_sidebar_cache_key
-
+from collections import deque
 # 导入 F 对象用于精细化内容切片
 import math # 导入 math 用于计算总页数
+
+
+# 定义富文本分页函数
+# 定义富文本分页函数
+# --- 分页辅助函数 ---
+def get_paginated_html(html_content, page_number=1, chars_per_page=1500):
+    """
+    递归遍历所有元素，确保不遗漏任何内容
+    """
+    if not html_content or len(html_content) < chars_per_page:
+        return html_content, 1
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    def collect_content_blocks(element, blocks=None):
+        """递归收集所有内容块"""
+        if blocks is None:
+            blocks = []
+
+        # 如果是叶子节点或包含主要内容的节点
+        if not element.children or element.name in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'blockquote']:
+            if element.get_text(strip=True):  # 只添加有实际内容的元素
+                blocks.append(element)
+        else:
+            # 递归处理子元素
+            for child in element.children:
+                if hasattr(child, 'name') and child.name:
+                    collect_content_blocks(child, blocks)
+                elif isinstance(child, str) and child.strip():
+                    # 处理纯文本节点
+                    text_elem = soup.new_tag('p')
+                    text_elem.string = child.strip()
+                    blocks.append(text_elem)
+
+        return blocks
+
+    # 收集所有内容块
+    content_blocks = collect_content_blocks(soup)
+
+    if not content_blocks:
+        return html_content, 1
+
+    # 分页逻辑
+    pages = []
+    current_page_elements = []
+    current_page_chars = 0
+
+    for block in content_blocks:
+        block_str = str(block)
+        block_chars = len(block_str)
+
+        if current_page_chars + block_chars > chars_per_page and current_page_elements:
+            pages.append(current_page_elements)
+            current_page_elements = [block]
+            current_page_chars = block_chars
+        else:
+            current_page_elements.append(block)
+            current_page_chars += block_chars
+
+    if current_page_elements:
+        pages.append(current_page_elements)
+
+    # 其余逻辑与前面相同...
+    total_pages = len(pages) if pages else 1
+
+    try:
+        page_number = int(page_number)
+        page_number = max(1, min(page_number, total_pages))
+    except (ValueError, TypeError):
+        page_number = 1
+
+    current_page_elements = pages[page_number - 1]
+    page_html = ''.join(str(elem) for elem in current_page_elements)
+
+    return page_html, total_pages
+
+
 class CustomUserCreationForm(UserCreationForm):
     email = forms.EmailField(required=True, help_text='必填项。')
 
@@ -322,62 +399,45 @@ def knowledge_list(request):
 @login_required
 @require_http_methods(["GET", "PUT", "DELETE"])
 def note_detail_api(request, note_id):
-    """
-    处理单个笔记的获取、更新和删除操作。
-    """
     note = get_object_or_404(Note, pk=note_id)
-
-    # --- 1. 权限检查 (已优化) ---
-    # [优化] 调用模型方法，使视图逻辑更清晰
     if not note.has_permission(request.user):
         return HttpResponseForbidden("您没有权限访问此笔记。")
 
-    # --- 2. GET 请求处理 (已重构) ---
     if request.method == 'GET':
-        # 如果请求需要完整内容，则直接返回，不进行分页
         if request.GET.get('full_content') == 'true':
-            return JsonResponse({
+            data = {
                 'id': note.id,
                 'title': note.title,
                 'content': note.content or "",
                 'is_public': note.is_public,
-                'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else ""
-            })
+                'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
+                'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+                'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
+                'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
+            }
+            return JsonResponse(data)
 
-        # --- 分页逻辑 ---
-        # 注意：在内存中对大文本进行分页可能会消耗较多内存，但对于多数应用是可接受的。
-        full_content = note.content or ""
-        CHARS_PER_PAGE = 2000
-        try:
-            page = int(request.GET.get('page', 1))
-            if page < 1: page = 1
-        except ValueError:
-            page = 1
-
-        total_content_length = len(full_content)
-        total_pages = math.ceil(total_content_length / CHARS_PER_PAGE) if total_content_length > 0 else 1
-        if page > total_pages: page = total_pages
-
-        start_index = (page - 1) * CHARS_PER_PAGE
-        end_index = start_index + CHARS_PER_PAGE
-
+        page = request.GET.get('page', 1)
+        paginated_content, total_pages = get_paginated_html(note.content, page)
         data = {
             'id': note.id,
             'title': note.title,
-            'content': full_content[start_index:end_index],
+            'content': paginated_content,
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
             'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
             'author': {'id': note.author.id, 'username': note.author.username},
+            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
+            'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
             'pagination': {
-                'current_page': page,
+                'current_page': int(page),
                 'total_pages': total_pages,
             }
         }
         return JsonResponse(data)
 
-    # --- 3. PUT 请求处理 (已修改) ---
     if request.method == 'PUT':
         try:
             data = json.loads(request.body)
@@ -388,24 +448,29 @@ def note_detail_api(request, note_id):
         note.is_public = data.get('is_public', note.is_public)
         if 'content' in data:
             note.content = data['content']
-
-        # 如果笔记被设为公开，确保它有一个 public_id
+        note.last_modified_by = request.user
         if note.is_public and not note.public_id:
             note.public_id = uuid.uuid4()
-
         note.save()
 
-        # [优化] 使用辅助函数清理缓存
         cache.delete(get_sidebar_cache_key(request.user.id))
 
-        # [修改] 返回一个简洁的、更新后的对象，而不是带分页的复杂结构。
-        # 这更符合 RESTful 风格，也避免了前端状态错乱的风险。
+        paginated_content, total_pages = get_paginated_html(note.content, 1)
         updated_data = {
             'id': note.id,
             'title': note.title,
-            'content': note.content or "",  # 前端可能需要更新后的完整内容来刷新视图
+            'content': paginated_content,
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
+            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'last_modified_by': {'username': note.last_modified_by.username},
+            'author': {'id': note.author.id, 'username': note.author.username},
+            'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
+            'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
+            'pagination': {
+                'current_page': 1,
+                'total_pages': total_pages,
+            }
         }
         return JsonResponse(updated_data)
 
@@ -632,3 +697,36 @@ def ckeditor_image_upload_view(request):
         if 'new_asset' in locals() and new_asset.pk:
             new_asset.delete()
         return JsonResponse({'error': {'message': '服务器保存文件时出错。'}}, status=500)
+
+
+# --- 【新增】创建新笔记的 API 视图 ---
+# knowledge_project/views.py
+
+@login_required
+@require_http_methods(["POST"])
+def create_note_api(request):
+    """
+    为当前登录用户创建一篇新的空白笔记。
+    【修正版】：笔记不关联任何项目
+    """
+    user = request.user
+
+    try:
+        # 创建新的笔记实例，不关联任何项目
+        new_note = Note.objects.create(
+            author=user,
+            title="无标题笔记",
+            content="",
+            project=None  # 明确设置为 None，不关联项目
+        )
+
+        # 清除侧边栏缓存
+        cache.delete(get_sidebar_cache_key(user.id))
+
+        return JsonResponse({
+            'id': new_note.id,
+            'title': new_note.title
+        })
+    except Exception as e:
+        logger.error(f"为用户 {user.id} 创建新笔记时出错: {e}", exc_info=True)
+        return JsonResponse({'error': '创建笔记时发生内部错误'}, status=500)

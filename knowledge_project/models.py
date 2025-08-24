@@ -1,6 +1,7 @@
 # Create your models here.
 # knowledge_project/models.py
-
+from bs4 import BeautifulSoup
+import jieba.analyse
 from django.db import models
 import uuid
 from django.core.exceptions import ValidationError
@@ -10,9 +11,18 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.urls import reverse
 from django_ckeditor_5.fields import CKEditor5Field
+import bleach
 # 架构已重构：移除了 Team 和 TeamMembership 模型。
 # 权限和成员管理现在直接在 Project 层级进行。
+class Tag(models.Model):
+    name = models.CharField(max_length=50, unique=True, verbose_name="标签名")
 
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "标签"
+        verbose_name_plural = "标签"
 class Project(models.Model):
     """
     重构后的核心模型。每个项目都是一个独立的协作空间。
@@ -113,10 +123,25 @@ class Note(models.Model):
         null=True,  # 允许数据库中该字段为NULL
         blank=True  # 允许在表单中（如Django Admin）提交时该字段为空
     )
+
+    # 【修改】created_at 保持不变
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    # 【新增】最后修改时间
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="最后修改时间")
+
+    # 【新增】最后修改者
+    last_modified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='modified_notes',
+        verbose_name="最后修改者"
+    )
     is_public = models.BooleanField(default=False, verbose_name="是否公开")
     public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-
+    tags = models.ManyToManyField(Tag, blank=True, related_name='notes', verbose_name="标签")
     # --- 👇👇👇 将下面的方法添加到这里 👇👇👇 ---
     def has_permission(self, user):
         """
@@ -131,6 +156,32 @@ class Note(models.Model):
         # 规则2: 如果笔记未关联任何项目（即 "随手记"），
         # 那么只有笔记的作者有权访问。
         return self.author == user
+    def save(self, *args, **kwargs):
+        # 定义允许的 HTML 标签
+        ALLOWED_TAGS = [
+            'p', 'b', 'i', 'u', 'strong', 'em', 'strike', 'a',
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+            'br', 'hr', 'img', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
+            'span', 'div','section', 'article', 'header', 'footer', 'nav', 'aside', 'figure', 'figcaption', 'details', 'summary','hr'
+        ]
+        # 定义允许的属性，防止例如 onmouseover 等危险属性
+        ALLOWED_ATTRIBUTES = {
+            '*': ['class', 'style'], # 允许通用属性
+            'a': ['href', 'title', 'target'],
+            'img': ['src', 'alt', 'title', 'width', 'height'],
+        }
+
+        # 清理 content 字段
+        if self.content:
+            self.content = bleach.clean(
+                self.content,
+                tags=ALLOWED_TAGS,
+                attributes=ALLOWED_ATTRIBUTES,
+                strip=True  # strip=True 会移除所有不允许的标签，而不是转义
+            )
+
+        super().save(*args, **kwargs) # 调用父类的 save 方法
 
     # --- 👆👆👆 添加结束 👆👆👆 ---
     def __str__(self):
@@ -242,3 +293,47 @@ def create_personal_project_for_new_user(sender, instance, created, **kwargs):
             project=personal_project,
             role='owner'
         )
+@receiver(post_save, sender=Note)
+def auto_generate_tags_for_note(sender, instance, created, **kwargs):
+    """
+    当笔记被创建或更新时，自动从内容中提取关键词作为标签。
+    """
+    if not instance.content:
+        # 如果内容为空，则不处理
+        return
+
+    # 1. 从 HTML 内容中提取纯文本
+    soup = BeautifulSoup(instance.content, 'html.parser')
+    text = soup.get_text()
+
+    if len(text) < 20: # 内容太短，可能没有意义，不提取
+        return
+
+    # 2. 使用 jieba 的 TF-IDF 算法提取关键词
+    # topK=5 表示提取最重要的5个词
+    # withWeight=False 表示我们不需要权重，只需要关键词
+    # allowPOS=('n', 'nr', 'ns', 'nz', 'v') 表示只从名词、动词等词性中提取，过滤掉形容词、副词等
+    keywords = jieba.analyse.extract_tags(
+        text,
+        topK=5,
+        withWeight=False,
+        allowPOS=('n', 'nr', 'ns', 'nz', 'v')
+    )
+
+    if not keywords:
+        return
+
+    # 3. 更新笔记的标签
+    # 注意：这里需要暂时断开信号，防止无限循环
+    post_save.disconnect(auto_generate_tags_for_note, sender=Note)
+
+    # 清空旧标签
+    instance.tags.clear()
+
+    # 添加新标签
+    for keyword in keywords:
+        tag, _ = Tag.objects.get_or_create(name=keyword)
+        instance.tags.add(tag)
+
+    # 重新连接信号
+    post_save.connect(auto_generate_tags_for_note, sender=Note)
