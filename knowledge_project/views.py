@@ -4,7 +4,7 @@ from .utils.code import check_code
 from django.http import HttpResponse
 from io import BytesIO
 from django.contrib.auth.forms import AuthenticationForm
-import os
+from django.utils import timezone
 from django.urls import reverse
 import hashlib
 from .forms import CustomUserCreationForm
@@ -402,7 +402,10 @@ def note_detail_api(request, note_id):
     note = get_object_or_404(Note, pk=note_id)
     if not note.has_permission(request.user):
         return HttpResponseForbidden("您没有权限访问此笔记。")
-
+    # --- 统一进行时区转换 ---
+    # 使用 timezone.localtime 将数据库中的UTC时间转换为settings.py中定义的本地时间
+    local_updated_at = timezone.localtime(note.updated_at)
+    local_created_at = timezone.localtime(note.created_at)
     if request.method == 'GET':
         if request.GET.get('full_content') == 'true':
             data = {
@@ -411,7 +414,7 @@ def note_detail_api(request, note_id):
                 'content': note.content or "",
                 'is_public': note.is_public,
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-                'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+                'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
                 'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
                 'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
             }
@@ -426,9 +429,9 @@ def note_detail_api(request, note_id):
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
-            'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
+            'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
             'author': {'id': note.author.id, 'username': note.author.username},
-            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
             'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
             'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
             'pagination': {
@@ -454,6 +457,9 @@ def note_detail_api(request, note_id):
         note.save()
 
         cache.delete(get_sidebar_cache_key(request.user.id))
+        # --- 在PUT响应中也进行时区转换 ---
+        put_local_updated_at = timezone.localtime(note.updated_at)
+        put_local_created_at = timezone.localtime(note.created_at)
 
         paginated_content, total_pages = get_paginated_html(note.content, 1)
         updated_data = {
@@ -462,10 +468,10 @@ def note_detail_api(request, note_id):
             'content': paginated_content,
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': put_local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
             'last_modified_by': {'username': note.last_modified_by.username},
             'author': {'id': note.author.id, 'username': note.author.username},
-            'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
+            'created_at': put_local_created_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
             'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
             'pagination': {
                 'current_page': 1,

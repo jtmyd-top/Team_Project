@@ -73,11 +73,24 @@
             <div class="note-header">
                 <div class="note-title-meta">
                     <h1>[[ selectedNote.title ]]</h1>
-                    <div class="note-meta">
-                        <span v-if="selectedNote.project">项目: [[ selectedNote.project.title ]]</span>
-                        <span v-else>项目: 未分配</span>
-                        | <span>创建于: [[ selectedNote.created_at ]]</span>
-                    </div>
+            <div class="note-meta">
+                <span v-if="selectedNote.project">项目: [[ selectedNote.project.title ]]</span>
+                <span v-else>项目: 未分配</span>
+                | <span>创建于: [[ selectedNote.created_at ]]</span>
+                <span v-if="selectedNote.last_modified_by">
+                    | 最近修改: [[ selectedNote.updated_at ]]
+                </span>
+                <span v-if="selectedNote.last_modified_by">
+                    by: [[ selectedNote.last_modified_by.username ]]
+                </span>
+                 <!-- !!! 新增：显示标签 !!! -->
+                <div v-if="selectedNote.tags && selectedNote.tags.length > 0" class="note-tags">
+                    <i class="fas fa-tags"></i> <!-- 标签图标 -->
+                    <span v-for="tag in selectedNote.tags" :key="tag.id" class="tag-item">
+                        [[ tag.name ]]
+                    </span>
+                </div>
+            </div>
                 </div>
                 <div class="note-actions">
                     <button class="action-btn" @click="startEditing" title="编辑笔记" :disabled="isLoading"><i class="fas fa-pen"></i><span>编辑</span></button>
