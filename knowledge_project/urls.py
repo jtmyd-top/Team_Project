@@ -1,10 +1,10 @@
 # knowledge_project/urls.py
 from . import views
 from django.urls import path,re_path
-from .views import home, SignUpView
-from .views import home, SignUpView, knowledge_list,captcha_image,check_username,CustomLoginView
+from .views import  SignUpView
+from .views import SignUpView, knowledge_list,captcha_image,check_username,CustomLoginView
 urlpatterns = [
-    path('', home, name='home'),
+    path('', views.public_notes_list_view, name='home'),
     path('signup/', SignUpView.as_view(), name='signup'),
     path('knowledge/', knowledge_list, name='knowledge_list'),
     path('captcha/', captcha_image, name='captcha_image'),

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% load static %} {% block title %}公开笔记中心{% endblock %}
+
+{% block content %}
+<style>
+    /* 1. 页面背景和全局字体 */
+    body {
+        /* 使用您上传的图片作为背景 */
+        background-image: url("{% static 'img/白金极简纹理.jpg' %}"); /* <-- 请将图片路径修改正确 */
+        background-size: cover;
+        background-position: center center;
+        background-attachment: fixed;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    }
+
+     /* 2. 主要内容面板 */
+    .notes-main-panel {
+        max-width: 1200px;
+        margin: 4rem auto;
+        padding: 3rem;
+        background-color: rgba(255, 255, 255, 0.92);
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    @media (max-width: 768px) {
+        .notes-main-panel {
+            margin: 1rem;
+            padding: 1.5rem;
+        }
+    }
+
+    /* 3. 面板内的标题和描述 */
+    .panel-header h1 {
+        font-weight: 700;
+        color: #343a40;
+    }
+    .panel-header p {
+        color: #6c757d;
+        font-size: 1.1rem;
+    }
+
+    /* 4. 笔记卡片网格布局 */
+    .notes-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1.5rem;
+    }
+
+    /* 5. 单个笔记卡片的样式 */
+    .note-card {
+        display: flex;
+        flex-direction: column;
+        background-color: #ffffff;
+        border: none;
+        border-radius: 12px;
+        padding: 1.5rem;
+        text-decoration: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        opacity: 0;
+        transform: translateY(20px);
+        animation: fadeIn-up 0.5s ease forwards;
+    }
+
+    /* 为每个卡片设置不同的动画延迟，产生依次出现的效果 */
+    {% for i in "123456789" %}
+    .note-card:nth-child({{ i }}) {
+        /* 【关键修改】使用正确的语法生成延迟时间 */
+        animation-delay: 0.{{ i }}s;
+    }
+    {% endfor %}
+
+    .note-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    .note-card h5 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #212529;
+        margin-bottom: 0.75rem;
+    }
+
+    .note-card .content-spacer {
+        flex-grow: 1;
+    }
+
+    .note-card .meta-info {
+        font-size: 0.875rem;
+        color: #6c757d;
+        margin-top: 1rem;
+    }
+
+    @keyframes fadeIn-up {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
+
+<div class="notes-main-panel">
+    <div class="panel-header text-center mb-5">
+        <h1>公开笔记中心</h1>
+        <p>这里汇集了所有用户分享的知识与见解。</p>
+    </div>
+
+    <div class="notes-grid">
+        {% for note in public_notes %}
+            <a href="{% url 'public_note_view' public_id=note.public_id %}" class="note-card">
+                <h5 class="card-title">{{ note.title }}</h5>
+                <div class="meta-info">
+                    <span>
+                        作者:
+                        {% if note.author %}
+                            {{ note.author.username }}
+                        {% else %}
+                            匿名作者
+                        {% endif %}
+                    </span>
+                    <span class="float-end">
+                        更新于: {{ note.updated_at|date:"Y-m-d" }}
+                    </span>
+                </div>
+            </a>
+        {% empty %}
+            <div class="col-12">
+                <div class="alert alert-light text-center no-notes-alert" role="alert">
+                    目前还没有人分享笔记，敬请期待！
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

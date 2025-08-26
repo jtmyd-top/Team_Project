@@ -126,14 +126,7 @@
             页 [[ currentPage ]] / [[ totalPages ]]
         </span>
         <!-- 编辑模式：显示输入框 -->
-        <input v-else
-               ref="pageInputRef"
-               type="number"
-               class="page-input"
-               v-model="pageInputNumber"
-               @keyup.enter="goToPage"
-               @blur="goToPage"
-        />
+        <input v-else ref="pageInputRef" type="number" class="page-input" v-model="pageInputNumber"  @keyup.enter="goToPage" @blur="goToPage"/>
     </div>
 
     <!-- 下一页按钮 (保持不变) -->

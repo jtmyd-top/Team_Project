@@ -227,9 +227,7 @@ def captcha_image(request):
     # 返回 HTTP 响应，设置 content_type 为 image/png
     return HttpResponse(image_data, content_type='image/png')
 
-@login_required
-def home(request):
-    return render(request, 'home.html')
+
 
 # --- 视图：实时检查用户名是否存在 (新功能) ---
 def check_username(request):
@@ -736,3 +734,20 @@ def create_note_api(request):
     except Exception as e:
         logger.error(f"为用户 {user.id} 创建新笔记时出错: {e}", exc_info=True)
         return JsonResponse({'error': '创建笔记时发生内部错误'}, status=500)
+# 【新增】公开笔记列表视图
+def public_notes_list_view(request):
+    """
+    获取所有被设置为公开的笔记，并按最后更新时间排序。
+    这个视图不要求用户登录。
+    """
+    # 1. 从数据库查询所有 is_public=True 的笔记
+    # 2. 按 updated_at 降序排列，让最新的笔记显示在最前面
+    public_notes = Note.objects.filter(is_public=True).order_by('-updated_at')
+
+    # 3. 准备传递给模板的上下文数据
+    context = {
+        'public_notes': public_notes,
+    }
+
+    # 4. 渲染并返回 public_notes_list.html 模板
+    return render(request, 'public_notes_list.html', context)
