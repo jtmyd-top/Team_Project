@@ -1,4 +1,3 @@
-# Create your models here.
 # knowledge_project/models.py
 from bs4 import BeautifulSoup
 import jieba.analyse
@@ -11,9 +10,13 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.urls import reverse
 from django_ckeditor_5.fields import CKEditor5Field
-import bleach
-# 架构已重构：移除了 Team 和 TeamMembership 模型。
-# 权限和成员管理现在直接在 Project 层级进行。
+import nh3
+
+
+
+# 【架构重构】：移除了 Project 和 ProjectMembership 模型。
+# 笔记和资产现在直接与用户关联，不再通过项目进行组织。
+
 class Tag(models.Model):
     name = models.CharField(max_length=50, unique=True, verbose_name="标签名")
 
@@ -23,114 +26,26 @@ class Tag(models.Model):
     class Meta:
         verbose_name = "标签"
         verbose_name_plural = "标签"
-class Project(models.Model):
-    """
-    重构后的核心模型。每个项目都是一个独立的协作空间。
-    """
-    STATUS_CHOICES = [('planning', '计划中'), ('active', '进行中'), ('completed', '已完成')]
-    is_personal_inbox = models.BooleanField(default=False, verbose_name="是否为随手笔记")
-    title = models.CharField(max_length=200, verbose_name="项目标题")
-    description = models.TextField(blank=True, null=True, verbose_name="项目描述")
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='planning', verbose_name="状态")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
-    # 【新增】通过 ProjectMembership 将用户和项目关联起来
-    members = models.ManyToManyField(
-        User,
-        through='ProjectMembership',
-        related_name='projects',
-        verbose_name="项目成员"
-    )
-    # 【新增】用于区分普通项目和用户注册时创建的个人项目
-    is_personal_space = models.BooleanField(default=False, verbose_name="是否为个人空间")
 
-    def __str__(self):
-        return self.title
+# 【已移除】Project 模型被完全移除。
 
-    @property
-    def owner(self):
-        """提供一个便捷的方式来获取项目所有者"""
-        try:
-            # membership关系在ProjectMembership模型中定义
-            return self.memberships.get(role='owner').user
-        except ProjectMembership.DoesNotExist:
-            return None
-
-    class Meta:
-        verbose_name, verbose_name_plural = "项目", "项目"
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['created_at']),
-            models.Index(fields=['status']),
-            models.Index(fields=['is_personal_space']),
-        ]
-
-class ProjectMembership(models.Model):
-    """
-    【新增】项目成员关系模型，替代原有的 TeamMembership。
-    定义了用户在某个项目中的角色。
-    """
-    ROLE_CHOICES = [
-        ('owner', '所有者'),
-        ('admin', '管理员'),
-        ('editor', '编辑者'),
-        ('viewer', '查看者'),
-    ]
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="project_memberships", verbose_name="用户")
-    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="memberships", verbose_name="项目")
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='viewer', verbose_name="角色")
-    joined_at = models.DateTimeField(auto_now_add=True, verbose_name="加入时间")
-
-    def clean(self):
-        """
-        校验逻辑，确保每个项目有且仅有一个所有者。
-        """
-        super().clean()
-        # 规则1: 确保一个项目只有一个 'owner'
-        if self.role == 'owner':
-            if ProjectMembership.objects.filter(project=self.project, role='owner').exclude(pk=self.pk).exists():
-                raise ValidationError('一个项目只能有一个所有者。')
-
-        # 规则2: 防止唯一的 'owner' 被降级或删除 (在视图/序列化器中处理删除逻辑)
-        if self.pk: # 仅在更新现有记录时检查
-            original_instance = ProjectMembership.objects.get(pk=self.pk)
-            if original_instance.role == 'owner' and self.role != 'owner':
-                # 检查是否还有其他 owner
-                if not ProjectMembership.objects.filter(project=self.project, role='owner').exclude(pk=self.pk).exists():
-                    raise ValidationError('不能移除唯一的项目所有者。请在更改此角色之前，先将另一位成员设为所有者。')
-
-    def __str__(self):
-        return f"{self.user.username} is {self.get_role_display()} in {self.project.title}"
-
-    class Meta:
-        unique_together = ('user', 'project') # 确保一个用户在一个项目中只有一个角色
-        verbose_name, verbose_name_plural = "项目成员关系", "项目成员关系"
-        indexes = [
-            models.Index(fields=['user', 'project']),
-            models.Index(fields=['role']),
-        ]
+# 【已移除】ProjectMembership 模型被完全移除。
 
 class Note(models.Model):
     title = models.CharField(max_length=255, verbose_name="笔记标题")
     content = CKEditor5Field(verbose_name="笔记内容", null=True, blank=True, config_name='full')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notes', verbose_name="作者")
-    project = models.ForeignKey(
-        Project,
-        on_delete=models.CASCADE,
-        related_name='notes',
-        verbose_name="所属项目",
-        null=True,  # 允许数据库中该字段为NULL
-        blank=True  # 允许在表单中（如Django Admin）提交时该字段为空
-    )
 
-    # 【修改】created_at 保持不变
+    # 【已移除】移除了 project 字段
+    # project = models.ForeignKey(
+    #     Project,
+    #     on_delete=models.CASCADE,
+    #     ...
+    # )
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-
-    # 【新增】最后修改时间
     updated_at = models.DateTimeField(auto_now=True, verbose_name="最后修改时间")
-
-    # 【新增】最后修改者
     last_modified_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -142,48 +57,51 @@ class Note(models.Model):
     is_public = models.BooleanField(default=False, verbose_name="是否公开")
     public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     tags = models.ManyToManyField(Tag, blank=True, related_name='notes', verbose_name="标签")
-    # --- 👇👇👇 将下面的方法添加到这里 👇👇👇 ---
+
+    # --- 👇👇👇 【修改】简化权限检查逻辑 👇👇👇 ---
     def has_permission(self, user):
         """
         检查用户是否有权访问此笔记。
-        这个方法包含了视图中所需的权限检查逻辑。
+        由于没有了项目，权限规则简化为：只有笔记的作者有权访问。
         """
-        # 规则1: 如果笔记关联了项目，检查用户是否是该项目的成员。
-        # Project 模型中 'members' 字段的定义是 members = models.ManyToManyField(User, ...)
-        if self.project:
-            return self.project.members.filter(pk=user.pk).exists()
-
-        # 规则2: 如果笔记未关联任何项目（即 "随手记"），
-        # 那么只有笔记的作者有权访问。
+        # 公开笔记逻辑可以加在这里，但核心私有权限是作者本人
+        # if self.is_public:
+        #     return True
         return self.author == user
+
+    # --- 👆👆👆 修改结束 👆👆👆 ---
+
+    # --- 👇👇👇 用下面这个 save 方法替换掉您现有的 save 方法 👇👇👇 ---
     def save(self, *args, **kwargs):
-        # 定义允许的 HTML 标签
-        ALLOWED_TAGS = [
-            'p', 'b', 'i', 'u', 'strong', 'em', 'strike', 'a',
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-            'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
-            'br', 'hr', 'img', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
-            'span', 'div','section', 'article', 'header', 'footer', 'nav', 'aside', 'figure', 'figcaption', 'details', 'summary','hr'
-        ]
-        # 定义允许的属性，防止例如 onmouseover 等危险属性
-        ALLOWED_ATTRIBUTES = {
-            '*': ['class', 'style'], # 允许通用属性
-            'a': ['href', 'title', 'target'],
-            'img': ['src', 'alt', 'title', 'width', 'height'],
-        }
-
-        # 清理 content 字段
         if self.content:
-            self.content = bleach.clean(
+            # 我们将所有规则定义移到函数内部，确保它们是最新的
+            allowed_tags = {
+                'p', 'img', 'b', 'i', 'u', 'strong', 'em', 'strike', 'a', 'h1', 'h2', 'h3',
+                'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'br', 'hr',
+                'table', 'thead', 'tbody', 'tr', 'td', 'th', 'span', 'div', 'section',
+                'article', 'header', 'footer', 'nav', 'aside', 'figure', 'figcaption',
+                'details', 'summary'
+            }
+
+            allowed_attributes = {
+                'a': {'href', 'title', 'target'},
+                # 关键：我们明确列出所有需要的img属性
+                'img': {'alt', 'title', 'width', 'height', 'src'},
+                # 再次强调：为了安全，不建议使用 '*' 通配符允许 style
+                '*': {'class'},
+            }
+
+            # 使用 nh3.clean 进行清理
+            self.content = nh3.clean(
                 self.content,
-                tags=ALLOWED_TAGS,
-                attributes=ALLOWED_ATTRIBUTES,
-                strip=True  # strip=True 会移除所有不允许的标签，而不是转义
+                tags=allowed_tags,
+                attributes=allowed_attributes,
+                strip_comments=True,
+                # 最终确认的、最稳定的 URL 协议配置
+                url_schemes={'http', 'https', ''}
             )
+        super().save(*args, **kwargs)
 
-        super().save(*args, **kwargs) # 调用父类的 save 方法
-
-    # --- 👆👆👆 添加结束 👆👆👆 ---
     def __str__(self):
         return self.title
 
@@ -192,24 +110,15 @@ class Note(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['created_at']),
-            models.Index(fields=['project']),
-            models.Index(fields=['author']),  # 为新字段添加索引
+            # 【已移除】移除了 project 字段的索引
+            # models.Index(fields=['project']),
+            models.Index(fields=['author']),
         ]
 
 
-
 def user_directory_path(instance, filename):
-    """
-    动态生成文件上传路径。
-    文件将被上传到 MEDIA_ROOT/user_<id>/<filename> 格式的路径中。
-    例如: uploads/user_1/report.pdf
-    """
-    # 检查 Asset 实例是否有 uploader 关联
     if instance.uploader and instance.uploader.id:
-        # 使用 f-string 格式化路径，'user_' 前缀让文件夹用途更清晰
         return f'user_{instance.uploader.id}/{filename}'
-
-    # 提供一个备用路径，以防万一 uploader 没有被设置
     return f'unknown_user/{filename}'
 
 
@@ -217,21 +126,12 @@ class Asset(models.Model):
     ASSET_TYPE_CHOICES = [
         ('file', '普通文件'), ('image', '图片'), ('code', '代码片段'), ('doc', '文档'),
     ]
+    # 【已移除】移除了 project 字段
+    # project = models.ForeignKey(...)
 
-    project = models.ForeignKey(
-        'Project',
-        on_delete=models.CASCADE,
-        related_name="assets",
-        verbose_name="所属项目",
-        null=True,  # <--- 允许数据库中该字段为 NULL
-        blank=True  # <--- 允许在表单（如Admin后台）中不填此项
-    )
     uploader = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="uploaded_assets",
                                  verbose_name="上传者")
-
-    # 【修改点】在这里添加 blank=True，使其变为非必填字段
     name = models.CharField(max_length=255, verbose_name="文件名/资源名", blank=True)
-
     file = models.FileField(upload_to=user_directory_path, verbose_name="上传文件", null=True)
     asset_type = models.CharField(max_length=10, choices=ASSET_TYPE_CHOICES, default='file', verbose_name="资源类型")
     description = models.TextField(blank=True, verbose_name="描述")
@@ -239,20 +139,21 @@ class Asset(models.Model):
     image_hash = models.CharField(max_length=64, blank=True, db_index=True, verbose_name="文件哈希值")
 
     def get_protected_url(self):
-        """返回受保护的访问URL，而不是直接的文件URL"""
-        return reverse('protected_media_view', kwargs={'file_path': str(self.file)})
+        # --- 👇👇👇 这是强烈建议的修复 👇👇👇 ---
+        # 手动构建一个确定的、以斜杠开头的相对URL。
+        # 'protected_uploads/' 必须与您 urls.py 中的 re_path 路径前缀完全一致。
+        if self.file:
+            return f"/protected_uploads/{self.file.name}"
+        return ""
     def __str__(self):
-        # 如果name为空，就显示文件名，避免显示空白
         return self.name or self.file.name
 
     class Meta:
-        verbose_name = "项目资产"
-        verbose_name_plural = "项目资产"
+        verbose_name = "个人资产"  # 【修改】名称可以改得更贴切
+        verbose_name_plural = "个人资产"
         ordering = ['-uploaded_at']
-        # --- 【新增】唯一性约束 ---
-        # 确保同一个用户不会上传具有相同哈希值的文件
-        # 注意：这里我们假设 image_hash 不为空时才需要唯一。更复杂的约束可能需要在 save 方法中实现
         unique_together = ('uploader', 'image_hash')
+
 
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="关联用户")
@@ -268,72 +169,36 @@ class Profile(models.Model):
 
 
 # --- Django Signals ---
-
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
-    """当新用户创建时，自动为其创建 Profile。"""
     if created:
         Profile.objects.create(user=instance)
 
-@receiver(post_save, sender=User)
-def create_personal_project_for_new_user(sender, instance, created, **kwargs):
-    """
-    【新增信号】当新用户创建时，自动为其创建一个个人项目空间。
-    """
-    if created:
-        # 1. 创建个人项目
-        personal_project = Project.objects.create(
-            title=f"{instance.username}的个人空间",
-            description="这是您的个人项目空间，用于存放您的私人笔记和资产。",
-            is_personal_space=True
-        )
-        # 2. 将该用户设为项目的所有者
-        ProjectMembership.objects.create(
-            user=instance,
-            project=personal_project,
-            role='owner'
-        )
+
+# 【已移除】为新用户创建个人项目的信号处理器已被移除
+# @receiver(post_save, sender=User)
+# def create_personal_project_for_new_user(sender, instance, created, **kwargs):
+#     ...
+
 @receiver(post_save, sender=Note)
 def auto_generate_tags_for_note(sender, instance, created, **kwargs):
-    """
-    当笔记被创建或更新时，自动从内容中提取关键词作为标签。
-    """
     if not instance.content:
-        # 如果内容为空，则不处理
         return
-
-    # 1. 从 HTML 内容中提取纯文本
     soup = BeautifulSoup(instance.content, 'html.parser')
     text = soup.get_text()
-
-    if len(text) < 20: # 内容太短，可能没有意义，不提取
+    if len(text) < 20:
         return
-
-    # 2. 使用 jieba 的 TF-IDF 算法提取关键词
-    # topK=5 表示提取最重要的5个词
-    # withWeight=False 表示我们不需要权重，只需要关键词
-    # allowPOS=('n', 'nr', 'ns', 'nz', 'v') 表示只从名词、动词等词性中提取，过滤掉形容词、副词等
     keywords = jieba.analyse.extract_tags(
         text,
         topK=5,
         withWeight=False,
         allowPOS=('n', 'nr', 'ns', 'nz', 'v')
     )
-
     if not keywords:
         return
-
-    # 3. 更新笔记的标签
-    # 注意：这里需要暂时断开信号，防止无限循环
     post_save.disconnect(auto_generate_tags_for_note, sender=Note)
-
-    # 清空旧标签
     instance.tags.clear()
-
-    # 添加新标签
     for keyword in keywords:
         tag, _ = Tag.objects.get_or_create(name=keyword)
         instance.tags.add(tag)
-
-    # 重新连接信号
     post_save.connect(auto_generate_tags_for_note, sender=Note)

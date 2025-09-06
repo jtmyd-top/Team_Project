@@ -74,9 +74,7 @@
                 <div class="note-title-meta">
                     <h1>[[ selectedNote.title ]]</h1>
             <div class="note-meta">
-                <span v-if="selectedNote.project">项目: [[ selectedNote.project.title ]]</span>
-                <span v-else>项目: 未分配</span>
-                | <span>创建于: [[ selectedNote.created_at ]]</span>
+                <span>创建于: [[ selectedNote.created_at ]]</span>
                 <span v-if="selectedNote.last_modified_by">
                     | 最近修改: [[ selectedNote.updated_at ]]
                 </span>

@@ -24,7 +24,7 @@ from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
 from django.core.paginator import Paginator  # 添加这行导入
 from django.core.cache import cache
-from .models import Project, Note,Asset,Tag
+from .models import  Note,Asset ,Tag
 
 import hashlib
 
@@ -38,7 +38,7 @@ import os
 import uuid  # 确保导入 uuid
 from django.shortcuts import render, get_object_or_404
 import logging
-from .signals import get_sidebar_cache_key
+from .utilt import get_sidebar_cache_key
 from collections import deque
 # 导入 F 对象用于精细化内容切片
 import math # 导入 math 用于计算总页数
@@ -47,76 +47,64 @@ import math # 导入 math 用于计算总页数
 # 定义富文本分页函数
 # 定义富文本分页函数
 # --- 分页辅助函数 ---
+from bs4 import BeautifulSoup # 确保已导入
+
+# --- vvv 用下面的代码替换旧的 get_paginated_html 函数 vvv ---
+
 def get_paginated_html(html_content, page_number=1, chars_per_page=1500):
     """
-    递归遍历所有元素，确保不遗漏任何内容
+    【修正版】
+    通过处理顶级HTML块来进行分页，确保图片<img>等无文本标签不会丢失。
     """
-    if not html_content or len(html_content) < chars_per_page:
+    # 1. 处理特殊情况：如果没有内容，或者内容不足一页，直接返回
+    if not html_content or len(html_content) <= chars_per_page:
         return html_content, 1
 
+    # 2. 解析HTML
     soup = BeautifulSoup(html_content, 'html.parser')
 
-    def collect_content_blocks(element, blocks=None):
-        """递归收集所有内容块"""
-        if blocks is None:
-            blocks = []
-
-        # 如果是叶子节点或包含主要内容的节点
-        if not element.children or element.name in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'blockquote']:
-            if element.get_text(strip=True):  # 只添加有实际内容的元素
-                blocks.append(element)
-        else:
-            # 递归处理子元素
-            for child in element.children:
-                if hasattr(child, 'name') and child.name:
-                    collect_content_blocks(child, blocks)
-                elif isinstance(child, str) and child.strip():
-                    # 处理纯文本节点
-                    text_elem = soup.new_tag('p')
-                    text_elem.string = child.strip()
-                    blocks.append(text_elem)
-
-        return blocks
-
-    # 收集所有内容块
-    content_blocks = collect_content_blocks(soup)
+    # 3. 获取所有顶级的HTML块 (p, div, h1, img 等)
+    #    我们只处理标签，过滤掉标签之间的空白换行符等纯文本节点
+    content_blocks = [child for child in soup.children if hasattr(child, 'name')]
 
     if not content_blocks:
         return html_content, 1
 
-    # 分页逻辑
+    # 4. 基于这些顶级块进行分页
     pages = []
-    current_page_elements = []
+    current_page_blocks = []
     current_page_chars = 0
 
     for block in content_blocks:
+        # 将块转为字符串以计算其长度
         block_str = str(block)
-        block_chars = len(block_str)
+        block_len = len(block_str)
 
-        if current_page_chars + block_chars > chars_per_page and current_page_elements:
-            pages.append(current_page_elements)
-            current_page_elements = [block]
-            current_page_chars = block_chars
+        # 如果当前页有内容，并且加入新块会超长，则结束当前页
+        if current_page_blocks and (current_page_chars + block_len > chars_per_page):
+            pages.append("".join(map(str, current_page_blocks)))
+            # 开始一个新页面
+            current_page_blocks = [block]
+            current_page_chars = block_len
         else:
-            current_page_elements.append(block)
-            current_page_chars += block_chars
+            # 否则，将块加入当前页
+            current_page_blocks.append(block)
+            current_page_chars += block_len
 
-    if current_page_elements:
-        pages.append(current_page_elements)
+    # 5. 不要忘记添加最后一页
+    if current_page_blocks:
+        pages.append("".join(map(str, current_page_blocks)))
 
-    # 其余逻辑与前面相同...
-    total_pages = len(pages) if pages else 1
-
+    # 6. 安全地获取请求的页码
+    total_pages = len(pages)
     try:
         page_number = int(page_number)
         page_number = max(1, min(page_number, total_pages))
     except (ValueError, TypeError):
         page_number = 1
 
-    current_page_elements = pages[page_number - 1]
-    page_html = ''.join(str(elem) for elem in current_page_elements)
-
-    return page_html, total_pages
+    # 7. 返回对应页面的HTML和总页数
+    return pages[page_number - 1], total_pages
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -360,37 +348,28 @@ def public_note_view(request, public_id):  # <---【修正点 1】参数名从 n
 
 @login_required
 def knowledge_list(request):
+    """【核心修改】此视图现在只加载当前用户作为作者的笔记。"""
     user = request.user
-    sidebar_notes_key = f"sidebar_notes_user_{user.id}"
+    # 使用辅助函数生成缓存键 (函数本身无需修改)
+    sidebar_notes_key = get_sidebar_cache_key(user.id)
     sidebar_notes = cache.get(sidebar_notes_key)
 
     if sidebar_notes is None:
-        # 使用 Q 对象来构建更灵活的查询
-        user_projects = Project.objects.filter(members=user)
-        # 条件A: 笔记在用户的项目中
-        condition_in_project = Q(project__in=user_projects)
-        # 条件B: 笔记没有项目，但作者是当前用户
-        condition_no_project_own_by_user = Q(project__isnull=True, author=user)
-
+        # 【修改点】查询逻辑极大简化：只获取当前用户是作者的笔记
         sidebar_notes = list(
-            Note.objects.filter(
-                condition_in_project | condition_no_project_own_by_user
-            )
-            .order_by('-created_at')
+            Note.objects.filter(author=user)
+            .order_by('-updated_at') # 按更新时间排序更实用
             .values('id', 'title')
-            .distinct()  # 添加 distinct 以防止因JOIN产生重复
         )
-        cache.set(sidebar_notes_key, sidebar_notes, timeout=900)
+        # 缓存结果
+        cache.set(sidebar_notes_key, sidebar_notes, timeout=900) # 缓存15分钟
 
     initial_data = {
         'sidebar_notes': sidebar_notes,
         'has_notes': bool(sidebar_notes),
         'csrf_token': request.COOKIES.get('csrftoken')
     }
-    context = {
-               'initial_data': initial_data,
-               #'is_public_view': False
-               }
+    context = {'initial_data': initial_data}
     return render(request, 'knowledge_list.html', context)
 
 
@@ -426,7 +405,8 @@ def note_detail_api(request, note_id):
             'content': paginated_content,
             'is_public': note.is_public,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-            'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
+            # 【已移除】不再返回 project 信息
+            #'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
             'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
             'author': {'id': note.author.id, 'username': note.author.username},
             'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
@@ -493,22 +473,18 @@ def note_detail_api(request, note_id):
             logger .error(f"删除笔记 {note_id_for_log} 时发生错误: {e}", exc_info=True)
             return JsonResponse({'error': '删除过程中发生内部错误'}, status=500)
 
+
 @login_required
 def search_notes_api(request):
+    """【核心修改】搜索逻辑现在只在当前用户的笔记中进行。"""
     query = request.GET.get('q', '')
-    if not query: return JsonResponse([], safe=False)
+    if not query:
+        return JsonResponse([], safe=False)
 
     user = request.user
-    user_projects = Project.objects.filter(members=user)
-
-    # 复用已修正的查询逻辑
-    condition_in_project = Q(project__in=user_projects)
-    condition_no_project_own_by_user = Q(project__isnull=True, author=user)
+    # 【修改点】查询条件简化：标题或内容包含查询字符串，并且作者是当前用户
     search_condition = Q(title__icontains=query) | Q(content__icontains=query)
-
-    results = Note.objects.filter(
-        search_condition & (condition_in_project | condition_no_project_own_by_user)
-    ).order_by('-created_at').values('id', 'title').distinct()
+    results = Note.objects.filter(search_condition, author=user).order_by('-updated_at').values('id', 'title')
 
     return JsonResponse(list(results), safe=False)
 
@@ -520,18 +496,11 @@ def get_all_notes_api(request):
     all_notes = cache.get(sidebar_notes_key)
 
     if all_notes is None:
-        # 复用已修正的查询逻辑
-        user_projects = Project.objects.filter(members=user)
-        condition_in_project = Q(project__in=user_projects)
-        condition_no_project_own_by_user = Q(project__isnull=True, author=user)
-
+        # 【修改点】查询逻辑与 knowledge_list 视图保持一致
         all_notes = list(
-            Note.objects.filter(
-                condition_in_project | condition_no_project_own_by_user
-            )
-            .order_by('-created_at')
+            Note.objects.filter(author=user)
+            .order_by('-updated_at')
             .values('id', 'title')
-            .distinct()
         )
         cache.set(sidebar_notes_key, all_notes, timeout=900)
 
@@ -547,12 +516,13 @@ def calculate_file_hash(file):
     file.seek(0)
     return hasher.hexdigest()
 # --- 【新增】TinyMCE 图片上传视图 ---
+# 我提供的、已移除 Project 依赖的 views.py 中的函数
 @login_required
 @require_http_methods(["POST"])
 def image_upload_view(request):
     """
-    处理 TinyMCE 图片上传，并集成基于 Asset 模型的用户级去重功能。
-    【最终修复版】：采用“两阶段保存”策略，确保用户文件夹路径正确。
+    处理图片上传，并包含用户级去重功能。
+    此版本已移除对 Project 的依赖。
     """
     if 'file' not in request.FILES:
         return JsonResponse({'error': '没有找到上传的文件。'}, status=400)
@@ -560,86 +530,73 @@ def image_upload_view(request):
     image_file = request.FILES['file']
     current_user = request.user
 
-    # 1. 计算文件哈希值 (这部分逻辑不变)
+    # 1. 计算文件哈希值 (这部分逻辑与您原来的一样)
     try:
         file_hash = calculate_file_hash(image_file)
     except Exception as e:
         logger.error(f"为用户 {current_user.id} 计算哈希值时出错: {e}", exc_info=True)
         return JsonResponse({'error': '无法处理该文件。'}, status=500)
 
-    # 2. 检查当前用户是否有重复的图片 (这部分逻辑不变)
+    # --- 核心去重逻辑在这里，完全保留 ---
+    # 2. 检查当前用户是否已上传过相同内容的文件
     try:
+        # 这个查询与您原始代码中的查询完全相同！
         existing_asset = Asset.objects.filter(uploader=current_user, image_hash=file_hash).first()
-        if existing_asset and existing_asset.file:
-            logger.info(f"为用户 {current_user.id} 检测到重复图片。哈希: {file_hash[:10]}...")
-            # 【核心修改】直接返回 get_protected_url() 生成的相对路径
-            return JsonResponse({'location': existing_asset.get_protected_url()})
-    except Exception as e:
-         logger.error(f"查询重复图片时出错: {e}", exc_info=True)
 
-    # 3. 【采用两阶段保存】
+        # 如果找到了重复的文件，就直接返回现有文件的URL
+        if existing_asset and existing_asset.file:
+            logger.info(f"为用户 {current_user.id} 检测到重复图片。")
+            return JsonResponse({'location': existing_asset.get_protected_url()})
+
+    except Exception as e:
+        logger.error(f"查询重复图片时出错: {e}", exc_info=True)
+        # 即使查询出错，我们也可以继续尝试保存，而不是中断流程
+
+    # --- 如果不是重复文件，则执行保存逻辑 ---
+    # 3. 采用“两阶段保存”策略，保存新文件
     try:
-        # --- 阶段一：保存元数据 ---
-        # 创建一个不包含文件的实例，保存核心信息
+        # 创建一个不包含文件的实例
         new_asset = Asset(
             uploader=current_user,
-            project=None,
             asset_type='image',
             image_hash=file_hash,
             name=image_file.name
+            # 注意：project=None 已经不再需要，因为模型里没有这个字段了
         )
         new_asset.save()  # 第一次保存
 
-        # --- 阶段二：关联并保存文件 ---
-        # 此时 new_asset 是一个完整的、已存入数据库的对象
+        # 关联并保存文件
         new_asset.file = image_file
-        new_asset.save()  # 第二次保存，此时 user_directory_path 会被正确调用
+        new_asset.save()  # 第二次保存
 
-        logger.info(f"为用户 {current_user.id} 上传了新图片。路径: {new_asset.file.name}")
+        logger.info(f"为用户 {current_user.id} 上传了新图片。")
         return JsonResponse({'location': new_asset.get_protected_url()})
 
     except Exception as e:
         logger.error(f"为用户 {current_user.id} 保存新图片失败: {e}", exc_info=True)
-        # 如果出错，可以考虑删除第一阶段创建的空记录
+        # 清理可能产生的孤立记录
         if 'new_asset' in locals() and new_asset.pk:
             new_asset.delete()
         return JsonResponse({'error': '服务器保存文件时出错。'}, status=500)
 @login_required
 def protected_media_view(request, file_path):
-    """
-    一个受保护的文件访问视图。
-    检查用户是否有权访问请求的文件。
-    """
-    # 从文件路径反查 Asset 对象
-    # file_path 会是类似 '1/my_image.png' 的形式
+    """【核心修改】权限检查现在只验证上传者。"""
     try:
-        # 我们需要找到 file 字段内容与 file_path 匹配的 Asset
         asset = Asset.objects.get(file=file_path)
     except Asset.DoesNotExist:
         raise Http404
 
-    # --- 核心权限检查 ---
-    # 规则1：文件的上传者是当前用户
-    can_access = (asset.uploader == request.user)
-
-    # 规则2 (未来扩展)：如果文件关联了项目，检查当前用户是否是项目成员
-    if not can_access and asset.project:
-        can_access = asset.project.members.filter(pk=request.user.pk).exists()
-
-    if not can_access:
-        # 如果用户无权访问，可以返回403 Forbidden或404 Not Found
+    # 【修改点】权限检查逻辑简化，移除了对项目的检查
+    # 只有文件的上传者才能访问
+    if asset.uploader != request.user:
         return HttpResponseForbidden("您无权访问此文件。")
 
-    # 如果有权限，则从文件系统读取文件并返回
-    # 注意：在生产环境中，这个任务最好交给 Nginx 的 X-Accel-Redirect 或类似机制，效率更高
+    # 文件服务逻辑保持不变
     file_full_path = os.path.join(settings.MEDIA_ROOT, file_path)
     try:
         with open(file_full_path, 'rb') as f:
             content_type, _ = mimetypes.guess_type(file_full_path)
-            response = HttpResponse(f.read(), content_type=content_type or 'application/octet-stream')
-            # 可选：让浏览器直接下载而不是预览
-            # response['Content-Disposition'] = f'attachment; filename="{asset.name}"'
-            return response
+            return HttpResponse(f.read(), content_type=content_type or 'application/octet-stream')
     except FileNotFoundError:
         raise Http404
 

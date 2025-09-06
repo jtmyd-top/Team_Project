@@ -6,4 +6,4 @@ class KnowledgeProjectConfig(AppConfig):
 
     def ready(self):
         # 在这里导入您的信号模块
-        import knowledge_project.signals
+        pass

@@ -12,4 +12,5 @@ media/
 uploads/
 .env
 .gitignore
+auto_xianyu/*
 knowledge_project/static/ckeditor5

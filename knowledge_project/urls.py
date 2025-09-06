@@ -10,7 +10,7 @@ urlpatterns = [
     path('captcha/', captcha_image, name='captcha_image'),
     # 【任务二】新增：为实时用户名检查提供API端点
     path('check-username/', check_username, name='check_username'),
-    path('signup/', SignUpView.as_view(), name='signup'),
+
     path('send-email-code/', views.SendEmailCodeView.as_view(), name='send_email_code'),
     path('login/', CustomLoginView.as_view(), name='login'),
     path('api/notes/search/', views.search_notes_api, name='api_search_notes'),
@@ -20,8 +20,7 @@ urlpatterns = [
     path('notes/public/<uuid:public_id>/', views.public_note_view, name='public_note_view'),
     # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
     path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),
-    re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
-# --- 【新增】图片上传的 API 路由 ---
+    # --- 【新增】图片上传的 API 路由 ---
     path('api/upload/image/', views.image_upload_view, name='image_upload_view'),
     re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
 
