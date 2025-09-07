@@ -23,6 +23,7 @@ urlpatterns = [
     # --- 【新增】图片上传的 API 路由 ---
     path('api/upload/image/', views.image_upload_view, name='image_upload_view'),
     re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
+    path('api/public-notes/', views.public_notes_api, name='public_notes_api'),
 
 ]
 

@@ -318,23 +318,19 @@ class SignUpView(View):
 
 # knowledge_project/views.py (public_note_view 部分)
 
-def public_note_view(request, public_id):  # <---【修正点 1】参数名从 note_id 改为 public_id
+def public_note_view(request, public_id):
     try:
-        # 使用正确的参数名 public_id 进行查询
-        note = Note.objects.get(public_id=public_id, is_public=True)  # <---【修正点 2】使用新的参数名查询
-
-        # 准备传递给模板的上下文数据
+        note = Note.objects.get(public_id=public_id, is_public=True)
         context = {
             'note_data': {
                 'id': note.id,
+                'public_id': str(note.public_id), # <--- 【新增】将 public_id 加入数据
                 'title': note.title,
                 'author': {'username': note.author.username if note.author else '匿名作者'},
-                'created_at': note.created_at.strftime('%Y-%m-%d %H:%M')  # 格式化时间
+                'created_at': note.created_at.strftime('%Y-%m-%d %H:%M')
             },
-            # 关键：一次性将完整内容传递给前端
             'full_content_data': note.content or "",
         }
-        # 【模板名称修正】确保您使用的模板是 public_note_page.html
         return render(request, 'public_note_view.html', context)
 
     except Note.DoesNotExist:
@@ -678,7 +674,7 @@ def create_note_api(request):
             author=user,
             title="无标题笔记",
             content="",
-            project=None  # 明确设置为 None，不关联项目
+
         )
 
         # 清除侧边栏缓存
@@ -692,19 +688,37 @@ def create_note_api(request):
         logger.error(f"为用户 {user.id} 创建新笔记时出错: {e}", exc_info=True)
         return JsonResponse({'error': '创建笔记时发生内部错误'}, status=500)
 # 【新增】公开笔记列表视图
+def public_notes_api(request):
+    """
+    一次性返回所有公开笔记的核心数据，用于前端动态渲染。
+    """
+    notes_qs = Note.objects.filter(is_public=True).order_by('-updated_at').select_related('author').prefetch_related(
+        'tags')
+
+    notes_data = []
+    for note in notes_qs:
+        # 使用BeautifulSoup安全地提取纯文本摘要
+        soup = BeautifulSoup(note.content or "", 'html.parser')
+        excerpt = soup.get_text()[:150] + '...'  # 截取前150个字符作为摘要
+
+        notes_data.append({
+            'id': note.id,
+            'title': note.title,
+            'public_url': f"/notes/public/{note.public_id}/",
+            'author': note.author.username if note.author else "匿名作者",
+            'updated_at': note.updated_at.strftime("%Y年%m月%d日"),
+            'excerpt': excerpt,
+            'tags': [tag.name for tag in note.tags.all()]  # 【新增】获取并添加标签列表
+        })
+
+    return JsonResponse(notes_data, safe=False)
+
+
+# 【修改】简化原有的 public_notes_list_view
 def public_notes_list_view(request):
     """
-    获取所有被设置为公开的笔记，并按最后更新时间排序。
-    这个视图不要求用户登录。
+    【修正版】
+    此视图现在只负责渲染承载Vue应用的HTML空壳，所有数据由JS通过API加载。
     """
-    # 1. 从数据库查询所有 is_public=True 的笔记
-    # 2. 按 updated_at 降序排列，让最新的笔记显示在最前面
-    public_notes = Note.objects.filter(is_public=True).order_by('-updated_at')
-
-    # 3. 准备传递给模板的上下文数据
-    context = {
-        'public_notes': public_notes,
-    }
-
-    # 4. 渲染并返回 public_notes_list.html 模板
-    return render(request, 'public_notes_list.html', context)
+    # 不再需要进行分页或查询数据，直接渲染模板
+    return render(request, 'public_notes_list.html')

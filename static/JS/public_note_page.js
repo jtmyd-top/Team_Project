@@ -1,14 +1,9 @@
-// static/JS/public_note_page.js
+// static/JS/public_note_page.js (最终完整版)
 
-const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
 
-// --- 全局常量配置 ---
-// 每页的字符数
+// 每页的字符数 (可以根据需要调整)
 const CHARS_PER_PAGE = 2000;
-// 当单页内容超过多少字符时，启用三列布局
-const COLUMN_LAYOUT_THRESHOLD = 1500;
-// 分成几列
-const COLUMN_COUNT = 3;
 
 createApp({
     delimiters: ['[[', ']]'],
@@ -21,16 +16,16 @@ createApp({
         const currentPage = ref(1);
         const totalPages = ref(1);
 
+        // 【新增】用于存储上一篇和下一篇文章信息的状态
+        const previousNote = ref(null);
+        const nextNote = ref(null);
+
         const isEditingPageNumber = ref(false);
         const pageInputNumber = ref(1);
         const pageInputRef = ref(null);
 
-        // 用于控制布局的状态
-        const useColumnLayout = ref(false);
-
         // --- 数据初始化 ---
         onMounted(() => {
-            // Helper function to safely parse JSON from script tags
             const getJsonData = (id) => {
                 const el = document.getElementById(id);
                 if (el && el.textContent) return JSON.parse(el.textContent);
@@ -47,29 +42,45 @@ createApp({
             }
 
             if (noteData && typeof contentData === 'string') {
-                note.value = {
-                    title: noteData.title,
-                    author: noteData.author,
-                    createdAt: noteData.created_at,
-                };
+                note.value = noteData; // 直接使用整个 noteData 对象
                 fullContent.value = contentData;
 
-                // 计算总页数
                 const totalLength = fullContent.value.length;
                 totalPages.value = totalLength > 0 ? Math.ceil(totalLength / CHARS_PER_PAGE) : 1;
 
-                // 【核心修复】从URL读取初始页码
                 const urlParams = new URLSearchParams(window.location.search);
                 let pageFromUrl = parseInt(urlParams.get('page'), 10);
-
-                // 验证URL页码的有效性
-                if (isNaN(pageFromUrl) || pageFromUrl < 1) {
+                if (isNaN(pageFromUrl) || pageFromUrl < 1 || pageFromUrl > totalPages.value) {
                     pageFromUrl = 1;
                 }
-                if (pageFromUrl > totalPages.value) {
-                    pageFromUrl = totalPages.value;
-                }
                 currentPage.value = pageFromUrl;
+
+                // --- vvv 【核心新增逻辑】 vvv ---
+                // 读取 sessionStorage 中由列表页存入的导航数据
+                const navListString = sessionStorage.getItem('noteNavigationList');
+                if (navListString) {
+                    try {
+                        const navList = JSON.parse(navListString);
+                        // 根据 public_id 找到当前笔记在列表中的位置
+                        const currentIndex = navList.findIndex(item => item.public_id === note.value.public_id);
+
+                        if (currentIndex !== -1) {
+                            // 如果当前笔记不是第一篇，则设置 "上一章"
+                            if (currentIndex > 0) {
+                                previousNote.value = navList[currentIndex - 1];
+                            }
+                            // 如果当前笔记不是最后一篇，则设置 "下一章"
+                            if (currentIndex < navList.length - 1) {
+                                nextNote.value = navList[currentIndex + 1];
+                            }
+                        }
+                    } catch (e) {
+                        console.error("无法解析导航列表:", e);
+                        // 清理可能已损坏的数据
+                        sessionStorage.removeItem('noteNavigationList');
+                    }
+                }
+                // --- ^^^ 【核心新增逻辑结束】 ^^^ ---
 
             } else {
                 message.value = '无法加载笔记数据，或数据格式不正确。';
@@ -77,8 +88,6 @@ createApp({
         });
 
         // --- 计算属性 ---
-
-        // 1. 计算出当前页应该显示的【原始内容】
         const currentPageContent = computed(() => {
             if (!note.value) return '';
             const start = (currentPage.value - 1) * CHARS_PER_PAGE;
@@ -86,39 +95,7 @@ createApp({
             return fullContent.value.substring(start, end);
         });
 
-        // 2. 【新增】根据当前页内容，计算出三列的【分列内容】
-        const columnContents = computed(() => {
-            if (!useColumnLayout.value) return [];
-
-            const content = currentPageContent.value;
-            const pageLength = content.length;
-            const columnLength = Math.ceil(pageLength / COLUMN_COUNT);
-            const columns = [];
-
-            for (let i = 0; i < COLUMN_COUNT; i++) {
-                const start = i * columnLength;
-                const end = start + columnLength;
-                columns.push(content.substring(start, end));
-            }
-            return columns;
-        });
-
-
-        // --- 监听器 ---
-
-        // 【新增】监听`currentPageContent`的变化，自动决定是否启用三列布局
-        watch(currentPageContent, (newContent) => {
-            if (newContent.length > COLUMN_LAYOUT_THRESHOLD) {
-                useColumnLayout.value = true;
-            } else {
-                useColumnLayout.value = false;
-            }
-        }, { immediate: true }); // immediate: true 保证初始化时也执行一次
-
-
         // --- 方法 ---
-
-        // 更新浏览器URL（无刷新）
         const updateUrl = (newPage) => {
             const url = new URL(window.location.href);
             url.searchParams.set('page', newPage);
@@ -128,6 +105,8 @@ createApp({
         const changePage = (newPage) => {
             if (newPage >= 1 && newPage <= totalPages.value) {
                 currentPage.value = newPage;
+                const contentContainer = document.querySelector('.main-content-scrollable') || document.querySelector('.content-container');
+                contentContainer?.scrollTo(0, 0);
                 updateUrl(newPage);
             }
         };
@@ -155,8 +134,8 @@ createApp({
             currentPage,
             totalPages,
             currentPageContent,
-            useColumnLayout,
-            columnContents,
+            previousNote, // <-- 暴露给模板
+            nextNote,     // <-- 暴露给模板
             prevPage,
             nextPage,
             isEditingPageNumber,

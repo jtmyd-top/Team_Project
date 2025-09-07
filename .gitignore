@@ -12,5 +12,7 @@ media/
 uploads/
 .env
 .gitignore
+test.py
+xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5

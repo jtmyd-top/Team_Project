@@ -1,143 +1,206 @@
 {% extends "base.html" %}
-{% load static %} {% block title %}公开笔记中心{% endblock %}
+{% load static %}
+{% block title %}文章分享{% endblock %}
+
+{% block head_extra %}
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+{% endblock %}
 
 {% block content %}
 <style>
-    /* 1. 页面背景和全局字体 */
+    /* 1. 全局背景和基础设置 */
     body {
-        /* 使用您上传的图片作为背景 */
-        background-image: url("{% static 'img/白金极简纹理.jpg' %}"); /* <-- 请将图片路径修改正确 */
+        background-image: url("{% static 'img/白金极简纹理.jpg' %}");
         background-size: cover;
         background-position: center center;
         background-attachment: fixed;
+        /* 移除body的overflow，让滚动在内部容器发生 */
+        overflow: hidden;
+    }
+
+    /* 2. Vue应用根容器，采用Flex布局实现全屏 */
+    #public-notes-app {
+        display: flex;
+        flex-direction: column;
+        /* 高度计算：100vh是整个视窗高度，减去顶部导航栏的高度 (请根据您导航栏的实际高度调整) */
+        height: calc(100vh - 60px);
+        width: 100%;
+        max-width: 1200px; /* 内容最大宽度 */
+        margin: 0 auto;
+        padding: 1rem 2rem;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
     }
 
-     /* 2. 主要内容面板 */
-    .notes-main-panel {
-        max-width: 1200px;
-        margin: 4rem auto;
-        padding: 3rem;
-        background-color: rgba(255, 255, 255, 0.92);
-        border-radius: 16px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+    /* 3. 页面头部 */
+    .container-header {
+        flex-shrink: 0; /* 头部高度固定，不压缩 */
+        padding-bottom: 1rem;
+        text-align: center;
     }
+    .container-header h1 { font-size: 2rem; font-weight: 600; color: #333; }
+    .container-header p { font-size: 1rem; color: #666; }
+    /* --- vvv 新增样式 vvv --- */
+    /* 4. 【新增】搜索框区域样式 */
+    .search-bar-wrapper {
+        flex-shrink: 0;
+        margin-bottom: 2rem;
+        position: relative;
+    }
+    .search-input {
+        width: 100%;
+        padding: 12px 20px 12px 40px; /* 左侧留出图标空间 */
+        border: 1px solid #ddd;
+        border-radius: 25px; /* 圆角胶囊形状 */
+        font-size: 1rem;
+        transition: box-shadow 0.2s ease;
+    }
+    .search-input:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+        border-color: #80bdff;
+    }
+    .search-icon {
+        position: absolute;
+        left: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #aaa;
+    }
+    /* --- ^^^ 新增样式结束 ^^^ --- */
+    /* 4. 文章列表容器 (核心：占据剩余所有空间并可滚动) */
+    .notes-list-container {
+        flex-grow: 1; /* 占据所有剩余垂直空间 */
+        overflow-y: auto; /* 内容溢出时显示滚动条 */
+        padding: 0 10px; /* 为滚动条和内容留出一些边距 */
 
-    @media (max-width: 768px) {
-        .notes-main-panel {
-            margin: 1rem;
-            padding: 1.5rem;
-        }
-    }
-
-    /* 3. 面板内的标题和描述 */
-    .panel-header h1 {
-        font-weight: 700;
-        color: #343a40;
-    }
-    .panel-header p {
-        color: #6c757d;
-        font-size: 1.1rem;
-    }
-
-    /* 4. 笔记卡片网格布局 */
-    .notes-grid {
+        /* 网格布局 */
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: repeat(2, 1fr); /* 默认两列 */
+        gap: 1.5rem; /* 卡片间距 */
+        align-content: start; /* 让内容从顶部开始排列 */
     }
 
-    /* 5. 单个笔记卡片的样式 */
-    .note-card {
-        display: flex;
-        flex-direction: column;
-        background-color: #ffffff;
-        border: none;
-        border-radius: 12px;
+    /* 5. 响应式设计：在窄屏幕上恢复单列布局 */
+    @media (max-width: 768px) {
+        .notes-list-container {
+            grid-template-columns: 1fr; /* 在手机等设备上，变回一列 */
+        }
+        #public-notes-app {
+            padding: 1rem;
+        }
+    }
+
+    /* 6. 单篇文章卡片样式 */
+    .blog-post {
+        background-color: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(0,0,0,0.05);
+        border-radius: 8px;
         padding: 1.5rem;
-        text-decoration: none;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        opacity: 0;
-        transform: translateY(20px);
-        animation: fadeIn-up 0.5s ease forwards;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.07);
+        display: flex;
+        flex-direction: column; /* 内部flex布局，用于对齐 "阅读全文" */
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+     .blog-post:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
     }
 
-    /* 为每个卡片设置不同的动画延迟，产生依次出现的效果 */
-    {% for i in "123456789" %}
-    .note-card:nth-child({{ i }}) {
-        /* 【关键修改】使用正确的语法生成延迟时间 */
-        animation-delay: 0.{{ i }}s;
-    }
-    {% endfor %}
+    .post-content-wrapper { flex-grow: 1; } /* 让此部分占据所有可用空间 */
 
-    .note-card:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.1);
-    }
+    .blog-post-title a { font-size: 1.3rem; font-weight: 600; text-decoration: none; color: #212529; }
+    .post-meta { font-size: 0.8rem; color: #6c757d; margin: 0.25rem 0 1rem 0; }
+    .post-excerpt { font-size: 0.9rem; color: #495057; line-height: 1.6; }
 
-    .note-card h5 {
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: #212529;
-        margin-bottom: 0.75rem;
-    }
-
-    .note-card .content-spacer {
-        flex-grow: 1;
+    /* 7. 标签样式 */
+    .post-tags { margin-top: 1rem; }
+    .tag-item {
+        display: inline-block;
+        background-color: #e9ecef;
+        color: #495057;
+        font-size: 0.75rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 12px;
+        margin-right: 0.5rem;
+        margin-bottom: 0.5rem;
     }
 
-    .note-card .meta-info {
-        font-size: 0.875rem;
-        color: #6c757d;
-        margin-top: 1rem;
+    .read-more-btn {
+        margin-top: 1rem; /* 与上方内容隔开 */
+        font-size: 0.9rem; font-weight: 500; color: #007bff; text-decoration: none;
     }
 
-    @keyframes fadeIn-up {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
+    /* 8. 分页控件 */
+    .pagination-controls {
+        flex-shrink: 0; /* 分页控件高度固定 */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 1.5rem 0 1rem 0;
     }
+    .page-info { margin: 0 1.5rem; font-size: 0.9rem; color: #555; }
+    .pagination-btn {
+        background: #fff; border: 1px solid #ccc; border-radius: 50%; width: 36px; height: 36px;
+        cursor: pointer; transition: all 0.2s ease;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .pagination-btn:not(:disabled):hover { background-color: rgba(0,0,0,0.05); }
+
 </style>
 
-<div class="notes-main-panel">
-    <div class="panel-header text-center mb-5">
-        <h1>公开笔记中心</h1>
-        <p>这里汇集了所有用户分享的知识与见解。</p>
+<div id="public-notes-app" v-cloak>
+    <div class="container-header">
+        <h1>文章分享</h1>
+        <p>探索、学习、成长。记录每一次的思考与发现。</p>
     </div>
 
-    <div class="notes-grid">
-        {% for note in public_notes %}
-            <a href="{% url 'public_note_view' public_id=note.public_id %}" class="note-card">
-                <h5 class="card-title">{{ note.title }}</h5>
-                <div class="meta-info">
-                    <span>
-                        作者:
-                        {% if note.author %}
-                            {{ note.author.username }}
-                        {% else %}
-                            匿名作者
-                        {% endif %}
-                    </span>
-                    <span class="float-end">
-                        更新于: {{ note.updated_at|date:"Y-m-d" }}
-                    </span>
+    <div class="search-bar-wrapper">
+        <i class="fas fa-search search-icon"></i>
+        <input type="text" class="search-input" placeholder="搜索标题、摘要或标签..." v-model="searchQuery">
+    </div>
+
+    <div class="notes-list-container" ref="containerRef">
+        <div v-if="isLoading" class="text-center p-5">正在加载...</div>
+
+        <div v-if="!isLoading && paginatedNotes.length === 0" class="text-center p-5" style="grid-column: 1 / -1;">
+            <p>没有找到与 "[[ searchQuery ]]" 相关的笔记。</p>
+        </div>
+
+        <article v-for="note in paginatedNotes" :key="note.id" class="blog-post">
+            <div class="post-content-wrapper">
+                <h2 class="blog-post-title">
+                    <a :href="note.public_url">[[ note.title ]]</a>
+                </h2>
+                <div class="post-meta">
+                    <span>作者: <strong>[[ note.author ]]</strong></span>&nbsp;&middot;&nbsp;
+                    <span>更新于: [[ note.updated_at ]]</span>
                 </div>
-            </a>
-        {% empty %}
-            <div class="col-12">
-                <div class="alert alert-light text-center no-notes-alert" role="alert">
-                    目前还没有人分享笔记，敬请期待！
+                <div class="post-excerpt">
+                    <p>[[ note.excerpt ]]</p>
+                </div>
+                <div v-if="note.tags && note.tags.length > 0" class="post-tags">
+                    <span v-for="tag in note.tags" :key="tag" class="tag-item">[[ tag ]]</span>
                 </div>
             </div>
-        {% endfor %}
+            <a :href="note.public_url" @click.prevent="navigateToNote(note)" class="read-more-btn">阅读全文 &rarr;</a>
+        </article>
+    </div>
+
+    <div v-if="!isLoading && filteredNotes.length > 0" class="pagination-controls">
+        <button @click="prevPage" :disabled="currentPage === 1" class="pagination-btn">
+            <i class="fas fa-chevron-left"></i>
+        </button>
+        <div class="page-info">第 [[ currentPage ]] / [[ totalPages ]] 页</div>
+        <button @click="nextPage" :disabled="currentPage === totalPages" class="pagination-btn">
+            <i class="fas fa-chevron-right"></i>
+        </button>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="{% static 'JS/public_notes_list.js'%}"></script>
 {% endblock %}
