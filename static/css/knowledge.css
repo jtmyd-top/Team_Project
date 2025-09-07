@@ -1,4 +1,5 @@
 /* --- 通用布局样式 --- */
+
 .knowledge-root {
   background: rgba(255, 255, 255, 0.70);
   box-sizing: border-box;
@@ -41,7 +42,7 @@
 }
 
 .sidebar.collapsed ~ .main-content {
-  margin-left: 80px;
+  #margin-left: 80px;
 }
 
 /* --- 编辑模式 (Edit Mode) 的样式调整 --- */
@@ -339,7 +340,10 @@
   transition: background 0.18s, color 0.18s;
   white-space: nowrap;
 }
-
+.sidebar-content {
+    overflow: auto;
+    width: 100%;
+}
 .notes-nav-list li a:hover,
 .notes-nav-list li.active a {
   background: linear-gradient(90deg, #e0e9ff, #dbeafe 90%);

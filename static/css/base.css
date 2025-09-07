@@ -1,73 +1,197 @@
- html, body {
-        height: 100%;
-        margin: 0;
-        font-family: sans-serif;
-        background-color: #f4f7f6;
-    }
+/* 全局样式 */
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  background-color: #f4f7f6;
+  background-image: url("../img/白金极简纹理.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  display: flex;
+  flex-direction: column;
+}
 
-    body {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        font-size: 1rem;
-        line-height: 1.6;
-        background-image: url("../img/白金极简纹理.jpg");
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        background-attachment: fixed;
-    }
+header {
+  flex-shrink: 0;
+  min-width: 100%;
+}
 
-    header {
-        flex-shrink: 0;
-        min-width: 100%;
-    }
+main {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
-    main {
-        flex-grow: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
+nav {
+  border-bottom: 1px solid rgba(0,0,0,.1);
+  padding: .5em 1em;
+  box-shadow: 0 2px 4px rgba(0,0,0,.05);
+  background-color: rgba(255,255,255,.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* 未登录时 nav-right 不存在，左侧自然靠左 */
+}
 
-    nav {
-        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-        padding: 0.5em 1em;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        background-color: rgba(255, 255, 255, 0.1);
-    }
+.nav-left, .nav-right {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
 
-    nav a {
-        margin-right: 1em;
-        text-decoration: none;
-        color: #333;
-        font-weight: 600;
-        transition: color 0.3s ease;
-    }
+nav a {
+  text-decoration: none;
+  color: #333;
+  font-weight: 600;
+  transition: color .3s;
+}
+nav a:hover { color: #007BFF; }
 
-    nav a:hover {
-        color: #007BFF;
-    }
+/* 用户菜单 */
+.user-menu {
+  position: relative;
+  display: inline-block;
+}
 
-    .user-info {
-        display: flex;
-        align-items: center;
-        gap: 1em;
-    }
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
 
-    .username {
-        color: #555;
-    }
+.user-menu-trigger:hover {
+  background-color: #f0f0f0;
+}
 
-    .logout-button {
-        background-color: transparent;
-        border: 1px solid #ccc;
-        padding: 0.3em 0.7em;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.2s ease-in-out;
-    }
+.user-menu-trigger span {
+  margin: 0 6px;
+  font-weight: 500;
+  color: #333;
+}
 
-    .logout-button:hover {
-        background-color: #eee;
-    }
+.user-menu-trigger .fa-chevron-down {
+  font-size: 0.8em;
+  margin-left: 4px;
+  transition: transform 0.3s ease;
+}
+
+.user-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 240px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+  border: 1px solid #eee;
+  display: none;
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.user-card.show {
+  display: block;
+  animation: fadeIn 0.2s ease;
+}
+
+/* 卡片头部 */
+.user-card-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f9f9f9;
+}
+
+.user-avatar {
+  width: 45px;
+  height: 45px;
+  border-radius: 50%;
+  margin-right: 12px;
+  object-fit: cover;
+}
+
+.user-info-dropdown {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-info-dropdown .username {
+  font-weight: 600;
+  color: #333;
+}
+
+.user-info-dropdown .email {
+  font-size: 0.85em;
+  color: #777;
+}
+
+/* 菜单项 */
+.user-card-menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.user-card-menu li a,
+.logout-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #333;
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.user-card-menu li a:hover,
+.logout-btn:hover {
+  background-color: #f5f7fa;
+  color: #007bff;
+}
+
+.user-card-menu li i {
+  width: 18px;
+  margin-right: 10px;
+  text-align: center;
+  color: #555;
+}
+
+.user-card-menu .divider {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 6px 0;
+}
+
+/* 退出按钮特殊样式 */
+.logout-btn {
+  font-weight: 500;
+  border-top: 1px solid #eee;
+  border-radius: 0;
+  text-align: left;
+}
+
+.logout-btn:hover {
+  background-color: #ffecec;
+  color: #d9534f;
+}
+
+.logout-btn i {
+  color: #d9534f;
+}
+
+/* 动画 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}

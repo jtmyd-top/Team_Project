@@ -25,9 +25,11 @@ import json # <--- 确保在文件顶部导入了 json 模块
 from django.core.paginator import Paginator  # 添加这行导入
 from django.core.cache import cache
 from .models import  Note,Asset ,Tag
-
+from django.shortcuts import render, redirect
+from django.contrib import messages
+import subprocess
 import hashlib
-
+from utils.avatars import save_user_avatar
 from django.conf import settings
 from django.http import JsonResponse, HttpResponseForbidden, Http404, HttpResponse
 from django.contrib.auth.decorators import login_required
@@ -39,6 +41,7 @@ import uuid  # 确保导入 uuid
 from django.shortcuts import render, get_object_or_404
 import logging
 from .utilt import get_sidebar_cache_key
+from django.core.files.base import ContentFile
 from collections import deque
 # 导入 F 对象用于精细化内容切片
 import math # 导入 math 用于计算总页数
@@ -51,7 +54,7 @@ from bs4 import BeautifulSoup # 确保已导入
 
 # --- vvv 用下面的代码替换旧的 get_paginated_html 函数 vvv ---
 
-def get_paginated_html(html_content, page_number=1, chars_per_page=1500):
+def get_paginated_html(html_content, page_number=1, chars_per_page=500):
     """
     【修正版】
     通过处理顶级HTML块来进行分页，确保图片<img>等无文本标签不会丢失。
@@ -284,11 +287,9 @@ class SignUpView(View):
 
         # 1. 验证邮箱验证码 (这部分逻辑保持不变)
         verification_info = request.session.get('registration_verification')
-        if not verification_info or verification_info.get('email') != email or verification_info.get(
-                'code') != email_code:
+        if not verification_info or verification_info.get('email') != email or verification_info.get('code') != email_code:
             # 返回一个更结构化的错误，方便前端处理
-            return JsonResponse({'status': 'error', 'errors': {'emailCode': [{'message': '邮箱验证码错误或已过期'}]}},
-                                status=400)
+            return JsonResponse({'status': 'error', 'errors': {'emailCode': [{'message': '邮箱验证码错误或已过期'}]}},status=400)
 
         # 2. 使用表单验证其他所有数据 (用户名、密码、邮箱格式、邮箱是否唯一)
         if form.is_valid():
@@ -298,6 +299,10 @@ class SignUpView(View):
             user.is_active = True
             user.save()
 
+            avatar_path = save_user_avatar(user.email, user.username)
+            if avatar_path and os.path.exists(avatar_path):
+                with open(avatar_path, "rb") as f:
+                    user.profile.avatar.save(os.path.basename(avatar_path), ContentFile(f.read()), save=True)
             # 清理 session
             del request.session['registration_verification']
 
@@ -722,3 +727,5 @@ def public_notes_list_view(request):
     """
     # 不再需要进行分页或查询数据，直接渲染模板
     return render(request, 'public_notes_list.html')
+
+

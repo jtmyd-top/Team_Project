@@ -12,7 +12,7 @@
 
      <link href="{% static 'css/base.css' %}" rel="stylesheet">
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
     <!-- 2. CKEditor 5 核心和 Vue 组件 -->
 
@@ -21,34 +21,102 @@
     <script src="{% static 'fontawesome-free-6.7.2/js/all.js' %}"></script>
 
     {% block head_extra %}{% endblock %}
+
 </head>
 <body>
     <header>
-        <nav>
-            <a href="{% url 'home' %}">首页</a>
-            {% if user.is_authenticated %}
-                <a href="{% url 'knowledge_list' %}">知识笔记</a>
+          <nav>
+              <div class="nav-left">
+                <a href="{% url 'home' %}">首页</a>
 
-                <span style="float: right;">
-                    <div class="user-info">
-                        <span class="username">你好, {{ user.username }}!</span>
-                        <form action="{% url 'logout' %}" method="post">
-                            {% csrf_token %}
-                            <button type="submit" class="logout-button">退出登录</button>
-                        </form>
+                {% if user.is_authenticated %}
+                  <a href="{% url 'knowledge_list' %}">知识笔记</a>
+                {% else %}
+                  <a href="{% url 'login' %}">登录</a>
+                  <a href="{% url 'signup' %}">注册</a>
+                {% endif %}
+              </div>
+
+              {% if user.is_authenticated %}
+              <div class="nav-right">
+                <div class="user-menu" id="userMenu">
+                  <div class="user-menu-trigger" id="userMenuTrigger">
+                    <i class="fas fa-user-circle"></i>
+                    <span>{{ user.username }}</span>
+                    <i class="fas fa-chevron-down"></i>
+                  </div>
+
+                  <div class="user-card" id="userDropdown">
+                    <div class="user-card-header">
+                      <img src="{{ user.profile.avatar.url|default:'/static/images/default-avatar.png' }}" alt="头像">
+                      <div class="user-info-dropdown">
+                        <span class="username">{{ user.username }}</span>
+                        <span class="email">已登录</span>
+                      </div>
                     </div>
-                </span>
-            {% else %}
-                <a href="{% url 'login' %}">登录</a>
-                <a href="{% url 'signup' %}">注册</a>
-            {% endif %}
-        </nav>
+                    <ul class="user-card-menu">
+                      <li><a href="#"><i class="fas fa-cog"></i> 设置</a></li>
+                      <li class="divider"></li>
+                      <li>
+                        <form id="logoutForm" action="{% url 'logout' %}" method="post">
+                          {% csrf_token %}
+                          <button type="submit" class="logout-btn">
+                            <i class="fas fa-sign-out-alt"></i> 退出登录
+                          </button>
+                        </form>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+            </nav>
     </header>
 
+        <script>
+document.addEventListener("DOMContentLoaded", function() {
+  const userMenu  = document.getElementById("userMenu");      // 外层容器（包含触发器+卡片）
+  const trigger   = document.getElementById("userMenuTrigger");// 触发器：用户名
+  const dropdown  = document.getElementById("userDropdown");   // 下拉卡片
+  let hideTimer   = null;
+
+  function openMenu() {
+    clearTimeout(hideTimer);
+    dropdown.classList.add("show");
+    trigger.setAttribute("aria-expanded", "true");
+  }
+  function closeMenu(immediate=false) {
+    const doClose = () => {
+      dropdown.classList.remove("show");
+      trigger.setAttribute("aria-expanded", "false");
+    };
+    if (immediate) { clearTimeout(hideTimer); doClose(); }
+    else { hideTimer = setTimeout(doClose, 180); } // 缓关 180ms
+  }
+
+  // 悬浮整块容器即可保持展开（从触发器移到卡片不会关）
+  userMenu.addEventListener("mouseenter", openMenu);
+  userMenu.addEventListener("mouseleave", () => closeMenu(false));
+
+  // 点击触发开关（支持触控）
+  trigger.addEventListener("click", function(e) {
+    e.stopPropagation();
+    if (dropdown.classList.contains("show")) closeMenu(true);
+    else openMenu();
+  });
+
+  // 点击页面其他区域立即关闭
+  document.addEventListener("click", function(e) {
+    if (!userMenu.contains(e.target)) closeMenu(true);
+  });
+
+  // 防止在卡片内点按钮/表单造成冒泡误关
+  dropdown.addEventListener("click", function(e) { e.stopPropagation(); });
+});
+</script>
+
     <main>
-        {% block content %}
-        <!-- 子模板的内容将在这里被居中显示 -->
-        {% endblock %}
+        {% block content %}{% endblock %}
 
 
 
@@ -61,7 +129,8 @@
     <script src="{% static 'fontawesome-free-6.7.2/js/all.js' %}"></script>
 
     <!-- 4. 为子模板预留一个可以插入自己脚本的位置 -->
-    {% block scripts %}{% endblock %}
+    {% block scripts %} {% endblock %}
+
     </main>
 
 </body>

@@ -28,6 +28,7 @@
             flex-direction: column;
             height: calc(100vh - 60px); /* 减去您顶部导航栏的高度 */
             width: 100%;
+            overflow: auto; /* 允许内部滚动 */
         }
 
         /* 3. 顶部导航区 */
@@ -58,7 +59,7 @@
         .detail-layout-container {
             display: flex;
             flex-grow: 1; /* 占据所有剩余空间 */
-            overflow: hidden; /* 防止子元素溢出 */
+            overflow: auto; /* 防止子元素溢出 */
         }
 
         /* 5. 左右两侧导航 */
@@ -99,8 +100,8 @@
         .main-content-scrollable {
             flex: 0 0 70%; /* 占据固定70%的宽度 */
             max-width: 900px; /* 但最大不超过900px */
-            height: 100%;
-            overflow-y: auto; /* 核心：让这个区域独立滚动 */
+            height: 100vh;
+            overflow: auto; /* 核心：让这个区域独立滚动 */
             background-color: rgba(255, 255, 255, 0.9);
             backdrop-filter: blur(10px);
             border-left: 1px solid #eee;

@@ -72,6 +72,10 @@ DATABASES = {
         'HOST': os.getenv('mysql_ip'),
         'PORT': os.getenv('mysql_port'),
         'OPTIONS': {'init_command': "SET sql_mode='STRICT_TRANS_TABLES'"},
+        'OPTIONS': {
+                    # This line is critical!
+                    'charset': 'utf8mb4',
+                },
     }
 }
 
