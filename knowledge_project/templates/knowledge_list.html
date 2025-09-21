@@ -66,94 +66,118 @@
 
     <!-- 主内容区域 -->
     <main class="main-content">
-        <div v-if="isLoading" class="loading-spinner" style="margin:auto;text-align:center;"><i class="fas fa-spinner fa-spin"></i> 正在加载...</div>
-
-        <!-- 预览模式 -->
-        <div v-else-if="selectedNote && !isEditing" class="note-preview">
-            <div class="note-header">
-                <div class="note-title-meta">
-                    <h1>[[ selectedNote.title ]]</h1>
-            <div class="note-meta">
-                <span>创建于: [[ selectedNote.created_at ]]</span>
-                <span v-if="selectedNote.last_modified_by">
-                    | 最近修改: [[ selectedNote.updated_at ]]
-                </span>
-                <span v-if="selectedNote.last_modified_by">
-                    by: [[ selectedNote.last_modified_by.username ]]
-                </span>
-                 <!-- !!! 新增：显示标签 !!! -->
-                <div v-if="selectedNote.tags && selectedNote.tags.length > 0" class="note-tags">
-                    <i class="fas fa-tags"></i> <!-- 标签图标 -->
-                    <span v-for="tag in selectedNote.tags" :key="tag.id" class="tag-item">
-                        [[ tag.name ]]
-                    </span>
-                </div>
-            </div>
-                </div>
-                <div class="note-actions">
-                    <button class="action-btn" @click="startEditing" title="编辑笔记" :disabled="isLoading"><i class="fas fa-pen"></i><span>编辑</span></button>
-                    <label :disabled="isLoading" class="action-btn share-toggle-label" :class="{ 'is-public': selectedNote.is_public }" title="设为公开或私密">
-                        <input type="checkbox" class="share-toggle-checkbox" v-model="selectedNote.is_public" @change="updateNote(false)">
-                        <i :class="selectedNote.is_public ? 'fas fa-lock-open' : 'fas fa-share-alt'"></i>
-                        <span>[[ selectedNote.is_public ? '已公开' : '分享' ]]</span>
-                    </label>
-                    <button v-if="selectedNote.is_public" class="action-btn" @click="copyPublicUrl" title="复制公开链接">
-                         <i :class="copyStatus === 'copied' ? 'fas fa-check' : 'fas fa-copy'"></i>
-                         <span>[[ copyStatus === 'copied' ? '已复制!' : '复制链接' ]]</span>
-                    </button>
-                     <!-- 【新增】删除按钮 -->
-                    <button class="action-btn btn-danger" @click="deleteNote" title="删除笔记" :disabled="isLoading">
-                        <i class="fas fa-trash-alt"></i><span>删除</span>
-                    </button>
-                </div>
-        </div>
-        <div class="note-content" v-html="selectedNote.content"></div>
-
-            <!-- 找到这个 div 并用下面的代码块替换它 -->
-            <div v-if="totalPages > 1" class="pagination-controls">
-                <!-- 上一页按钮 (保持不变) -->
-                <button @click="prevPage" :disabled="currentPage === 1" class="action-btn" style="margin-right: 10px;">
-                    <i class="fas fa-chevron-left"></i>
-                    <span>上一页</span>
-                </button>
-
-    <!-- !!! 关键修改：可编辑的页码区域 !!! -->
-    <div class="page-selector">
-        <!-- 预览模式：显示页码，点击可进入编辑 -->
-        <span v-if="!isEditingPageNumber" @click="editPageNumber" title="点击输入页码" class="page-display">
-            页 [[ currentPage ]] / [[ totalPages ]]
-        </span>
-        <!-- 编辑模式：显示输入框 -->
-        <input v-else ref="pageInputRef" type="number" class="page-input" v-model="pageInputNumber"  @keyup.enter="goToPage" @blur="goToPage"/>
+    <!-- 加载状态 -->
+    <div v-if="isLoading" class="loading-spinner" style="margin:auto;text-align:center;">
+        <i class="fas fa-spinner fa-spin fa-2x"></i>
+        <p style="margin-top: 10px;">正在加载您的笔记，请稍候...</p>
     </div>
 
-    <!-- 下一页按钮 (保持不变) -->
-    <button @click="nextPage" :disabled="currentPage === totalPages" class="action-btn" style="margin-left: 10px;">
-        <span>下一页</span>
-        <i class="fas fa-chevron-right"></i>
-    </button>
-</div></div>
+    <!-- 没有任何笔记时显示 -->
+    <div v-else-if="sidebarNotes.length === 0" class="empty-state">
+        <div class="empty-illustration">
+            <i class="fas fa-book-open fa-5x" style="color:#ccc;"></i>
+        </div>
+        <h2>还没有任何笔记</h2>
+        <p>点击左上角 <strong>“新建笔记”</strong> 来记录你的第一篇灵感吧！</p>
+    </div>
 
-         <!-- 编辑模式 -->
-        <div v-else-if="selectedNote && isEditing" class="edit-mode">
-            <div class="edit-header">
-                <input type="text" v-model="selectedNote.title" placeholder="请输入笔记标题...">
-                <div class="edit-actions">
-                    <button @click="cancelEditing" class="btn-cancel">取消</button>
-                    <button @click="updateNote(true)" class="btn-save">保存更改</button>
-                    <!-- 【新增】编辑模式下的删除按钮 -->
-                    <button @click="deleteNote" class="action-btn btn-danger btn-danger">删除笔记</button>
+    <!-- 预览模式 -->
+    <div v-else-if="selectedNote && selectedNote.id && !isEditing" class="note-preview">
+        <div class="note-header">
+            <div class="note-title-meta">
+                <h1>[[ selectedNote.title ]]</h1>
+
+                <!-- 如果有内容/元信息，显示详情 -->
+                <div v-if="selectedNote.content || selectedNote.created_at" class="note-meta">
+                    <span>创建于: [[ selectedNote.created_at ]]</span>
+                    <span v-if="selectedNote.last_modified_by">
+                        | 最近修改: [[ selectedNote.updated_at ]]
+                    </span>
+                    <span v-if="selectedNote.last_modified_by">
+                        by: [[ selectedNote.last_modified_by.username ]]
+                    </span>
+
+                    <!-- 标签显示 -->
+                    <div v-if="selectedNote.tags && selectedNote.tags.length > 0" class="note-tags">
+                        <i class="fas fa-tags"></i>
+                        <span v-for="tag in selectedNote.tags" :key="tag.id" class="tag-item">
+                            [[ tag.name ]]
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 没有内容时给出温馨提示 -->
+                <div v-else class="note-meta-empty">
+                    <i class="fas fa-info-circle"></i> 这篇笔记还没有内容，点击右上角“编辑”开始书写吧！
                 </div>
             </div>
-            <textarea id="editor" ref="editorElRef"></textarea>
+
+            <div class="note-actions">
+                <button class="action-btn" @click="startEditing" title="编辑笔记" :disabled="isLoading">
+                    <i class="fas fa-pen"></i><span>编辑</span>
+                </button>
+                <label :disabled="isLoading" class="action-btn share-toggle-label"
+                       :class="{ 'is-public': selectedNote.is_public }" title="设为公开或私密">
+                    <input type="checkbox" class="share-toggle-checkbox"
+                           v-model="selectedNote.is_public" @change="updateNote(false)">
+                    <i :class="selectedNote.is_public ? 'fas fa-lock-open' : 'fas fa-share-alt'"></i>
+                    <span>[[ selectedNote.is_public ? '已公开' : '分享' ]]</span>
+                </label>
+                <button v-if="selectedNote.is_public" class="action-btn" @click="copyPublicUrl">
+                     <i :class="copyStatus === 'copied' ? 'fas fa-check' : 'fas fa-copy'"></i>
+                     <span>[[ copyStatus === 'copied' ? '已复制!' : '复制链接' ]]</span>
+                </button>
+                <button class="action-btn btn-danger" @click="deleteNote" :disabled="isLoading">
+                    <i class="fas fa-trash-alt"></i><span>删除</span>
+                </button>
+            </div>
         </div>
 
-        <!-- 默认空状态 -->
-        <div v-else class="empty-state">
-          <h2>选择一篇笔记开始阅读</h2>
-          <p>或者，点击左上角的“新建笔记”来记录新的灵感。</p>
+        <!-- 笔记内容 -->
+        <div class="note-content" v-html="selectedNote.content"></div>
+
+        <!-- 分页控制 -->
+        <div v-if="totalPages > 1" class="pagination-controls">
+            <button @click="prevPage" :disabled="currentPage === 1" class="action-btn" style="margin-right: 10px;">
+                <i class="fas fa-chevron-left"></i>
+                <span>上一页</span>
+            </button>
+
+            <div class="page-selector">
+                <span v-if="!isEditingPageNumber" @click="editPageNumber" title="点击输入页码" class="page-display">
+                    页 [[ currentPage ]] / [[ totalPages ]]
+                </span>
+                <input v-else ref="pageInputRef" type="number" class="page-input"
+                       v-model="pageInputNumber" @keyup.enter="goToPage" @blur="goToPage"/>
+            </div>
+
+            <button @click="nextPage" :disabled="currentPage === totalPages" class="action-btn" style="margin-left: 10px;">
+                <span>下一页</span>
+                <i class="fas fa-chevron-right"></i>
+            </button>
         </div>
-       </main>
+    </div>
+
+    <!-- 编辑模式 -->
+    <div v-else-if="selectedNote && isEditing" class="edit-mode">
+        <div class="edit-header">
+            <input type="text" v-model="selectedNote.title" placeholder="请输入笔记标题...">
+            <div class="edit-actions">
+                <button @click="cancelEditing" class="btn-cancel">取消</button>
+                <button @click="updateNote(true)" class="btn-save">保存更改</button>
+                <button @click="deleteNote" class="action-btn btn-danger btn-danger">删除笔记</button>
+            </div>
+        </div>
+        <textarea id="editor" ref="editorElRef"></textarea>
+    </div>
+
+    <!-- 默认空状态（有笔记但未选择） -->
+    <div v-else class="empty-state">
+        <h2>选择一篇笔记开始阅读</h2>
+        <p>或者，点击左上角的“新建笔记”来记录新的灵感。</p>
+    </div>
+</main>
+
 </div>
 
 

@@ -23,6 +23,7 @@ createApp({
     const initialHasNotes = ref(initialData.has_notes || false);
     const csrfToken = initialData.csrf_token || '';
     const selectedNoteId = ref(null);
+    const notes = ref([]);// 新增一个 notes 数组来存储提示信息
     const selectedNote = ref({ // 确保这里有完整的初始值
       id: null,
       title: '',
@@ -60,6 +61,7 @@ createApp({
     const iconClass = computed(() => isSidebarCollapsed.value ? 'fas fa-chevron-right' : 'fas fa-chevron-left');
 
     // --- 辅助函数 ---
+    const hasNotes = computed(() => sidebarNotes.value.length > 0);
     const setupInactivityTimer = () => {
       let inactivityTimer;
       const timeoutDuration = 3 * 60 * 60 * 1000;
@@ -271,6 +273,15 @@ createApp({
     };
 
     const cancelEditing = async () => {
+      // 检查编辑器内容是否有变化
+      const currentContent = editorInstance ? editorInstance.getContent() : fullNoteContentForEditing.value;
+      const hasUnsavedChanges = currentContent !== fullNoteContentForEditing.value;
+
+      if (hasUnsavedChanges) {
+        const confirmed = await showConfirm('您有未保存的更改，确定要放弃吗？');
+        if (!confirmed) return;  // 用户点了取消，就不退出编辑
+      }
+
       isEditing.value = false;
       destroyEditor();
     };
@@ -366,11 +377,20 @@ createApp({
     const openNewNoteEditor = async () => {
       if (isEditing.value) {
         const confirmed = await showConfirm('您正在编辑一篇笔记。要放弃当前更改并创建新笔记吗？');
-        if (!confirmed) { return; }
+        if (!confirmed) return;
+
+        // ✅ 在这里就把编辑状态清掉，避免 selectNote 再次弹窗
+        isEditing.value = false;
+        destroyEditor();
+        fullNoteContentForEditing.value = "";
       }
+
       isLoading.value = true;
       try {
-        const response = await fetch('/api/notes/create/', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken } });
+        const response = await fetch('/api/notes/create/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken }
+        });
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(errorData.error || '创建笔记失败');
@@ -380,7 +400,8 @@ createApp({
         initialHasNotes.value = true;
 
         await selectNote(newNote.id, 1);
-        isEditing.value = true; // 切换到编辑模式
+        fullNoteContentForEditing.value = "";
+        isEditing.value = true;
 
         showToast('新笔记已创建！', 'success');
       } catch (error) {
@@ -428,7 +449,7 @@ createApp({
       currentPage, totalPages, iconClass, toggleSidebar, selectNote, updateNote,
       startEditing, cancelEditing, prevPage, nextPage, isEditingPageNumber,
       pageInputNumber, pageInputRef, editPageNumber, goToPage,
-      searchNotes, editorElRef, handleSearchClickWhenCollapsed,
+      searchNotes, editorElRef, handleSearchClickWhenCollapsed,notes,hasNotes,
       openNewNoteEditor, deleteNote,
       copyPublicUrl: () => {
         if (!selectedNote.value?.public_url) return;

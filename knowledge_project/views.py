@@ -14,7 +14,7 @@ from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views import View
 from django.contrib.auth.models import User
-from django.conf import settings
+from .models import auto_generate_tags_for_note
 from django.core.mail import send_mail
 import random
 import string
@@ -29,7 +29,7 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 import subprocess
 import hashlib
-from utils.avatars import save_user_avatar
+from .utils.avatars import save_user_avatar
 from django.conf import settings
 from django.http import JsonResponse, HttpResponseForbidden, Http404, HttpResponse
 from django.contrib.auth.decorators import login_required
@@ -134,12 +134,12 @@ class SendEmailCodeView(View):
 
         # 3. 检查小时限制 (1小时内最多3次)
         hourly_attempts = cache.get(hourly_key, 0)
-        if hourly_attempts >= 3:
+        if hourly_attempts >= 30:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         # 4. 检查天限制 (24小时内最多5次)
         daily_attempts = cache.get(daily_key, 0)
-        if daily_attempts >= 5:
+        if daily_attempts >= 50:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         # --- 通过所有限制，继续执行原有逻辑 ---
@@ -299,10 +299,12 @@ class SignUpView(View):
             user.is_active = True
             user.save()
 
-            avatar_path = save_user_avatar(user.email, user.username)
+            avatar_path, avatar_source = save_user_avatar(user.email, user.username)
             if avatar_path and os.path.exists(avatar_path):
                 with open(avatar_path, "rb") as f:
-                    user.profile.avatar.save(os.path.basename(avatar_path), ContentFile(f.read()), save=True)
+                    user.profile.avatar.save(os.path.basename(avatar_path), ContentFile(f.read()), save=False)
+                    user.profile.avatar_source = avatar_source
+                    user.profile.save(update_fields=["avatar", "avatar_source"])
             # 清理 session
             del request.session['registration_verification']
 
@@ -434,7 +436,9 @@ def note_detail_api(request, note_id):
         if note.is_public and not note.public_id:
             note.public_id = uuid.uuid4()
         note.save()
+        if note.content and len(BeautifulSoup(note.content, 'html.parser').get_text()) > 20:
 
+            auto_generate_tags_for_note(Note, note, created=True)
         cache.delete(get_sidebar_cache_key(request.user.id))
         # --- 在PUT响应中也进行时区转换 ---
         put_local_updated_at = timezone.localtime(note.updated_at)

@@ -5,5 +5,4 @@ class KnowledgeProjectConfig(AppConfig):
     name = 'knowledge_project'
 
     def ready(self):
-        # 在这里导入您的信号模块
-        pass
+        import knowledge_project.models  # 确保 models.py 被导入

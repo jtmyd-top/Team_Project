@@ -1,3 +1,5 @@
+import random as pyrandom
+
 from bs4 import BeautifulSoup
 import jieba.analyse
 from django.db import models
@@ -12,7 +14,7 @@ import hashlib, io, re, requests, colorsys
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
-
+from io import BytesIO
 # ---------------- 标签 ----------------
 class Tag(models.Model):
     name = models.CharField(max_length=50, unique=True, verbose_name="标签名")
@@ -135,6 +137,14 @@ class Profile(models.Model):
     def __str__(self):
         return f'{self.user.username} Profile'
 
+    @property
+    def avatar_url(self):
+        if self.avatar:
+            try:
+                return self.avatar.url
+            except ValueError:
+                pass
+        return "/static/img/default-avatar.png"
     class Meta:
         verbose_name = "用户资料"
         verbose_name_plural = "用户资料"
@@ -185,22 +195,27 @@ def fetch_avatar(user):
         user.profile.avatar_source = source
         user.profile.save(update_fields=["avatar", "avatar_source"])
 
-def generate_initial_avatar(key, size=256):
-    # 随机纯色背景 + 首字母
-    h = (int(hashlib.sha1(key.encode()).hexdigest(), 16) % 360) / 360
-    r, g, b = colorsys.hsv_to_rgb(h, 0.5, 0.9)
-    img = Image.new("RGB", (size, size), (int(r*255), int(g*255), int(b*255)))
+from io import BytesIO
+
+def generate_initial_avatar(text, size=128):
+    img = Image.new("RGB", (size, size),
+                    (pyrandom.randint(64, 192),
+                     pyrandom.randint(64, 192),
+                     pyrandom.randint(64, 192)))
     draw = ImageDraw.Draw(img)
-    ch = key[0].upper() if key else "U"
-    try:
-        font_path = getattr(settings, "AVATAR_FONT_PATH", "")
-        font = ImageFont.truetype(font_path or "arial.ttf", int(size * 0.44))
-    except Exception:
-        font = ImageFont.load_default()
-    tw, th = draw.textsize(ch, font=font)
-    draw.text(((size - tw) // 2, (size - th) // 2), ch, fill=(255, 255, 255), font=font)
-    buf = io.BytesIO(); img.save(buf, format="PNG")
-    return buf.getvalue()
+    font_path = os.path.join(settings.BASE_DIR, "knowledge_project", "utils", "kumo.ttf")
+    font = ImageFont.truetype(font_path, size // 2)
+
+    ch = text[0].upper() if text else "?"
+    bbox = draw.textbbox((0, 0), ch, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((size - tw) / 2, (size - th) / 2), ch, font=font, fill=(255, 255, 255))
+
+    # 返回字节流而不是 Image 对象，避免 ContentFile 出错
+    from io import BytesIO
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 # ---------------- Signals ----------------

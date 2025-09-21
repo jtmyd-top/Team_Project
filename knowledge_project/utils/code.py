@@ -1,9 +1,10 @@
 import random
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageTransform
 from io import BytesIO
+import os
 
-
-font_path = r"D:\Team Project\Team_Project\knowledge_project\static\utils\kumo.ttf"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+font_path = os.path.join(BASE_DIR, "kumo.ttf")
 
 
 def check_code(width=120, height=30, char_length=5, font_file=font_path, font_size=28):
