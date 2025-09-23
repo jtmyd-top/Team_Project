@@ -19,6 +19,9 @@ from django.core.mail import send_mail
 import random
 import string
 import time
+import re
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
 from bs4 import BeautifulSoup, Tag,NavigableString
 from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
@@ -45,7 +48,11 @@ from django.core.files.base import ContentFile
 from collections import deque
 # 导入 F 对象用于精细化内容切片
 import math # 导入 math 用于计算总页数
-
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from django.contrib.auth.hashers import check_password
 
 # 定义富文本分页函数
 # 定义富文本分页函数
@@ -53,7 +60,7 @@ import math # 导入 math 用于计算总页数
 from bs4 import BeautifulSoup # 确保已导入
 
 # --- vvv 用下面的代码替换旧的 get_paginated_html 函数 vvv ---
-
+USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
 def get_paginated_html(html_content, page_number=1, chars_per_page=500):
     """
     【修正版】
@@ -117,57 +124,101 @@ class CustomUserCreationForm(UserCreationForm):
         model = User
         fields = UserCreationForm.Meta.fields + ('email',)
 logger = logging.getLogger(__name__)
+def _check_email_availability(request, email: str, *, exclude_self: bool = False):
+    """
+    统一的邮箱可用性检查逻辑（供多个视图共用）
+    - 返回 dict: {'ok': True/False, 'reason': 'invalid'/'taken'/'ok', 'message': str}
+    - exclude_self=True 时，会排除当前登录用户（用于“修改邮箱”场景）
+    """
+    email = (email or "").strip()
+    if not email:
+        return {'ok': False, 'reason': 'invalid', 'message': '邮箱不能为空'}
 
+    try:
+        validate_email(email)
+    except ValidationError:
+        return {'ok': False, 'reason': 'invalid', 'message': '邮箱格式不正确'}
+
+    qs = User.objects.filter(email__iexact=email)
+    # if exclude_self and request.user.is_authenticated:
+    #     qs = qs.exclude(pk=request.user.pk)
+
+    if qs.exists():
+        return {'ok': False, 'reason': 'taken', 'message': '该邮箱已被绑定'}
+    return {'ok': True, 'reason': 'ok', 'message': ''}
 class SendEmailCodeView(View):
     """
-    验证图片验证码，成功后再发送邮箱验证码。
-    【包含小时和天级别的IP发送限制】
+    验证图片验证码 -> 发送邮箱验证码
+    兼容两种业务：
+    - 注册: purpose='register'（默认）
+    - 修改邮箱: purpose='change'
     """
-
     def post(self, request, *args, **kwargs):
-        # 1. 识别客户端IP
+        # 1) 识别客户端 IP，用于限流
         ip_address = request.META.get('REMOTE_ADDR')
-
-        # 2. 定义不同时间窗口的缓存键
         hourly_key = f"email_attempts_hourly_{ip_address}"
-        daily_key = f"email_attempts_daily_{ip_address}"
+        daily_key  = f"email_attempts_daily_{ip_address}"
 
-        # 3. 检查小时限制 (1小时内最多3次)
+        # 2) 限流（维持你现有阈值）
         hourly_attempts = cache.get(hourly_key, 0)
         if hourly_attempts >= 30:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
-        # 4. 检查天限制 (24小时内最多5次)
         daily_attempts = cache.get(daily_key, 0)
         if daily_attempts >= 50:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
-        # --- 通过所有限制，继续执行原有逻辑 ---
-
+        # 3) 解析参数
         try:
             data = json.loads(request.body)
-            email = data.get('email')
-            image_captcha_code = data.get('image_captcha_code', '').upper()
         except json.JSONDecodeError:
             return JsonResponse({'status': 'error', 'message': '请求格式错误'}, status=400)
 
-        # 验证图片验证码
-        session_code = request.session.get('captcha_code', '').upper()
+        email = (data.get('email') or '').strip()
+        image_captcha_code = (data.get('image_captcha_code') or '').strip().upper()
+        purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'change'
+
+        # 4) 校验图片验证码（并单次使用）
+        session_code = (request.session.get('captcha_code') or '').upper()
         if 'captcha_code' in request.session:
             del request.session['captcha_code']
         if not session_code or session_code != image_captcha_code:
             return JsonResponse({'status': 'error', 'message': '图片验证码错误'}, status=400)
 
-        # 检查邮箱是否已被注册
-        if User.objects.filter(email__iexact=email).exists():
-            return JsonResponse({'status': 'error', 'message': '该邮箱已被注册'}, status=400)
+        # 5) 业务区分 & 邮箱可用性检查（共用工具函数）
+        if purpose == 'change':
+            # 未登录不能走“修改邮箱”
+            if not request.user.is_authenticated:
+                return JsonResponse({'status': 'error', 'message': '未登录用户无法修改邮箱'}, status=403)
 
-        # 生成并发送邮箱验证码
+            # 禁止把新邮箱改成当前邮箱（防止滥发验证码）
+            if email and request.user.email and email.lower() == request.user.email.lower():
+                return JsonResponse({'status': 'error', 'message': '该邮箱与当前绑定邮箱一致，无需修改'}, status=400)
+
+            # 修改邮箱：排除自己判断占用
+            check = _check_email_availability(request, email, exclude_self=True)
+            if not check['ok']:
+                return JsonResponse({'status': 'error', 'message': check['message']}, status=400)
+
+            mail_subject = '邮箱修改验证码'
+            ok_message   = '验证码已发送至您的新邮箱'
+        else:
+            # 注册：谁绑了都算占用
+            check = _check_email_availability(request, email, exclude_self=False)
+            if not check['ok']:
+                # 为了与之前前端体验一致，文案使用“已被注册”
+                msg = '该邮箱已被注册' if check['reason'] == 'taken' else check['message']
+                return JsonResponse({'status': 'error', 'message': msg}, status=400)
+
+            mail_subject = '注册验证码'
+            ok_message   = '验证码已发送至您的邮箱'
+
+        # 6) 生成并发送邮件
         email_code = ''.join(random.choices(string.digits, k=6))
         try:
             send_mail(
-                '注册验证码',
-                f'您的注册验证码是：{email_code}。10分钟内有效。',
+                mail_subject,
+                f'您的{mail_subject}是：{email_code}。10分钟内有效。',
                 settings.DEFAULT_FROM_EMAIL,
                 [email],
                 fail_silently=False,
@@ -176,29 +227,26 @@ class SendEmailCodeView(View):
             print(f"邮件发送失败 (IP: {ip_address}, Email: {email}), 错误: {e}")
             return JsonResponse({'status': 'error', 'message': '邮件发送失败，请稍后重试。'}, status=500)
 
-        # --- 邮件发送成功后，更新两个计数器 ---
-
-        # a. 更新小时计数器
+        # 7) 发送成功后，更新限流计数
         if hourly_attempts == 0:
-            cache.set(hourly_key, 1, timeout=3600)  # 3600秒 = 1小时
+            cache.set(hourly_key, 1, timeout=3600)   # 1小时
         else:
             cache.incr(hourly_key)
 
-        # b. 更新天计数器
         if daily_attempts == 0:
-            cache.set(daily_key, 1, timeout=86400)  # 86400秒 = 24小时
+            cache.set(daily_key, 1, timeout=86400)  # 24小时
         else:
             cache.incr(daily_key)
 
-        # 将验证码存入session用于注册
+        # 8) 把验证码写入 session，沿用你现有的 key
         request.session['registration_verification'] = {
             'code': email_code,
             'email': email,
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'purpose': purpose,  # 记录用途，方便后续需要时校验
         }
 
-        return JsonResponse({'status': 'success', 'message': '验证码已发送至您的邮箱'})
-
+        return JsonResponse({'status': 'success', 'message': ok_message})
 
 def captcha_image(request):
     """
@@ -222,14 +270,35 @@ def captcha_image(request):
 
 # --- 视图：实时检查用户名是否存在 (新功能) ---
 def check_username(request):
-    """一个专门用来检查用户名是否已被占用的API视图"""
-    username = request.GET.get('username', None)
-    if username:
-        # 使用 __iexact 进行不区分大小写的查询
-        is_taken = User.objects.filter(username__iexact=username).exists()
-        return JsonResponse({'is_taken': is_taken})
-    return JsonResponse({'error': 'Username not provided'}, status=400)
+    """检查用户名是否可用"""
+    username = request.GET.get("username", "").strip()
+    if not username:
+        return JsonResponse({"error": "Username not provided"}, status=400)
+    # 正则检查
+    if not USERNAME_REGEX.match(username):
+        return JsonResponse({
+            "is_taken": True,
+            "message": "用户名至少6位，以小写字母开头，只能包含字母数字下划线"
+        })
+    # 查重
+    is_taken = User.objects.filter(username__iexact=username).exists()
+    return JsonResponse({"is_taken": is_taken})
+def check_email(request):
+    """
+    实时检查邮箱是否已被绑定
+    - GET /check-email/?email=xxx[&exclude_self=1]
+    - 返回：{'is_taken': bool, 'message': '...'(可选)}
+    """
+    email = request.GET.get('email', '').strip()
+    exclude_self = request.GET.get('exclude_self') == '1'
 
+    result = _check_email_availability(request, email, exclude_self=exclude_self)
+
+    # 为了兼容你之前的前端，沿用 is_taken 字段
+    # invalid 视为 is_taken=True，并返回 message（这样前端可以统一提示）
+    if not result['ok']:
+        return JsonResponse({'is_taken': True, 'message': result['message']})
+    return JsonResponse({'is_taken': False})
 
 class CustomLoginView(View):
     """
@@ -274,7 +343,7 @@ class SignUpView(View):
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
-        return render(request, 'signup.html')
+        return render(request, 'registration/signup.html')
 
     def post(self, request, *args, **kwargs):
         # 注意：由于您前端使用 FormData，数据在 request.POST 中
@@ -338,15 +407,15 @@ def public_note_view(request, public_id):
             },
             'full_content_data': note.content or "",
         }
-        return render(request, 'public_note_view.html', context)
+        return render(request, 'knowledge/public_note_view.html', context)
 
     except Note.DoesNotExist:
         # 如果笔记不存在或非公开，返回一个提示页面
-        return render(request, 'public_note_view.html', {'error_message': '抱歉，这篇笔记不存在或未公开分享。'})
+        return render(request, 'knowledge/public_note_view.html', {'error_message': '抱歉，这篇笔记不存在或未公开分享。'})
     except Exception as e:
         # 记录未预料到的错误
         print(f"Error in public_note_view for public_id {public_id}: {e}")
-        return render(request, 'public_note_view.html', {'error_message': '加载笔记时发生了一个错误，请稍后重试。'})
+        return render(request, 'knowledge/public_note_view.html', {'error_message': '加载笔记时发生了一个错误，请稍后重试。'})
 
 
 @login_required
@@ -373,7 +442,7 @@ def knowledge_list(request):
         'csrf_token': request.COOKIES.get('csrftoken')
     }
     context = {'initial_data': initial_data}
-    return render(request, 'knowledge_list.html', context)
+    return render(request, 'knowledge/knowledge_list.html', context)
 
 
 @login_required
@@ -730,6 +799,122 @@ def public_notes_list_view(request):
     此视图现在只负责渲染承载Vue应用的HTML空壳，所有数据由JS通过API加载。
     """
     # 不再需要进行分页或查询数据，直接渲染模板
-    return render(request, 'public_notes_list.html')
+    return render(request, 'knowledge/public_notes_list.html')
+@login_required
+def settings_view(request):
+    """
+    用户个人设置页面
+    - 后续可以扩展：处理POST请求修改头像、用户名、邮箱、密码
+    """
+    return render(request, 'settings/setting.html')
+@login_required
+@require_http_methods(["POST"])
+def upload_avatar(request):
+    """上传并更新用户头像"""
+    avatar_file = request.FILES.get("avatar")
+    if not avatar_file:
+        return JsonResponse({"status": "error", "message": "未选择文件"}, status=400)
+
+    user = request.user
+    try:
+        # 删除旧头像（可选）
+        if user.profile.avatar:
+            user.profile.avatar.delete(save=False)
+
+        # 保存新头像
+        user.profile.avatar.save(avatar_file.name, avatar_file, save=True)
+
+        return JsonResponse({
+            "status": "success",
+             "avatar_url": request.build_absolute_uri(user.profile.avatar.url)
+        })
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_profile(request):
+    """更新昵称，增加正则校验 + 重名检查"""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    nickname = data.get("nickname", "").strip()
+    if not nickname:
+        return JsonResponse({"status": "error", "message": "昵称不能为空"}, status=400)
+
+    # ✅ 正则校验
+    if not USERNAME_REGEX.match(nickname):
+        return JsonResponse({
+            "status": "error",
+            "message": "用户名必须至少6位，以小写字母开头，只能包含字母数字下划线"
+        }, status=400)
+
+    # ✅ 检查重名
+    if User.objects.filter(username=nickname).exclude(pk=request.user.pk).exists():
+        return JsonResponse({"status": "error", "message": "该用户名已存在"}, status=400)
+
+    user = request.user
+    user.username = nickname
+    user.save(update_fields=["username"])
+
+    return JsonResponse({"status": "success", "nickname": user.username})
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_email(request):
+    """验证密码、图形验证码、邮箱验证码后修改邮箱"""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    current_password = data.get("password", "")
+    new_email = data.get("new_email", "").strip()
+    code = data.get("code", "").strip()
+    image_captcha_code = data.get("image_captcha_code", "").upper().strip()
+
+    if not current_password or not new_email or not code or not image_captcha_code:
+        return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
+
+    # 1) 校验当前密码
+    if not request.user.check_password(current_password):
+        return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
+
+    # 2) 校验图形验证码（建议与“发送验证码”时使用同一个 /captcha/ 接口，确认时再刷一次）
+    session_captcha = request.session.get("captcha_code", "").upper()
+    if not session_captcha or session_captcha != image_captcha_code:
+        return JsonResponse({"status": "error", "message": "图形验证码错误"}, status=400)
+    # 用一次就作废，防复用
+    if "captcha_code" in request.session:
+        del request.session["captcha_code"]
+
+    # 3) 校验邮箱验证码（含有效期）
+    info = request.session.get("registration_verification")
+    if not info or info.get("email") != new_email or info.get("code") != code:
+        return JsonResponse({"status": "error", "message": "邮箱验证码错误或邮箱不匹配"}, status=400)
+
+    # 有效期 10 分钟
+    if time.time() - float(info.get("timestamp", 0)) > 600:
+        return JsonResponse({"status": "error", "message": "邮箱验证码已过期，请重新获取"}, status=400)
+
+    # 4) 检查邮箱是否已被占用（再兜底）
+    if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
+        return JsonResponse({"status": "error", "message": "该邮箱已被绑定"}, status=400)
+
+    # 5) 更新邮箱
+    user = request.user
+    user.email = new_email
+    user.save(update_fields=["email"])
+
+    # 作废验证码 session
+    if "registration_verification" in request.session:
+        del request.session["registration_verification"]
+
+    return JsonResponse({"status": "success", "email": user.email, "message": "邮箱修改成功"})
 
 

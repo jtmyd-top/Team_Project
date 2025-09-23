@@ -24,6 +24,10 @@ urlpatterns = [
     path('api/upload/image/', views.image_upload_view, name='image_upload_view'),
     re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
     path('api/public-notes/', views.public_notes_api, name='public_notes_api'),
-
+    path("settings/", views.settings_view, name="settings"),
+    path("upload-avatar/", views.upload_avatar, name="upload_avatar"),
+    path("update-profile/", views.update_profile, name="update_profile"),
+    path("update-email/", views.update_email, name="update_email"),
+    path('check-email/', views.check_email, name='check_email'),#path("logout/", views.logout_view, name="logout"),
 ]
 
