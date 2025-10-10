@@ -801,12 +801,22 @@ def public_notes_list_view(request):
     # 不再需要进行分页或查询数据，直接渲染模板
     return render(request, 'knowledge/public_notes_list.html')
 @login_required
+@login_required
 def settings_view(request):
     """
     用户个人设置页面
-    - 后续可以扩展：处理POST请求修改头像、用户名、邮箱、密码
     """
-    return render(request, 'settings/setting.html')
+    user = request.user
+    profile = getattr(user, "profile", None)
+
+    context = {
+        "avatar_url": profile.avatar.url if profile and profile.avatar else "/static/img/default-avatar.png",
+        "nickname": user.username,
+        "email": user.email,
+        "bio": profile.bio if profile and profile.bio else "",
+    }
+    print(context)
+    return render(request, "settings/setting.html", context)
 @login_required
 @require_http_methods(["POST"])
 def upload_avatar(request):
@@ -833,35 +843,51 @@ def upload_avatar(request):
 
 
 
-@login_required
-@require_http_methods(["POST"])
 def update_profile(request):
-    """更新昵称，增加正则校验 + 重名检查"""
+    """
+    通用更新接口：可以单独更新昵称或 bio。
+    前端通过发送不同字段决定更新内容。
+    """
     try:
         data = json.loads(request.body)
+        profile = request.user.profile
     except json.JSONDecodeError:
-        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
-
-    nickname = data.get("nickname", "").strip()
-    if not nickname:
-        return JsonResponse({"status": "error", "message": "昵称不能为空"}, status=400)
-
-    # ✅ 正则校验
-    if not USERNAME_REGEX.match(nickname):
-        return JsonResponse({
-            "status": "error",
-            "message": "用户名必须至少6位，以小写字母开头，只能包含字母数字下划线"
-        }, status=400)
-
-    # ✅ 检查重名
-    if User.objects.filter(username=nickname).exclude(pk=request.user.pk).exists():
-        return JsonResponse({"status": "error", "message": "该用户名已存在"}, status=400)
+        return JsonResponse({"status": "error", "message": "请求格式错误"}, status=400)
 
     user = request.user
-    user.username = nickname
-    user.save(update_fields=["username"])
+    profile = getattr(user, "profile", None)
 
-    return JsonResponse({"status": "success", "nickname": user.username})
+    updated_fields = []
+    response_data = {"status": "success"}
+
+    # 更新昵称
+    nickname = data.get("nickname")
+    if nickname is not None:
+        if len(nickname) < 6:
+            return JsonResponse({"status": "error", "message": "昵称至少6位"}, status=400)
+        user.username = nickname
+        updated_fields.append("username")
+        response_data["nickname"] = nickname
+
+    # 更新个性签名
+    bio = data.get("bio")
+
+    if bio is not None:
+        if len(bio) > 160:
+            return JsonResponse({"status": "error", "message": "个性签名不能超过160字"}, status=400)
+        profile.bio = bio
+        updated_fields.append("bio")
+        response_data["bio"] = bio
+
+    if updated_fields:
+        if "username" in updated_fields:
+            user.save(update_fields=["username"])
+        if "bio" in updated_fields:
+            profile.save(update_fields=["bio", "last_updated"])
+        print(response_data)
+        return JsonResponse(response_data)
+
+    return JsonResponse({"status": "error", "message": "没有任何更新字段"}, status=400)
 
 
 @login_required

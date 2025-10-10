@@ -14,6 +14,8 @@ import hashlib, io, re, requests, colorsys
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
+from django.utils.safestring import mark_safe
+from django.core.validators import MaxLengthValidator
 from io import BytesIO
 # ---------------- 标签 ----------------
 class Tag(models.Model):
@@ -133,7 +135,89 @@ class Profile(models.Model):
     code_created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     avatar = models.ImageField(upload_to=user_avatar_path, null=True, blank=True, verbose_name="头像")
     avatar_source = models.CharField(max_length=32, blank=True, verbose_name="头像来源")
+    THEME_CHOICES = [
+        ('light', '浅色主题'),
+        ('dark', '深色主题'),
+        ('system', '系统默认')
+    ]
 
+    # 新增个性化字段
+    bio = models.TextField(
+        max_length=160,
+        blank=True,
+        validators=[MaxLengthValidator(160)],
+        verbose_name="个人简介"
+    )
+    banner_image = models.ImageField(
+        upload_to=user_avatar_path,  # 复用头像路径函数
+        null=True,
+        blank=True,
+        verbose_name="主页横幅"
+    )
+    theme = models.JSONField(
+        default={
+            'mode': 'system',
+            'primary_color': '#2196F3',
+            'dark_mode': False
+        },
+        verbose_name="主题设置"
+    )
+    allow_rich_bio = models.BooleanField(
+        default=False,
+        verbose_name="允许富文本简介"
+    )
+    last_updated = models.DateTimeField(
+        auto_now=True,
+        verbose_name="最后更新时间"
+    )
+
+    def clean_bio(self):
+        """净化用户输入的富文本内容"""
+        from nh3 import clean
+        if self.allow_rich_bio:
+            return clean(
+                self.bio,
+                tags={'a', 'b', 'i', 'strong', 'em', 'br', 'p'},
+                attributes={'a': {'href', 'title', 'target'}},
+                url_schemes={'http', 'https'}
+            )
+        return self.escape_markup(self.bio)
+
+    @staticmethod
+    def escape_markup(text):
+        """转义纯文本中的HTML标记"""
+        return mark_safe(text).replace('<', '&lt;').replace('>', '&gt;')
+
+    def save(self, *args, **kwargs):
+        self.bio = self.clean_bio()
+        super().save(*args, **kwargs)
+        self.process_banner_image()  # 处理横幅图片
+
+    def process_banner_image(self):
+        """处理横幅图片的压缩和裁剪"""
+        if self.banner_image:
+            try:
+                img = Image.open(self.banner_image.path)
+
+                # 转换为RGB模式
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                # 限制尺寸最大为2560x600
+                img.thumbnail((2560, 600))
+
+                # 质量压缩
+                buffer = BytesIO()
+                img.save(buffer, format='JPEG', quality=85, optimize=True)
+
+                # 保存回文件
+                self.banner_image.save(
+                    os.path.basename(self.banner_image.name),
+                    ContentFile(buffer.getvalue()),
+                    save=False
+                )
+            except Exception as e:
+                logger.error(f"处理横幅图片失败: {str(e)}")
     def __str__(self):
         return f'{self.user.username} Profile'
 

@@ -10,7 +10,6 @@ urlpatterns = [
     path('captcha/', captcha_image, name='captcha_image'),
     # 【任务二】新增：为实时用户名检查提供API端点
     path('check-username/', check_username, name='check_username'),
-
     path('send-email-code/', views.SendEmailCodeView.as_view(), name='send_email_code'),
     path('login/', CustomLoginView.as_view(), name='login'),
     path('api/notes/search/', views.search_notes_api, name='api_search_notes'),
@@ -28,6 +27,8 @@ urlpatterns = [
     path("upload-avatar/", views.upload_avatar, name="upload_avatar"),
     path("update-profile/", views.update_profile, name="update_profile"),
     path("update-email/", views.update_email, name="update_email"),
-    path('check-email/', views.check_email, name='check_email'),#path("logout/", views.logout_view, name="logout"),
+    path('check-email/', views.check_email, name='check_email'),
+
+    #path("logout/", views.logout_view, name="logout"),
 ]
 
