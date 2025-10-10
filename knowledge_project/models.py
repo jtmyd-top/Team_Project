@@ -1,4 +1,5 @@
 import random as pyrandom
+import logging
 
 from bs4 import BeautifulSoup
 import jieba.analyse
@@ -17,6 +18,8 @@ from django.conf import settings
 from django.utils.safestring import mark_safe
 from django.core.validators import MaxLengthValidator
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
 # ---------------- 标签 ----------------
 class Tag(models.Model):
     name = models.CharField(max_length=50, unique=True, verbose_name="标签名")
@@ -166,6 +169,13 @@ class Profile(models.Model):
         default=False,
         verbose_name="允许富文本简介"
     )
+
+    # 点赞功能字段
+    likes_count = models.IntegerField(
+        default=0,
+        verbose_name="获赞数"
+    )
+
     last_updated = models.DateTimeField(
         auto_now=True,
         verbose_name="最后更新时间"
@@ -232,6 +242,38 @@ class Profile(models.Model):
     class Meta:
         verbose_name = "用户资料"
         verbose_name_plural = "用户资料"
+
+
+# ---------------- 点赞记录模型 ----------------
+class ProfileLike(models.Model):
+    """
+    记录用户之间的点赞关系
+    后续可以扩展为通用点赞模型，支持对笔记的点赞
+    """
+    liker = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='given_likes',
+        verbose_name="点赞者"
+    )
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.CASCADE,
+        related_name='received_likes',
+        verbose_name="被点赞的用户资料"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="点赞时间")
+
+    class Meta:
+        verbose_name = "点赞记录"
+        verbose_name_plural = "点赞记录"
+        unique_together = ('liker', 'profile')  # 确保一个用户只能点赞同一个资料一次
+        indexes = [
+            models.Index(fields=['liker', 'profile']),
+        ]
+
+    def __str__(self):
+        return f"{self.liker.username} 点赞了 {self.profile.user.username}"
 
 
 # ---------------- 头像抓取逻辑 ----------------

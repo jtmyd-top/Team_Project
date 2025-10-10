@@ -27,7 +27,7 @@ from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
 from django.core.paginator import Paginator  # 添加这行导入
 from django.core.cache import cache
-from .models import  Note,Asset ,Tag
+from .models import  Note,Asset ,Tag, ProfileLike, Profile
 from django.shortcuts import render, redirect
 from django.contrib import messages
 import subprocess
@@ -809,36 +809,96 @@ def settings_view(request):
     user = request.user
     profile = getattr(user, "profile", None)
 
+    # 获取当前用户的笔记数量
+    notes_count = Note.objects.filter(author=user).count()
+
+    # 检查当前用户是否已经点赞过自己的资料
+    is_liked = ProfileLike.objects.filter(liker=user, profile=profile).exists() if profile else False
+
     context = {
         "avatar_url": profile.avatar.url if profile and profile.avatar else "/static/img/default-avatar.png",
         "nickname": user.username,
         "email": user.email,
         "bio": profile.bio if profile and profile.bio else "",
+        "likes_count": profile.likes_count if profile else 0,
+        "notes_count": notes_count,
+        "views_count": 0,  # 暂时默认为0，后续可以添加访问统计功能
+        "is_liked": is_liked,
     }
     print(context)
     return render(request, "settings/setting.html", context)
 @login_required
 @require_http_methods(["POST"])
 def upload_avatar(request):
-    """上传并更新用户头像"""
+    """上传并更新用户头像或横幅图"""
+    # 检测是头像还是横幅
     avatar_file = request.FILES.get("avatar")
-    if not avatar_file:
-        return JsonResponse({"status": "error", "message": "未选择文件"}, status=400)
+    banner_file = request.FILES.get("banner")
 
     user = request.user
+
     try:
-        # 删除旧头像（可选）
-        if user.profile.avatar:
-            user.profile.avatar.delete(save=False)
+        # 横幅图/视频上传
+        if banner_file:
+            # 验证文件类型（支持图片和视频）
+            allowed_image_types = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+            allowed_video_types = ['video/mp4', 'video/webm']
+            allowed_types = allowed_image_types + allowed_video_types
 
-        # 保存新头像
-        user.profile.avatar.save(avatar_file.name, avatar_file, save=True)
+            if banner_file.content_type not in allowed_types:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "只支持 JPG、PNG、WebP、GIF、MP4 和 WebM 格式"
+                }, status=400)
 
-        return JsonResponse({
-            "status": "success",
-             "avatar_url": request.build_absolute_uri(user.profile.avatar.url)
-        })
+            # 验证文件大小（图片最大 5MB，视频最大 15MB）
+            is_video = banner_file.content_type in allowed_video_types
+            max_size = 150 * 1024 * 1024 if is_video else 5 * 1024 * 1024
+            max_size_mb = 150 if is_video else 5
+
+            if banner_file.size > max_size:
+                return JsonResponse({
+                    "status": "error",
+                    "message": f"{'视频' if is_video else '图片'}大小不能超过 {max_size_mb}MB"
+                }, status=400)
+
+            # 删除旧横幅（可选）
+            if user.profile.banner_image:
+                user.profile.banner_image.delete(save=False)
+
+            # 保存新横幅
+            user.profile.banner_image.save(banner_file.name, banner_file, save=True)
+
+            return JsonResponse({
+                "status": "success",
+                "banner_url": request.build_absolute_uri(user.profile.banner_image.url),
+                "is_video": is_video
+            })
+
+        # 头像上传
+        elif avatar_file:
+            # 删除旧头像（可选）
+            if user.profile.avatar:
+                user.profile.avatar.delete(save=False)
+
+            # 保存新头像
+            user.profile.avatar.save(avatar_file.name, avatar_file, save=True)
+
+            return JsonResponse({
+                "status": "success",
+                "avatar_url": request.build_absolute_uri(user.profile.avatar.url)
+            })
+
+        else:
+            return JsonResponse({
+                "status": "error",
+                "message": "未选择文件"
+            }, status=400)
+
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"上传文件失败: {str(e)}", exc_info=True)
         return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
 
@@ -942,5 +1002,45 @@ def update_email(request):
         del request.session["registration_verification"]
 
     return JsonResponse({"status": "success", "email": user.email, "message": "邮箱修改成功"})
+
+
+# ==================== 点赞功能 API ====================
+@login_required
+@require_http_methods(["POST"])
+def toggle_profile_like(request):
+    """
+    切换对当前用户资料的点赞状态
+    - 如果已点赞，则取消点赞
+    - 如果未点赞，则添加点赞
+    """
+    user = request.user
+    profile = user.profile
+
+    try:
+        # 检查是否已经点赞过
+        like_record = ProfileLike.objects.filter(liker=user, profile=profile).first()
+
+        if like_record:
+            # 已点赞，执行取消点赞操作
+            like_record.delete()
+            profile.likes_count = max(0, profile.likes_count - 1)  # 确保不会小于0
+            profile.save(update_fields=['likes_count'])
+            is_liked = False
+        else:
+            # 未点赞，执行点赞操作
+            ProfileLike.objects.create(liker=user, profile=profile)
+            profile.likes_count += 1
+            profile.save(update_fields=['likes_count'])
+            is_liked = True
+
+        return JsonResponse({
+            "status": "success",
+            "is_liked": is_liked,
+            "likes_count": profile.likes_count
+        })
+
+    except Exception as e:
+        logger.error(f"点赞操作失败 (用户: {user.id}): {str(e)}", exc_info=True)
+        return JsonResponse({"status": "error", "message": "操作失败，请稍后重试"}, status=500)
 
 

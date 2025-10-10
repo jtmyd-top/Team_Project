@@ -28,6 +28,7 @@ urlpatterns = [
     path("update-profile/", views.update_profile, name="update_profile"),
     path("update-email/", views.update_email, name="update_email"),
     path('check-email/', views.check_email, name='check_email'),
+    path('api/toggle-like/', views.toggle_profile_like, name='toggle_profile_like'),
 
     #path("logout/", views.logout_view, name="logout"),
 ]
