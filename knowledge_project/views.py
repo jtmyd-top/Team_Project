@@ -338,14 +338,18 @@ def check_email(request):
 
 class CustomLoginView(View):
     """
-    一个完全自定义的登录视图，用于处理 /login/ 路径。
+    支持两因素认证的自定义登录视图。
+
+    登录流程：
+    1. 验证用户名和密码
+    2. 如果用户启用了2FA，要求输入验证码
+    3. 验证2FA码后完成登录
     """
     template_name = 'registration/login.html'
-
-    # 登录成功后的默认跳转地址
     next_page = reverse_lazy('home')
+
     def dispatch(self, request, *args, **kwargs):
-        # 核心逻辑：如果用户已登录，直接重定向到首页
+        # 如果用户已登录，直接重定向到首页
         if request.user.is_authenticated:
             return redirect('home')
         return super().dispatch(request, *args, **kwargs)
@@ -355,21 +359,60 @@ class CustomLoginView(View):
         return render(request, self.template_name, {'form': form})
 
     def post(self, request, *args, **kwargs):
+        """第一步：验证用户名和密码"""
         form = AuthenticationForm(request, data=request.POST)
+
         if form.is_valid():
-            # 【关键修正】使用 form.get_user() 来获取认证成功的用户
             user = form.get_user()
-            login(request, user)  # 为用户创建登录会话
+            profile = getattr(user, 'profile', None)
 
-            # 【建议修正】返回的 message 应该与登录行为匹配
-            return JsonResponse({
-                'status': 'success',
-                'message': '登录成功！即将跳转到首页。',
-                'redirect_url': reverse('home')
-            })
+            # 检查是否启用了2FA
+            if profile and profile.two_fa_enabled:
+                # 将用户ID临时存入session，等待2FA验证
+                request.session['pending_2fa_user_id'] = user.id
+                request.session['pending_2fa_method'] = profile.two_fa_method
 
-        # 如果表单无效，重新渲染页面并显示错误
-        return render(request, self.template_name, {'form': form})
+                # 如果是邮箱验证方式，立即发送验证码
+                if profile.two_fa_method == 'email':
+                    email_code = ''.join(random.choices(string.digits, k=6))
+                    request.session['2fa_email_code'] = email_code
+                    request.session['2fa_email_timestamp'] = time.time()
+
+                    try:
+                        send_mail(
+                            '登录验证码',
+                            f'您的登录验证码是：{email_code}。5分钟内有效。',
+                            settings.DEFAULT_FROM_EMAIL,
+                            [user.email],
+                            fail_silently=False,
+                        )
+                    except Exception as e:
+                        logger.error(f"发送2FA邮件失败: {e}")
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': '发送验证码失败，请稍后重试'
+                        }, status=500)
+
+                return JsonResponse({
+                    'status': 'require_2fa',
+                    'message': '请输入两因素验证码',
+                    'method': profile.two_fa_method,
+                    'email_sent': profile.two_fa_method == 'email'
+                })
+            else:
+                # 没有启用2FA，直接登录
+                login(request, user)
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '登录成功！',
+                    'redirect_url': reverse('home')
+                })
+
+        # 表单验证失败
+        return JsonResponse({
+            'status': 'error',
+            'message': '用户名或密码不正确'
+        }, status=400)
 
 
 class SignUpView(View):

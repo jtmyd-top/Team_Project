@@ -432,6 +432,8 @@
     notes_count: {{ notes_count|default:0 }},
     views_count: {{ views_count|default:0 }},
     is_liked: {{ is_liked|yesno:"true,false" }},
+    two_fa_enabled: {{ two_fa_enabled|yesno:"true,false" }},
+    two_fa_method: "{{ two_fa_method|escapejs }}",
     csrfToken: "{{ request.COOKIES.csrftoken|default:''|escapejs }}"
   };
 
@@ -669,7 +671,7 @@
             <i class="fas fa-times-circle"></i> 禁用两因素认证
           </el-button>
           <el-button v-if="security.twoFaMethod === 'totp'" @click="showBackupCodesDialog = true">
-            <i class="fas fa-list-ol"></i> 查看备用验证码
+            <i class="fas fa-list-ol"></i> 管理备用验证码
           </el-button>
         </div>
       </div>
@@ -796,20 +798,31 @@
     </el-dialog>
 
     <!-- 备用验证码弹窗 -->
-    <el-dialog v-model="showBackupCodesDialog" title="重新生成备用验证码" width="500px" align-center>
+    <el-dialog v-model="showBackupCodesDialog" title="管理备用验证码" width="500px" align-center>
       <div v-if="!backupCodes.newCodes">
-        <p style="margin-bottom: 16px; color: #606266;">重新生成备用验证码会使旧的备用码失效</p>
+        <el-alert title="关于备用验证码" type="info" :closable="false" style="margin-bottom: 16px;">
+          <p style="margin-bottom: 8px;">备用验证码用于在您无法访问验证器应用时登录账户。</p>
+          <p>出于安全考虑，备用验证码已加密存储，无法查看原始内容。您只能重新生成新的备用验证码。</p>
+        </el-alert>
+
+        <p style="margin-bottom: 16px; color: #606266;">
+          <i class="fas fa-exclamation-circle" style="color: #E6A23C;"></i>
+          <strong>重要提示：</strong>重新生成备用验证码会使所有旧的备用码立即失效
+        </p>
+
         <el-form>
           <el-form-item label="当前密码">
-            <el-input v-model="backupCodes.password" type="password" show-password placeholder="请输入当前密码"></el-input>
+            <el-input v-model="backupCodes.password" type="password" show-password placeholder="请输入当前密码以继续"></el-input>
           </el-form-item>
         </el-form>
         <el-button type="primary" @click="regenerateBackupCodes" style="width: 100%;">
-          重新生成备用验证码
+          <i class="fas fa-sync-alt"></i> 重新生成备用验证码
         </el-button>
       </div>
       <div v-else>
-        <el-alert title="请妥善保存这些新的备用验证码" type="success" :closable="false" style="margin-bottom: 16px;"></el-alert>
+        <el-alert title="请妥善保存这些新的备用验证码" type="success" :closable="false" style="margin-bottom: 16px;">
+          <p>这些验证码只会显示一次，请立即保存到安全的地方。每个备用码只能使用一次。</p>
+        </el-alert>
         <div style="background: #f5f7fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
           <div v-for="code in backupCodes.newCodes" :key="code" style="font-family: monospace; padding: 4px 0;">
             [[ code ]]
