@@ -1,0 +1,921 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
+<style>
+/* 全局容器：无边距，铺满页面 */
+.settings-container {
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    background: #f5f7fa;
+    min-height: 100vh;
+}
+
+/* ==================== 横幅预览区域 ==================== */
+.profile-banner-section {
+    position: relative;
+    width: 100%;
+    height: 328px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    overflow: hidden;
+    margin-bottom: 24px;
+}
+
+.banner-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* 音量控制按钮 */
+.volume-control-btn {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 20px;
+    z-index: 10;
+}
+
+.volume-control-btn:hover {
+    background: rgba(0, 0, 0, 0.8);
+    transform: scale(1.1);
+}
+
+.banner-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.profile-banner-section:hover .banner-overlay {
+    opacity: 1;
+}
+
+.banner-upload-btn {
+    background: white;
+    color: #333;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s ease;
+}
+
+.banner-upload-btn:hover {
+    transform: translateY(-2px);
+}
+
+/* 用户信息卡片 */
+.user-info-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    padding: 24px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+.user-info-left {
+    flex-shrink: 0;
+}
+
+.user-info-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.user-basic-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.user-nickname {
+    font-size: 24px;
+    font-weight: 600;
+    color: #303133;
+}
+
+.user-stats {
+    display: flex;
+    gap: 24px;
+    color: #606266;
+    font-size: 14px;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.stat-number {
+    font-weight: 600;
+    color: #409EFF;
+}
+
+/* 点赞按钮 */
+.like-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid #dcdfe6;
+    background: white;
+    color: #606266;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.like-button:hover {
+    border-color: #f56c6c;
+    color: #f56c6c;
+    transform: translateY(-2px);
+}
+
+.like-button.liked {
+    border-color: #f56c6c;
+    background: #fef0f0;
+    color: #f56c6c;
+}
+
+.like-button .heart-icon {
+    font-size: 16px;
+    transition: transform 0.3s ease;
+}
+
+.like-button.liked .heart-icon {
+    animation: heartBeat 0.6s ease;
+}
+
+@keyframes heartBeat {
+    0%, 100% { transform: scale(1); }
+    25% { transform: scale(1.3); }
+    50% { transform: scale(1.1); }
+}
+
+
+.avatar-wrapper {
+    position: relative;
+    border: 5px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    background: white;
+    width: 120px;
+    height: 120px;
+}
+
+.avatar-edit-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    cursor: pointer;
+}
+
+.avatar-wrapper:hover .avatar-edit-overlay {
+    opacity: 1;
+}
+
+.avatar-edit-icon {
+    color: white;
+    font-size: 24px;
+}
+
+/* ==================== 主内容区 ==================== */
+
+
+/* 选项卡导航 */
+.settings-tabs {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+
+.el-menu {
+    border: none;
+}
+
+.el-menu-item {
+    font-weight: 500;
+    padding: 0 32px;
+    height: 56px;
+    line-height: 56px;
+}
+
+/* 内容卡片容器 */
+.settings-content-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    padding: 32px;
+}
+
+/* 表单布局 */
+.form-section {
+    margin-bottom: 32px;
+}
+
+.form-section:last-child {
+    margin-bottom: 0;
+}
+
+.form-section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #303133;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.form-row {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 20px;
+}
+
+.form-col {
+    flex: 1;
+}
+
+.form-col-full {
+    width: 100%;
+}
+
+/* 输入框美化 */
+.el-input__inner {
+    border-radius: 8px !important;
+    height: 42px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.el-input__inner:focus {
+    border-color: #409EFF !important;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.1);
+}
+
+.el-textarea__inner {
+    border-radius: 8px !important;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.el-textarea__inner:focus {
+    border-color: #409EFF !important;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.1);
+}
+
+/* 按钮美化 */
+.el-button {
+    border-radius: 8px;
+    font-weight: 600;
+    height: 42px;
+    padding: 0 20px;
+    transition: all 0.2s ease;
+}
+
+.el-button--primary {
+    background-color: #409EFF;
+    border-color: #409EFF;
+}
+
+.el-button--primary:hover {
+    background-color: #66b1ff;
+    border-color: #66b1ff;
+}
+
+.el-button--success {
+    background-color: #67c23a;
+    border-color: #67c23a;
+}
+
+.el-button--success:hover {
+    background-color: #85ce61;
+    border-color: #85ce61;
+}
+
+/* 表单项间距 */
+.el-form-item {
+    margin-bottom: 24px;
+}
+
+/* Bio 预览区域 */
+.bio-preview {
+    min-height: 120px;
+    padding: 16px;
+    background: #f9fafb;
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.bio-preview p {
+    word-break: break-word;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    line-height: 1.6;
+    margin: 0;
+    color: #606266;
+}
+
+.bio-placeholder {
+    color: #909399;
+    font-size: 14px;
+    text-align: center;
+    font-style: italic;
+}
+
+/* 操作按钮组 */
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid #f0f0f0;
+}
+
+/* 修复 Element Plus input-group 中按钮样式 */
+.el-input-group__append .el-button {
+    background-color: #409EFF !important;
+    color: white !important;
+    border-color: #409EFF !important;
+}
+
+.el-input-group__append .el-button:hover {
+    background-color: #66b1ff !important;
+    border-color: #66b1ff !important;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .profile-banner-section {
+        height: 200px;
+        margin-bottom: 60px;
+    }
+
+    .profile-avatar-container {
+        bottom: -40px;
+    }
+
+    .settings-content-wrapper {
+        padding: 0 16px 24px;
+    }
+
+    .settings-content-card {
+        padding: 20px;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 0;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<script>
+  // 给前端一个全局对象
+  window.SETTINGS_INITIAL = {
+    updateProfile: "{{ request.build_absolute_uri|escapejs }}{% url 'update_profile' %}",
+    avatar: "{{ user.profile.avatar_url|default:'/static/img/default-avatar.png'|escapejs }}",
+    banner: "{% if user.profile.banner_image %}{{ user.profile.banner_image.url|escapejs }}{% else %}{% endif %}",
+    nickname: "{{ user.username|escapejs }}",
+    email: "{{ user.email|escapejs }}",
+    bio: "{{ user.profile.bio|default_if_none:''|escapejs }}",
+    likes_count: {{ likes_count|default:0 }},
+    notes_count: {{ notes_count|default:0 }},
+    views_count: {{ views_count|default:0 }},
+    is_liked: {{ is_liked|yesno:"true,false" }},
+    csrfToken: "{{ request.COOKIES.csrftoken|default:''|escapejs }}"
+  };
+
+  window.API_ENDPOINTS = {
+    updateProfile: "{% url 'update_profile' %}",
+    updateEmail: "{% url 'update_email' %}",
+    uploadAvatar: "{% url 'upload_avatar' %}",
+    uploadBanner: "{% url 'upload_avatar' %}", // 暂时复用，稍后会创建专门的接口
+    sendEmailCode: "{% url 'send_email_code' %}",
+    checkEmail: "{% url 'check_email' %}",
+    toggleLike: "{% url 'toggle_profile_like' %}"
+  };
+</script>
+
+<div id="settings-app" class="settings-container">
+  <!-- ==================== 顶部横幅区域 ==================== -->
+  <section class="profile-banner-section">
+    <!-- 横幅图片 -->
+    <img v-if="profile.banner && !profile.bannerIsVideo" :src="profile.banner" alt="个人主页横幅" class="banner-image">
+
+    <!-- 横幅视频 -->
+    <video v-if="profile.banner && profile.bannerIsVideo"
+           ref="bannerVideo"
+           :src="profile.banner"
+           class="banner-image"
+           autoplay
+           loop
+           muted
+           playsinline
+           @loadedmetadata="checkVideoAudio">
+    </video>
+
+    <!-- 音量控制按钮（只在视频有声音时显示） -->
+    <button v-if="profile.bannerIsVideo && videoHasAudio"
+            class="volume-control-btn"
+            @click="toggleVideoMute"
+            :title="videoMuted ? '播放声音' : '静音'">
+      <i :class="videoMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up'"></i>
+    </button>
+
+    <!-- 悬停遮罩和上传按钮 -->
+    <div class="banner-overlay">
+      <el-upload
+        action="{% url 'upload_avatar' %}"
+        name="banner"
+        :headers="csrfHeader"
+        :show-file-list="false"
+        :on-success="handleBannerSuccess"
+        :on-error="() => ElMessage.error('横幅上传失败')"
+        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
+      >
+        <button class="banner-upload-btn">
+          <i class="fas fa-camera"></i>
+          [[ profile.banner ? '更换横幅' : '上传横幅' ]]
+        </button>
+      </el-upload>
+    </div>
+  </section>
+
+  <!-- ==================== 用户信息卡片 ==================== -->
+  <div class="settings-content-wrapper">
+    <div class="user-info-card">
+      <!-- 左侧：头像（保留编辑功能） -->
+      <div class="user-info-left">
+        <div class="avatar-wrapper">
+          <el-avatar :size="120" :src="profile.avatar"></el-avatar>
+          <!-- 头像编辑遮罩 -->
+          <el-upload
+            action="{% url 'upload_avatar' %}"
+            name="avatar"
+            :headers="csrfHeader"
+            :show-file-list="false"
+            :on-success="handleAvatarSuccess"
+            :on-error="() => ElMessage.error('头像上传失败')"
+            accept="image/*"
+          >
+            <div class="avatar-edit-overlay">
+              <i class="fas fa-camera avatar-edit-icon"></i>
+            </div>
+          </el-upload>
+        </div>
+      </div>
+
+      <!-- 右侧：用户信息 -->
+      <div class="user-info-right">
+        <div class="user-basic-info">
+          <h2 class="user-nickname">[[ profile.nickname ]]</h2>
+          <button class="like-button" :class="{ liked: isLiked }" @click="toggleLike">
+            <span class="heart-icon">[[ isLiked ? '❤️' : '🤍' ]]</span>
+            <span>[[ profile.likes_count || 0 ]]</span>
+          </button>
+        </div>
+        <div class="user-stats">
+          <div class="stat-item">
+            <i class="fas fa-sticky-note"></i>
+            <span>笔记：<span class="stat-number">[[ notesCount ]]</span> 篇</span>
+          </div>
+          <div class="stat-item">
+            <i class="fas fa-eye"></i>
+            <span>访问：<span class="stat-number">[[ viewsCount ]]</span> 次</span>
+          </div>
+        </div>
+        <div v-if="profile.bio" style="word-break: break-word; color: #606266; margin-top: 8px;">
+          [[ profile.bio ]]
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 主内容区域 ==================== -->
+  <div class="settings-content-wrapper">
+    <!-- 选项卡导航 -->
+    <nav class="settings-tabs">
+      <el-menu :default-active="active" @select="active = $event" mode="horizontal">
+        <el-menu-item index="profile">
+          <i class="fas fa-user"></i> 个人资料
+        </el-menu-item>
+        <el-menu-item index="security">
+          <i class="fas fa-shield-alt"></i> 账户安全
+        </el-menu-item>
+        <el-menu-item index="notifications">
+          <i class="fas fa-bell"></i> 通知偏好
+        </el-menu-item>
+        <el-menu-item index="appearance">
+          <i class="fas fa-palette"></i> 外观主题
+        </el-menu-item>
+        <el-menu-item index="note_prefs">
+          <i class="fas fa-book"></i> 笔记偏好
+        </el-menu-item>
+        <el-menu-item index="data">
+          <i class="fas fa-database"></i> 数据与导出
+        </el-menu-item>
+      </el-menu>
+    </nav>
+
+    <!-- ==================== 个人资料标签页 ==================== -->
+    <div v-if="active === 'profile'" class="settings-content-card">
+      <!-- 基础信息 -->
+      <div class="form-section">
+        <h3 class="form-section-title">基础信息</h3>
+        <el-form label-width="80px" :model="profile">
+          <div class="form-row">
+            <div class="form-col">
+              <el-form-item label="用户名">
+                <el-input v-model="profile.nickname" placeholder="请输入昵称"></el-input>
+              </el-form-item>
+            </div>
+            <div class="form-col">
+              <el-form-item label="邮箱">
+                <el-input v-model="profile.email" disabled>
+                  <template #append>
+                    <el-button @click="openEmailDialog">修改</el-button>
+                  </template>
+                </el-input>
+              </el-form-item>
+            </div>
+          </div>
+        </el-form>
+      </div>
+
+      <!-- 个性签名 -->
+      <div class="form-section">
+        <h3 class="form-section-title">个性签名</h3>
+        <div v-if="!bioEditing" class="bio-preview">
+          <p v-if="profile.bio">[[ profile.bio ]]</p>
+          <p v-else class="bio-placeholder">还没有写个性签名，点击下方按钮添加...</p>
+        </div>
+
+        <div v-else>
+          <el-input
+            type="textarea"
+            v-model="bioDraft"
+            maxlength="160"
+            show-word-limit
+            placeholder="写点个性签名吧（160字以内）"
+            :rows="4"
+          ></el-input>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <el-button v-if="!bioEditing" type="primary" @click="editBio">
+            <i class="fas fa-edit"></i> 编辑签名
+          </el-button>
+          <template v-else>
+            <el-button @click="cancelBio">取消</el-button>
+            <el-button type="primary" @click="saveBio">保存签名</el-button>
+          </template>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-buttons">
+        <el-button type="success" size="large" @click="saveProfile">
+          <i class="fas fa-save"></i> 保存所有更改
+        </el-button>
+      </div>
+    </div>
+
+    <!-- ==================== 账户安全标签页 ==================== -->
+    <div v-if="active === 'security'" class="settings-content-card">
+      <!-- 修改密码 -->
+      <div class="form-section">
+        <h3 class="form-section-title">修改密码</h3>
+        <p style="margin-bottom: 20px; color: #606266;">定期修改密码可以提高账户安全性</p>
+        <el-button type="primary" @click="showPasswordDialog = true">
+          <i class="fas fa-key"></i> 修改密码
+        </el-button>
+      </div>
+
+      <!-- 两因素认证 -->
+      <div class="form-section">
+        <h3 class="form-section-title">两因素认证（2FA）</h3>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+          <div style="flex: 1;">
+            <p style="color: #606266; margin-bottom: 8px;">两因素认证为您的账户提供额外的安全保护</p>
+            <p style="color: #909399; font-size: 13px;">
+              当前状态：
+              <el-tag :type="security.twoFaEnabled ? 'success' : 'info'" size="small">
+                [[ security.twoFaEnabled ? '已启用' : '未启用' ]]
+              </el-tag>
+              <span v-if="security.twoFaEnabled" style="margin-left: 8px;">
+                （方式：[[ security.twoFaMethod === 'totp' ? 'TOTP验证器' : '邮箱验证' ]]）
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div v-if="!security.twoFaEnabled">
+          <el-button type="primary" @click="show2faSetupDialog = true">
+            <i class="fas fa-shield-alt"></i> 启用两因素认证
+          </el-button>
+        </div>
+        <div v-else style="display: flex; gap: 12px;">
+          <el-button type="danger" @click="show2faDisableDialog = true">
+            <i class="fas fa-times-circle"></i> 禁用两因素认证
+          </el-button>
+          <el-button v-if="security.twoFaMethod === 'totp'" @click="showBackupCodesDialog = true">
+            <i class="fas fa-list-ol"></i> 查看备用验证码
+          </el-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 修改密码弹窗 -->
+    <el-dialog v-model="showPasswordDialog" title="修改密码" width="500px" align-center>
+      <el-form label-width="120px">
+        <el-form-item label="当前密码">
+          <el-input v-model="passwordForm.current" type="password" show-password placeholder="请输入当前密码"></el-input>
+        </el-form-item>
+
+        <el-form-item label="新密码">
+          <el-input v-model="passwordForm.new" type="password" show-password placeholder="至少8位字符"></el-input>
+        </el-form-item>
+
+        <el-form-item label="确认新密码">
+          <el-input v-model="passwordForm.confirm" type="password" show-password placeholder="再次输入新密码"></el-input>
+        </el-form-item>
+
+        <el-form-item label="图形验证码">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <el-input v-model="passwordForm.imageCaptcha" placeholder="输入图片验证码" style="flex: 1;"></el-input>
+            <img :src="captchaUrl" @click="refreshCaptcha" alt="验证码"
+                 style="height: 42px; width: 140px; object-fit: contain; border: 1px solid #dcdfe6; border-radius: 4px; cursor: pointer;"
+                 title="点击刷新">
+          </div>
+        </el-form-item>
+
+        <el-form-item label="邮箱验证码">
+          <div style="display: flex; gap: 8px;">
+            <el-input v-model="passwordForm.emailCode" placeholder="输入验证码" style="flex: 1;"></el-input>
+            <el-button type="primary" :disabled="passwordForm.codeSending || passwordForm.codeCountdown>0 || !passwordForm.imageCaptcha"
+                       @click="sendPasswordEmailCode" style="min-width: 120px;">
+              [[ passwordForm.codeCountdown > 0 ? passwordForm.codeCountdown + 's' : '获取验证码' ]]
+            </el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button @click="showPasswordDialog = false">取消</el-button>
+          <el-button type="primary" @click="changePassword">确认修改</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 启用2FA弹窗 -->
+    <el-dialog v-model="show2faSetupDialog" title="启用两因素认证" width="500px" align-center>
+      <div v-if="!twoFaSetup.step">
+        <p style="margin-bottom: 20px; color: #606266;">请选择验证方式：</p>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <el-button @click="start2faSetup('totp')" size="large">
+            <i class="fas fa-mobile-alt"></i> TOTP验证器（推荐）
+          </el-button>
+          <el-button @click="start2faSetup('email')" size="large">
+            <i class="fas fa-envelope"></i> 邮箱验证
+          </el-button>
+        </div>
+      </div>
+
+      <!-- TOTP扫码步骤 -->
+      <div v-else-if="twoFaSetup.step === 'totp-scan'">
+        <p style="margin-bottom: 12px; color: #606266;">使用 Google Authenticator 或其他 TOTP 应用扫描此二维码：</p>
+        <div style="text-align: center; margin: 20px 0;">
+          <img :src="twoFaSetup.qrCode" alt="QR Code" style="max-width: 250px;">
+        </div>
+        <p style="margin-top: 12px; color: #909399; font-size: 13px;">
+          无法扫描？手动输入密钥：<br>
+          <code style="background: #f5f7fa; padding: 4px 8px; border-radius: 4px;">[[ twoFaSetup.secret ]]</code>
+        </p>
+        <el-form style="margin-top: 20px;">
+          <el-form-item label="验证码">
+            <el-input v-model="twoFaSetup.verifyCode" placeholder="输入6位验证码"></el-input>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <!-- 备用码显示 -->
+      <div v-else-if="twoFaSetup.step === 'backup-codes'">
+        <el-alert title="请妥善保存这些备用验证码" type="warning" :closable="false" style="margin-bottom: 16px;">
+          <p>当您无法使用验证器时，可以使用这些备用码登录。每个备用码只能使用一次。</p>
+        </el-alert>
+        <div style="background: #f5f7fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+          <div v-for="code in twoFaSetup.backupCodes" :key="code" style="font-family: monospace; padding: 4px 0;">
+            [[ code ]]
+          </div>
+        </div>
+        <el-button type="primary" @click="copyBackupCodes" style="width: 100%;">
+          <i class="fas fa-copy"></i> 复制所有备用码
+        </el-button>
+      </div>
+
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button @click="cancel2faSetup">取消</el-button>
+          <el-button v-if="twoFaSetup.step === 'totp-scan'" type="primary" @click="verify2faSetup">
+            验证并启用
+          </el-button>
+          <el-button v-if="twoFaSetup.step === 'backup-codes'" type="success" @click="finish2faSetup">
+            我已保存，完成设置
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 禁用2FA弹窗 -->
+    <el-dialog v-model="show2faDisableDialog" title="禁用两因素认证" width="400px" align-center>
+      <el-alert title="警告" type="warning" :closable="false" style="margin-bottom: 16px;">
+        <p>禁用两因素认证会降低您的账户安全性，请谨慎操作。</p>
+      </el-alert>
+      <el-form>
+        <el-form-item label="当前密码">
+          <el-input v-model="twoFaDisable.password" type="password" show-password placeholder="请输入当前密码"></el-input>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button @click="show2faDisableDialog = false">取消</el-button>
+          <el-button type="danger" @click="disable2fa">确认禁用</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 备用验证码弹窗 -->
+    <el-dialog v-model="showBackupCodesDialog" title="重新生成备用验证码" width="500px" align-center>
+      <div v-if="!backupCodes.newCodes">
+        <p style="margin-bottom: 16px; color: #606266;">重新生成备用验证码会使旧的备用码失效</p>
+        <el-form>
+          <el-form-item label="当前密码">
+            <el-input v-model="backupCodes.password" type="password" show-password placeholder="请输入当前密码"></el-input>
+          </el-form-item>
+        </el-form>
+        <el-button type="primary" @click="regenerateBackupCodes" style="width: 100%;">
+          重新生成备用验证码
+        </el-button>
+      </div>
+      <div v-else>
+        <el-alert title="请妥善保存这些新的备用验证码" type="success" :closable="false" style="margin-bottom: 16px;"></el-alert>
+        <div style="background: #f5f7fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+          <div v-for="code in backupCodes.newCodes" :key="code" style="font-family: monospace; padding: 4px 0;">
+            [[ code ]]
+          </div>
+        </div>
+        <el-button type="primary" @click="copyNewBackupCodes" style="width: 100%;">
+          <i class="fas fa-copy"></i> 复制所有备用码
+        </el-button>
+      </div>
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button @click="closeBackupCodesDialog">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- ==================== 其他标签页占位 ==================== -->
+    <div v-if="active === 'notifications'" class="settings-content-card">
+      <div class="form-section">
+        <h3 class="form-section-title">通知偏好</h3>
+        <p style="color: #909399;">此功能正在开发中...</p>
+      </div>
+    </div>
+
+    <div v-if="active === 'appearance'" class="settings-content-card">
+      <div class="form-section">
+        <h3 class="form-section-title">外观主题</h3>
+        <p style="color: #909399;">此功能正在开发中...</p>
+      </div>
+    </div>
+
+    <div v-if="active === 'note_prefs'" class="settings-content-card">
+      <div class="form-section">
+        <h3 class="form-section-title">笔记偏好</h3>
+        <p style="color: #909399;">此功能正在开发中...</p>
+      </div>
+    </div>
+
+    <div v-if="active === 'data'" class="settings-content-card">
+      <div class="form-section">
+        <h3 class="form-section-title">数据与导出</h3>
+        <p style="color: #909399;">此功能正在开发中...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 修改邮箱弹窗 ==================== -->
+  <el-dialog v-model="showEmailDialog" title="修改邮箱" width="450px" align-center>
+    <el-form label-width="100px">
+      <el-form-item label="当前密码">
+        <el-input v-model="emailForm.password" type="password" show-password placeholder="请输入当前密码"></el-input>
+      </el-form-item>
+
+      <el-form-item label="新邮箱">
+        <el-input v-model="emailForm.new_email" placeholder="请输入新邮箱地址"></el-input>
+      </el-form-item>
+
+      <el-form-item label="图形验证码">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <el-input
+            v-model="emailForm.imageCaptcha"
+            placeholder="输入图片验证码"
+            style="flex: 1;"
+          ></el-input>
+          <img
+            :src="captchaUrl"
+            @click="refreshCaptcha"
+            alt="验证码"
+            style="height: 42px; width: 140px; object-fit: contain; border: 1px solid #dcdfe6; border-radius: 4px; cursor: pointer;"
+            title="点击刷新"
+          >
+        </div>
+      </el-form-item>
+
+      <el-form-item label="邮箱验证码">
+        <div style="display: flex; gap: 8px;">
+          <el-input v-model="emailForm.code" placeholder="输入验证码" style="flex: 1;"></el-input>
+          <el-button
+            type="primary"
+            :disabled="emailForm.codeSending || emailForm.codeCountdown>0 || !emailForm.imageCaptcha"
+            @click="sendEmailCode"
+            style="min-width: 120px;"
+          >
+            [[ emailForm.codeCountdown > 0 ? emailForm.codeCountdown + 's' : '获取验证码' ]]
+          </el-button>
+        </div>
+      </el-form-item>
+    </el-form>
+
+    <template #footer>
+      <div style="text-align: right;">
+        <el-button @click="showEmailDialog=false">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!canSubmitEmail || !emailForm.password || !emailForm.code || !emailForm.imageCaptcha || emailCheck.status!=='ok'"
+          @click="changeEmail"
+        >
+          确认修改
+        </el-button>
+      </div>
+    </template>
+  </el-dialog>
+</div>
+
+
+<script src="{% static 'JS/vue/vue.global.js' %}"></script>
+<script src="{% static 'JS/element-plus/element-plus.js' %}"></script>
+<script src="{% static 'JS/settings_app.js' %}" type="module"></script>
+{% endblock %}

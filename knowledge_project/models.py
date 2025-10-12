@@ -132,6 +132,14 @@ class Asset(models.Model):
 def user_avatar_path(instance, filename):
     return f'user_{instance.user.id}/avatar/{filename}'
 
+def default_theme_settings():
+    """为 JSONField 提供默认主题设置的可调用函数"""
+    return {
+        'mode': 'system',
+        'primary_color': '#2196F3',
+        'dark_mode': False
+    }
+
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="关联用户")
     activation_code = models.CharField(max_length=8, blank=True, null=True, unique=True, verbose_name="激活码")
@@ -158,11 +166,7 @@ class Profile(models.Model):
         verbose_name="主页横幅"
     )
     theme = models.JSONField(
-        default={
-            'mode': 'system',
-            'primary_color': '#2196F3',
-            'dark_mode': False
-        },
+        default=default_theme_settings,  # 使用可调用函数而不是字典实例
         verbose_name="主题设置"
     )
     allow_rich_bio = models.BooleanField(
@@ -179,6 +183,31 @@ class Profile(models.Model):
     last_updated = models.DateTimeField(
         auto_now=True,
         verbose_name="最后更新时间"
+    )
+
+    # ==================== 两因素认证（2FA）相关字段 ====================
+    two_fa_enabled = models.BooleanField(
+        default=False,
+        verbose_name="启用两因素认证"
+    )
+    two_fa_method = models.CharField(
+        max_length=10,
+        choices=[('totp', 'TOTP验证器'), ('email', '邮箱验证')],
+        default='totp',
+        blank=True,
+        verbose_name="2FA验证方式"
+    )
+    totp_secret = models.CharField(
+        max_length=32,
+        blank=True,
+        verbose_name="TOTP密钥",
+        help_text="用于 Google Authenticator 等 TOTP 应用的密钥"
+    )
+    backup_codes = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="备用验证码",
+        help_text="用于 TOTP 设备丢失时的一次性备用码"
     )
 
     def clean_bio(self):
@@ -204,10 +233,19 @@ class Profile(models.Model):
         self.process_banner_image()  # 处理横幅图片
 
     def process_banner_image(self):
-        """处理横幅图片的压缩和裁剪"""
+        """处理横幅图片的压缩和裁剪（仅处理图片，跳过视频）"""
         if self.banner_image:
             try:
-                img = Image.open(self.banner_image.path)
+                # 检查文件类型，只处理图片
+                file_path = self.banner_image.path
+                file_ext = os.path.splitext(file_path)[1].lower()
+
+                # 如果是视频文件，跳过处理
+                if file_ext in ['.mp4', '.webm', '.avi', '.mov', '.mkv']:
+                    logger.info(f"跳过视频文件处理: {file_path}")
+                    return
+
+                img = Image.open(file_path)
 
                 # 转换为RGB模式
                 if img.mode != 'RGB':

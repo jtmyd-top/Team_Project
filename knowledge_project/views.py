@@ -53,6 +53,10 @@ from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.contrib.auth.hashers import check_password
+import threading  # 用于延迟删除文件
+import pyotp  # 用于 TOTP 两因素认证
+import qrcode  # 用于生成 QR 码
+import base64  # 用于编码 QR 码图片
 
 # 定义富文本分页函数
 # 定义富文本分页函数
@@ -124,6 +128,26 @@ class CustomUserCreationForm(UserCreationForm):
         model = User
         fields = UserCreationForm.Meta.fields + ('email',)
 logger = logging.getLogger(__name__)
+
+# 延迟删除文件的辅助函数
+def _delayed_delete_file(file_path, delay=3):
+    """
+    延迟删除文件，避免 Windows 文件占用问题
+    delay: 延迟秒数
+    """
+    def delete_file():
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"延迟删除文件成功: {file_path}")
+        except OSError as e:
+            logger.warning(f"延迟删除文件仍然失败: {file_path}, 错误: {e}")
+
+    # 使用 Timer 延迟删除
+    timer = threading.Timer(delay, delete_file)
+    timer.daemon = True  # 设置为守护线程，主程序退出时自动结束
+    timer.start()
+
 def _check_email_availability(request, email: str, *, exclude_self: bool = False):
     """
     统一的邮箱可用性检查逻辑（供多个视图共用）
@@ -149,9 +173,10 @@ def _check_email_availability(request, email: str, *, exclude_self: bool = False
 class SendEmailCodeView(View):
     """
     验证图片验证码 -> 发送邮箱验证码
-    兼容两种业务：
+    兼容三种业务：
     - 注册: purpose='register'（默认）
     - 修改邮箱: purpose='change'
+    - 修改密码: purpose='password_change'
     """
     def post(self, request, *args, **kwargs):
         # 1) 识别客户端 IP，用于限流
@@ -161,11 +186,11 @@ class SendEmailCodeView(View):
 
         # 2) 限流（维持你现有阈值）
         hourly_attempts = cache.get(hourly_key, 0)
-        if hourly_attempts >= 30:
+        if hourly_attempts >= 3:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         daily_attempts = cache.get(daily_key, 0)
-        if daily_attempts >= 50:
+        if daily_attempts >= 5:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         # 3) 解析参数
@@ -176,7 +201,7 @@ class SendEmailCodeView(View):
 
         email = (data.get('email') or '').strip()
         image_captcha_code = (data.get('image_captcha_code') or '').strip().upper()
-        purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'change'
+        purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'change' | 'password_change'
 
         # 4) 校验图片验证码（并单次使用）
         session_code = (request.session.get('captcha_code') or '').upper()
@@ -186,8 +211,18 @@ class SendEmailCodeView(View):
             return JsonResponse({'status': 'error', 'message': '图片验证码错误'}, status=400)
 
         # 5) 业务区分 & 邮箱可用性检查（共用工具函数）
-        if purpose == 'change':
-            # 未登录不能走“修改邮箱”
+        if purpose == 'password_change':
+            # 修改密码：发送验证码到当前邮箱，验证是本人操作
+            if not request.user.is_authenticated:
+                return JsonResponse({'status': 'error', 'message': '请先登录'}, status=403)
+
+            # 使用当前用户的邮箱，不需要检查可用性
+            email = request.user.email
+            mail_subject = '密码修改验证码'
+            ok_message   = '验证码已发送至您的邮箱'
+
+        elif purpose == 'change':
+            # 修改邮箱：发送验证码到新邮箱，验证新邮箱的所有权
             if not request.user.is_authenticated:
                 return JsonResponse({'status': 'error', 'message': '未登录用户无法修改邮箱'}, status=403)
 
@@ -202,11 +237,12 @@ class SendEmailCodeView(View):
 
             mail_subject = '邮箱修改验证码'
             ok_message   = '验证码已发送至您的新邮箱'
+
         else:
             # 注册：谁绑了都算占用
             check = _check_email_availability(request, email, exclude_self=False)
             if not check['ok']:
-                # 为了与之前前端体验一致，文案使用“已被注册”
+                # 为了与之前前端体验一致，文案使用"已被注册"
                 msg = '该邮箱已被注册' if check['reason'] == 'taken' else check['message']
                 return JsonResponse({'status': 'error', 'message': msg}, status=400)
 
@@ -801,7 +837,6 @@ def public_notes_list_view(request):
     # 不再需要进行分页或查询数据，直接渲染模板
     return render(request, 'knowledge/public_notes_list.html')
 @login_required
-@login_required
 def settings_view(request):
     """
     用户个人设置页面
@@ -824,6 +859,9 @@ def settings_view(request):
         "notes_count": notes_count,
         "views_count": 0,  # 暂时默认为0，后续可以添加访问统计功能
         "is_liked": is_liked,
+        # ✅ 添加 2FA 状态
+        "two_fa_enabled": profile.two_fa_enabled if profile else False,
+        "two_fa_method": profile.two_fa_method if profile else 'totp',
     }
     print(context)
     return render(request, "settings/setting.html", context)
@@ -853,8 +891,8 @@ def upload_avatar(request):
 
             # 验证文件大小（图片最大 5MB，视频最大 15MB）
             is_video = banner_file.content_type in allowed_video_types
-            max_size = 150 * 1024 * 1024 if is_video else 5 * 1024 * 1024
-            max_size_mb = 150 if is_video else 5
+            max_size = 1500 * 1024 * 1024 if is_video else 5 * 1024 * 1024
+            max_size_mb = 1500 if is_video else 5
 
             if banner_file.size > max_size:
                 return JsonResponse({
@@ -862,30 +900,60 @@ def upload_avatar(request):
                     "message": f"{'视频' if is_video else '图片'}大小不能超过 {max_size_mb}MB"
                 }, status=400)
 
-            # 删除旧横幅（可选）
+            # 【修复】先保存旧文件的路径，然后删除
+            old_banner_path = None
             if user.profile.banner_image:
-                user.profile.banner_image.delete(save=False)
+                try:
+                    # 获取旧文件的完整路径
+                    old_banner_path = user.profile.banner_image.path
+                except (ValueError, AttributeError):
+                    pass  # 如果文件不存在，忽略错误
 
-            # 保存新横幅
+            # 保存新横幅（先保存）
             user.profile.banner_image.save(banner_file.name, banner_file, save=True)
+
+            # 【修复】获取新文件路径，只删除路径不同的旧文件
+            try:
+                new_banner_path = user.profile.banner_image.path
+                # 只有当旧文件路径存在且与新文件路径不同时，才延迟删除
+                if old_banner_path and old_banner_path != new_banner_path and os.path.exists(old_banner_path):
+                    _delayed_delete_file(old_banner_path, delay=5)
+            except (ValueError, AttributeError):
+                pass
 
             return JsonResponse({
                 "status": "success",
+                "message": "横幅上传成功",
                 "banner_url": request.build_absolute_uri(user.profile.banner_image.url),
                 "is_video": is_video
             })
 
         # 头像上传
         elif avatar_file:
-            # 删除旧头像（可选）
+            # 【修复】先保存旧文件的路径，然后删除
+            old_avatar_path = None
             if user.profile.avatar:
-                user.profile.avatar.delete(save=False)
+                try:
+                    # 获取旧文件的完整路径
+                    old_avatar_path = user.profile.avatar.path
+                except (ValueError, AttributeError):
+                    pass  # 如果文件不存在，忽略错误
 
-            # 保存新头像
+            # 保存新头像（先保存）
             user.profile.avatar.save(avatar_file.name, avatar_file, save=True)
+
+            # 【修复】获取新文件路径，只删除路径不同的旧文件
+            try:
+                new_avatar_path = user.profile.avatar.path
+                # 只有当旧文件路径存在且与新文件路径不同时，才延迟删除
+                if old_avatar_path and old_avatar_path != new_avatar_path and os.path.exists(old_avatar_path):
+                    _delayed_delete_file(old_avatar_path, delay=5)
+            except (ValueError, AttributeError):
+                pass
 
             return JsonResponse({
                 "status": "success",
+                "message": "头像上传成功",
                 "avatar_url": request.build_absolute_uri(user.profile.avatar.url)
             })
 
@@ -896,8 +964,6 @@ def upload_avatar(request):
             }, status=400)
 
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"上传文件失败: {str(e)}", exc_info=True)
         return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
@@ -1042,5 +1108,297 @@ def toggle_profile_like(request):
     except Exception as e:
         logger.error(f"点赞操作失败 (用户: {user.id}): {str(e)}", exc_info=True)
         return JsonResponse({"status": "error", "message": "操作失败，请稍后重试"}, status=500)
+
+
+# ==================== 账户安全功能 API ====================
+
+@login_required
+@require_http_methods(["POST"])
+def change_password(request):
+    """
+    修改密码
+    需要验证：当前密码、图形验证码、邮箱验证码
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    current_password = data.get("current_password", "")
+    new_password = data.get("new_password", "")
+    confirm_password = data.get("confirm_password", "")
+    image_captcha_code = data.get("image_captcha_code", "").upper().strip()
+    email_code = data.get("email_code", "").strip()
+
+    # 1) 验证必要参数
+    if not all([current_password, new_password, confirm_password, image_captcha_code, email_code]):
+        return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
+
+    # 2) 验证当前密码
+    if not request.user.check_password(current_password):
+        return JsonResponse({"status": "error", "message": "当前密码错误"}, status=400)
+
+    # 3) 验证新密码和确认密码
+    if new_password != confirm_password:
+        return JsonResponse({"status": "error", "message": "两次输入的新密码不一致"}, status=400)
+
+    # 4) 验证密码强度（至少8位）
+    if len(new_password) < 8:
+        return JsonResponse({"status": "error", "message": "新密码长度至少为8位"}, status=400)
+
+    # 5) 验证图形验证码
+    session_captcha = request.session.get("captcha_code", "").upper()
+    if not session_captcha or session_captcha != image_captcha_code:
+        return JsonResponse({"status": "error", "message": "图形验证码错误"}, status=400)
+
+    # 用一次就作废
+    if "captcha_code" in request.session:
+        del request.session["captcha_code"]
+
+    # 6) 验证邮箱验证码
+    verification = request.session.get("registration_verification")
+    if not verification:
+        return JsonResponse({"status": "error", "message": "邮箱验证码已过期"}, status=400)
+
+    if verification.get("email") != request.user.email:
+        return JsonResponse({"status": "error", "message": "邮箱验证码不匹配"}, status=400)
+
+    if verification.get("code") != email_code:
+        return JsonResponse({"status": "error", "message": "邮箱验证码错误"}, status=400)
+
+    # 检查有效期（10分钟）
+    if time.time() - float(verification.get("timestamp", 0)) > 600:
+        return JsonResponse({"status": "error", "message": "邮箱验证码已过期"}, status=400)
+
+    # 7) 更新密码
+    user = request.user
+    user.set_password(new_password)
+    user.save()
+
+    # 清除验证码 session
+    if "registration_verification" in request.session:
+        del request.session["registration_verification"]
+
+    # 重新登录用户（因为密码已更改）
+    from django.contrib.auth import update_session_auth_hash
+    update_session_auth_hash(request, user)
+
+    return JsonResponse({"status": "success", "message": "密码修改成功"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def enable_2fa(request):
+    """
+    启用两因素认证
+    - TOTP方式：生成密钥和二维码
+    - Email方式：直接启用邮箱验证
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    method = data.get("method", "totp")  # 'totp' 或 'email'
+    profile = request.user.profile
+
+    # 如果已经启用2FA，不允许重复启用
+    if profile.two_fa_enabled:
+        return JsonResponse({"status": "error", "message": "两因素认证已启用"}, status=400)
+
+    if method == "totp":
+        # 生成 TOTP 密钥
+        secret = pyotp.random_base32()
+
+        # 生成 QR 码 URI
+        totp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+            name=request.user.email,
+            issuer_name="知识管理系统"
+        )
+
+        # 生成 QR 码图片
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(totp_uri)
+        qr.make(fit=True)
+
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        qr_code_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+        # 临时保存密钥到 session，等待验证后再写入数据库
+        request.session['temp_totp_secret'] = secret
+        request.session['temp_2fa_method'] = 'totp'
+
+        return JsonResponse({
+            "status": "success",
+            "message": "请扫描二维码并输入验证码",
+            "qr_code": f"data:image/png;base64,{qr_code_base64}",
+            "secret": secret,  # 也返回密钥文本，方便手动输入
+            "requires_verification": True
+        })
+
+    elif method == "email":
+        # 邮箱验证方式，直接标记为待验证状态
+        request.session['temp_2fa_method'] = 'email'
+
+        return JsonResponse({
+            "status": "success",
+            "message": "邮箱验证方式已准备就绪",
+            "requires_verification": False  # 邮箱方式不需要额外验证步骤
+        })
+
+    else:
+        return JsonResponse({"status": "error", "message": "不支持的验证方式"}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def verify_2fa_setup(request):
+    """
+    验证并完成 2FA 设置
+    - 对于 TOTP：验证用户输入的验证码是否正确
+    - 验证成功后，正式启用 2FA
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    code = data.get("code", "").strip()
+    profile = request.user.profile
+
+    # 检查是否有待验证的2FA设置
+    temp_method = request.session.get('temp_2fa_method')
+    if not temp_method:
+        return JsonResponse({"status": "error", "message": "未找到待验证的2FA设置"}, status=400)
+
+    if temp_method == "totp":
+        # 从 session 获取临时密钥
+        temp_secret = request.session.get('temp_totp_secret')
+        if not temp_secret:
+            return JsonResponse({"status": "error", "message": "密钥已过期，请重新设置"}, status=400)
+
+        # 验证 TOTP 码
+        totp = pyotp.TOTP(temp_secret)
+        if not totp.verify(code, valid_window=1):  # valid_window=1 允许前后30秒的时间差
+            return JsonResponse({"status": "error", "message": "验证码错误"}, status=400)
+
+        # 验证成功，保存密钥并启用2FA
+        profile.totp_secret = temp_secret
+        profile.two_fa_method = 'totp'
+        profile.two_fa_enabled = True
+
+        # 生成备用码
+        backup_codes = generate_backup_codes_list()
+        profile.backup_codes = [hashlib.sha256(code.encode()).hexdigest() for code in backup_codes]
+
+        profile.save(update_fields=['totp_secret', 'two_fa_method', 'two_fa_enabled', 'backup_codes'])
+
+        # 清除 session 中的临时数据
+        if 'temp_totp_secret' in request.session:
+            del request.session['temp_totp_secret']
+        if 'temp_2fa_method' in request.session:
+            del request.session['temp_2fa_method']
+
+        return JsonResponse({
+            "status": "success",
+            "message": "TOTP 两因素认证已成功启用",
+            "backup_codes": backup_codes  # 返回明文备用码供用户保存
+        })
+
+    elif temp_method == "email":
+        # 邮箱方式直接启用
+        profile.two_fa_method = 'email'
+        profile.two_fa_enabled = True
+        profile.save(update_fields=['two_fa_method', 'two_fa_enabled'])
+
+        # 清除 session
+        if 'temp_2fa_method' in request.session:
+            del request.session['temp_2fa_method']
+
+        return JsonResponse({
+            "status": "success",
+            "message": "邮箱两因素认证已成功启用"
+        })
+
+    return JsonResponse({"status": "error", "message": "未知错误"}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def disable_2fa(request):
+    """
+    禁用两因素认证
+    需要验证当前密码
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    password = data.get("password", "")
+    profile = request.user.profile
+
+    # 验证密码
+    if not request.user.check_password(password):
+        return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
+
+    # 禁用2FA并清除相关数据
+    profile.two_fa_enabled = False
+    profile.totp_secret = ""
+    profile.backup_codes = []
+    profile.save(update_fields=['two_fa_enabled', 'totp_secret', 'backup_codes'])
+
+    return JsonResponse({
+        "status": "success",
+        "message": "两因素认证已禁用"
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def regenerate_backup_codes(request):
+    """
+    重新生成备用验证码
+    需要验证当前密码或2FA验证码
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    password = data.get("password", "")
+    profile = request.user.profile
+
+    # 必须已启用2FA
+    if not profile.two_fa_enabled:
+        return JsonResponse({"status": "error", "message": "未启用两因素认证"}, status=400)
+
+    # 验证密码
+    if not request.user.check_password(password):
+        return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
+
+    # 生成新的备用码
+    backup_codes = generate_backup_codes_list()
+    profile.backup_codes = [hashlib.sha256(code.encode()).hexdigest() for code in backup_codes]
+    profile.save(update_fields=['backup_codes'])
+
+    return JsonResponse({
+        "status": "success",
+        "message": "备用验证码已重新生成",
+        "backup_codes": backup_codes
+    })
+
+
+def generate_backup_codes_list():
+    """
+    生成10个8位数字+字母的备用验证码
+    """
+    codes = []
+    for _ in range(10):
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        codes.append(code)
+    return codes
 
 
