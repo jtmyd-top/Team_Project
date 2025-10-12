@@ -31,11 +31,16 @@ urlpatterns = [
     path('api/toggle-like/', views.toggle_profile_like, name='toggle_profile_like'),
 
     # ==================== 账户安全相关 API ====================
+    path('api/security/send-operation-2fa/', views.send_operation_2fa_code, name='send_operation_2fa_code'),
     path('api/security/change-password/', views.change_password, name='change_password'),
     path('api/security/enable-2fa/', views.enable_2fa, name='enable_2fa'),
     path('api/security/verify-2fa-setup/', views.verify_2fa_setup, name='verify_2fa_setup'),
     path('api/security/disable-2fa/', views.disable_2fa, name='disable_2fa'),
     path('api/security/regenerate-backup-codes/', views.regenerate_backup_codes, name='regenerate_backup_codes'),
+
+    # ==================== 2FA登录验证 API ====================
+    path('api/2fa/verify/', views.verify_2fa_login, name='verify_2fa_login'),
+    path('api/2fa/resend-email/', views.resend_2fa_email, name='resend_2fa_email'),
 
     #path("logout/", views.logout_view, name="logout"),
 ]

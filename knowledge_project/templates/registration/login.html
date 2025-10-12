@@ -1,57 +1,384 @@
-<!-- knowledge_project/templates/registration/login.html (最终美化版) -->
 {% extends 'base.html' %}
 {% load static %}
 {% block title %}用户登录{% endblock %}
 
-{% block content %}
+{% block head_extra %}
+<link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
+<style>
+/* 登录页面容器 */
+.login-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+    width: 100vh;
+}
 
-<link href="{% static 'css/login.css' %}" rel="stylesheet">
+/* 登录卡片 */
+.login-card {
+    width: 100%;
+    max-width: 450px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
 
-<div id="login-app">
-    <h2>[[ pageTitle ]]</h2>
+/* 卡片头部 */
+.login-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 40px 30px;
+    text-align: center;
 
-    <!-- 修改1: 添加 @submit.prevent 指令 -->
-<form method="post" @submit.prevent="handleLogin">
-    {% csrf_token %}
-    <!-- 修改2: 使用 v-if 显示Vue中的错误信息 -->
-    <div v-if="loginError" class="form-error-message">
-        <p>[[ loginError ]]</p>
-    </div>
-    <!-- 用户名输入框 -->
-    <div class="form-group">
-        <!-- 修改3: 添加 v-model 来进行数据绑定 -->
-        <input type="text" name="username" id="id_username" class="form-input" placeholder=" " required
-               v-model="form.username">
-        <label for="id_username" class="floating-label">用户名</label>
-        <i class="fa-regular fa-user input-icon"></i>
-    </div>
-    <!-- 密码输入框 -->
-    <div class="form-group">
-        <!-- 修改4: 绑定密码字段并修改 type -->
-        <input :type="passwordFieldType" name="password" id="id_password" class="form-input" placeholder=" " required
-               v-model="form.password">
-        <label for="id_password" class="floating-label">密码</label>
-        <i class="fa fa-lock input-icon"></i>
-        <!-- 修改5: 添加 @click 事件 -->
-        <i class="fas input-passwd" :class="passwordFieldType === 'password' ? 'fa-eye' : 'fa-eye-slash'"
-           @click="togglePasswordVisibility"></i>
-    </div>
-    <button type="submit" class="submit-btn"><i class="fa fa-sign-in-alt "></i> 登录</button>
-</form>
+}
 
-<!--    <p class="signup-link">-->
-<!--        <a href="{% url 'signup' %}">还没有账户？点此注册</a>-->
-<!--    </p>-->
-</div>
-<script>
+.login-header h2 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+}
 
-        login= "{% url 'login' %}",
-        signup="{% url 'signup' %}",
-        sendEmailCode= "{% url 'send_email_code' %}"
+.login-header p {
+    margin: 8px 0 0;
+    font-size: 14px;
+    opacity: 0.9;
+}
 
-</script>
-<script src="{%static 'JS/login.js'%}"></script>
+/* 卡片内容 */
+.login-body {
+    padding: 40px 30px;
+}
 
+/* 表单项间距 */
+.el-form-item {
+    margin-bottom: 24px;
+}
+
+/* 按钮美化 */
+.el-button {
+    width: 100%;
+    height: 48px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.el-button--primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+}
+
+.el-button--primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+/* 输入框美化 */
+.el-input__inner {
+    height: 48px;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+/* 步骤指示器 */
+.step-indicator {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 24px;
+    gap: 12px;
+}
+
+.step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.step-circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #e0e0e0;
+    color: #999;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.step-circle.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.step-circle.completed {
+    background: #67c23a;
+    color: white;
+}
+
+.step-label {
+    font-size: 14px;
+    color: #999;
+}
+
+.step-label.active {
+    color: #667eea;
+    font-weight: 600;
+}
+
+.step-divider {
+    width: 40px;
+    height: 2px;
+    background: #e0e0e0;
+}
+
+/* 2FA信息提示 */
+.twofa-info {
+    background: #f0f9ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.twofa-info p {
+    margin: 0;
+    color: #1e40af;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.twofa-info i {
+    color: #3b82f6;
+    margin-right: 8px;
+}
+
+/* 备用验证码链接 */
+.backup-code-link {
+    text-align: center;
+    margin-top: 16px;
+}
+
+.backup-code-link a {
+    color: #667eea;
+    text-decoration: none;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.backup-code-link a:hover {
+    color: #764ba2;
+    text-decoration: underline;
+}
+
+/* 返回按钮 */
+.back-button {
+    margin-top: 16px;
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+    .login-card {
+        max-width: 100%;
+    }
+
+    .login-header {
+        padding: 30px 20px;
+    }
+
+    .login-body {
+        padding: 30px 20px;
+    }
+}
+</style>
 {% endblock %}
 
+{% block content %}
+<div id="login-app" class="login-container">
+    <div class="login-card">
+        <!-- 卡片头部 -->
+        <div class="login-header">
+            <h2>欢迎回来</h2>
+            <p>登录您的知识管理账户</p>
+        </div>
 
+        <!-- 卡片内容 -->
+        <div class="login-body">
+            <!-- 步骤指示器（仅在2FA流程时显示） -->
+            <div v-if="showStepIndicator" class="step-indicator">
+                <div class="step-item">
+                    <div class="step-circle completed">
+                        <i class="fas fa-check"></i>
+                    </div>
+                    <span class="step-label">密码验证</span>
+                </div>
+                <div class="step-divider"></div>
+                <div class="step-item">
+                    <div class="step-circle active">2</div>
+                    <span class="step-label active">两因素认证</span>
+                </div>
+            </div>
+
+            <!-- 第一步：用户名密码登录表单 -->
+            <el-form
+                v-if="!require2fa"
+                ref="loginFormRef"
+                :model="loginForm"
+                :rules="loginRules"
+                @submit.prevent="handleLogin"
+            >
+                <el-form-item prop="username">
+                    <el-input
+                        v-model="loginForm.username"
+                        placeholder="请输入用户名"
+                        size="large"
+                        clearable
+                    >
+                        <template #prefix>
+                            <i class="fa-regular fa-user"></i>
+                        </template>
+                    </el-input>
+                </el-form-item>
+
+                <el-form-item prop="password">
+                    <el-input
+                        v-model="loginForm.password"
+                        type="password"
+                        placeholder="请输入密码"
+                        size="large"
+                        show-password
+                        @keyup.enter="handleLogin"
+                    >
+                        <template #prefix>
+                            <i class="fa fa-lock"></i>
+                        </template>
+                    </el-input>
+                </el-form-item>
+
+                <el-form-item>
+                    <el-button
+                        type="primary"
+                        size="large"
+                        :loading="loading"
+                        @click="handleLogin"
+                    >
+                        <i class="fas fa-sign-in-alt" style="margin-right: 8px;"></i>
+                        [[ loading ? '登录中...' : '登录' ]]
+                    </el-button>
+                </el-form-item>
+            </el-form>
+
+            <!-- 第二步：2FA验证表单 -->
+            <div v-if="require2fa">
+                <!-- 2FA信息提示 -->
+                <div class="twofa-info">
+                    <p>
+                        <i class="fas fa-shield-alt"></i>
+                        <strong>两因素认证</strong>
+                    </p>
+                    <p v-if="!useBackupCode && twoFaMethod === 'totp'" style="margin-top: 8px;">
+                        请打开您的验证器应用（如 Google Authenticator），输入6位验证码
+                    </p>
+                    <p v-if="!useBackupCode && twoFaMethod === 'email'" style="margin-top: 8px;">
+                        验证码已发送至您的邮箱，请查收并输入（5分钟内有效）
+                    </p>
+                    <p v-if="useBackupCode" style="margin-top: 8px;">
+                        <i class="fas fa-exclamation-circle"></i>
+                        请输入8位备用验证码。注意：每个备用码只能使用一次
+                    </p>
+                </div>
+
+                <el-form
+                    ref="twoFaFormRef"
+                    :model="twoFaForm"
+                    :rules="twoFaRules"
+                >
+                    <el-form-item prop="code">
+                        <el-input
+                            v-model="twoFaForm.code"
+                            :placeholder="useBackupCode ? '请输入8位备用验证码' : '请输入6位验证码'"
+                            size="large"
+                            :maxlength="useBackupCode ? 8 : 6"
+                            clearable
+                            @keyup.enter="verify2fa"
+                        >
+                            <template #prefix>
+                                <i :class="useBackupCode ? 'fas fa-ticket-alt' : 'fas fa-key'"></i>
+                            </template>
+                        </el-input>
+                    </el-form-item>
+
+                    <!-- 邮箱验证方式：重新发送按钮 -->
+                    <div v-if="twoFaMethod === 'email' && !useBackupCode" style="text-align: center; margin-bottom: 16px;">
+                        <el-button
+                            text
+                            type="primary"
+                            :disabled="resendCountdown > 0"
+                            @click="resendEmailCode"
+                        >
+                            <i class="fas fa-paper-plane" style="margin-right: 4px;"></i>
+                            [[ resendCountdown > 0 ? `${resendCountdown}秒后重新发送` : '重新发送验证码' ]]
+                        </el-button>
+                    </div>
+
+                    <el-form-item>
+                        <el-button
+                            type="primary"
+                            size="large"
+                            :loading="verifying"
+                            @click="verify2fa"
+                        >
+                            <i class="fas fa-check-circle" style="margin-right: 8px;"></i>
+                            [[ verifying ? '验证中...' : '验证并登录' ]]
+                        </el-button>
+                    </el-form-item>
+
+                    <!-- 备用验证码选项 -->
+                    <div v-if="twoFaMethod === 'totp'" class="backup-code-link">
+                        <a v-if="!useBackupCode" href="javascript:void(0)" @click="switchToBackupCode">
+                            使用备用验证码登录
+                        </a>
+                        <a v-else href="javascript:void(0)" @click="switchToTotp">
+                            返回使用验证器应用
+                        </a>
+                    </div>
+
+                    <!-- 返回按钮 -->
+                    <el-form-item class="back-button">
+                        <el-button
+                            size="large"
+                            @click="backToLogin"
+                        >
+                            <i class="fas fa-arrow-left" style="margin-right: 8px;"></i>
+                            返回重新登录
+                        </el-button>
+                    </el-form-item>
+                </el-form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 全局API端点配置
+    window.LOGIN_API = {
+        login: "{% url 'login' %}",
+        verify2fa: "{% url 'verify_2fa_login' %}",
+        resendEmail: "{% url 'resend_2fa_email' %}",
+        home: "{% url 'home' %}"
+    };
+
+    window.CSRF_TOKEN = "{{ csrf_token }}";
+</script>
+
+<script src="{% static 'JS/vue/vue.global.js' %}"></script>
+<script src="{% static 'JS/element-plus/element-plus.js' %}"></script>
+<script src="{% static 'JS/login.js' %}" type="module"></script>
+{% endblock %}

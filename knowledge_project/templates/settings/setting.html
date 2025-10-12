@@ -692,24 +692,49 @@
           <el-input v-model="passwordForm.confirm" type="password" show-password placeholder="再次输入新密码"></el-input>
         </el-form-item>
 
-        <el-form-item label="图形验证码">
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <el-input v-model="passwordForm.imageCaptcha" placeholder="输入图片验证码" style="flex: 1;"></el-input>
-            <img :src="captchaUrl" @click="refreshCaptcha" alt="验证码"
-                 style="height: 42px; width: 140px; object-fit: contain; border: 1px solid #dcdfe6; border-radius: 4px; cursor: pointer;"
-                 title="点击刷新">
-          </div>
-        </el-form-item>
+        <!-- ✅ 2FA验证码输入（当需要2FA验证时显示） -->
+        <template v-if="passwordForm.show2FA">
+          <el-divider content-position="left">
+            <el-tag type="warning" size="small">
+              <i class="fas fa-shield-alt"></i> 两因素认证验证
+            </el-tag>
+          </el-divider>
 
-        <el-form-item label="邮箱验证码">
-          <div style="display: flex; gap: 8px;">
-            <el-input v-model="passwordForm.emailCode" placeholder="输入验证码" style="flex: 1;"></el-input>
-            <el-button type="primary" :disabled="passwordForm.codeSending || passwordForm.codeCountdown>0 || !passwordForm.imageCaptcha"
-                       @click="sendPasswordEmailCode" style="min-width: 120px;">
-              [[ passwordForm.codeCountdown > 0 ? passwordForm.codeCountdown + 's' : '获取验证码' ]]
+          <el-alert
+            :title="passwordForm.twoFaMethod === 'totp' ? '请输入验证器应用中的6位验证码' : '验证码已发送至您的邮箱'"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 16px;">
+          </el-alert>
+
+          <el-form-item :label="passwordForm.useBackup ? '备用验证码' : '验证码'">
+            <div style="display: flex; gap: 8px;">
+              <el-input
+                v-model="passwordForm.twoFaCode"
+                :placeholder="passwordForm.useBackup ? '输入8位备用验证码' : '输入6位验证码'"
+                :maxlength="passwordForm.useBackup ? 8 : 6"
+                style="flex: 1;"
+              ></el-input>
+              <!-- 邮箱方式：显示重新发送按钮 -->
+              <el-button
+                v-if="passwordForm.twoFaMethod === 'email'"
+                type="primary"
+                :loading="passwordForm.twoFaCodeSending"
+                @click="sendPassword2faCode"
+                style="min-width: 100px;"
+              >
+                重新发送
+              </el-button>
+            </div>
+          </el-form-item>
+
+          <!-- TOTP方式：显示切换到备用码的链接 -->
+          <div v-if="passwordForm.twoFaMethod === 'totp'" style="margin-top: -12px; margin-bottom: 16px; text-align: right;">
+            <el-button type="text" size="small" @click="togglePasswordBackupCode">
+              [[ passwordForm.useBackup ? '使用验证器' : '使用备用验证码' ]]
             </el-button>
           </div>
-        </el-form-item>
+        </template>
       </el-form>
 
       <template #footer>
@@ -870,7 +895,7 @@
   </div>
 
   <!-- ==================== 修改邮箱弹窗 ==================== -->
-  <el-dialog v-model="showEmailDialog" title="修改邮箱" width="450px" align-center>
+  <el-dialog v-model="showEmailDialog" title="修改邮箱" width="500px" align-center>
     <el-form label-width="100px">
       <el-form-item label="当前密码">
         <el-input v-model="emailForm.password" type="password" show-password placeholder="请输入当前密码"></el-input>
@@ -910,6 +935,50 @@
           </el-button>
         </div>
       </el-form-item>
+
+      <!-- ✅ 2FA验证码输入（当需要2FA验证时显示） -->
+      <template v-if="emailForm.show2FA">
+        <el-divider content-position="left">
+          <el-tag type="warning" size="small">
+            <i class="fas fa-shield-alt"></i> 两因素认证验证
+          </el-tag>
+        </el-divider>
+
+        <el-alert
+          :title="emailForm.twoFaMethod === 'totp' ? '请输入验证器应用中的6位验证码' : '验证码已发送至您的当前邮箱（非新邮箱）'"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 16px;">
+        </el-alert>
+
+        <el-form-item :label="emailForm.useBackup ? '备用验证码' : '验证码'">
+          <div style="display: flex; gap: 8px;">
+            <el-input
+              v-model="emailForm.twoFaCode"
+              :placeholder="emailForm.useBackup ? '输入8位备用验证码' : '输入6位验证码'"
+              :maxlength="emailForm.useBackup ? 8 : 6"
+              style="flex: 1;"
+            ></el-input>
+            <!-- 邮箱方式：显示重新发送按钮 -->
+            <el-button
+              v-if="emailForm.twoFaMethod === 'email'"
+              type="primary"
+              :loading="emailForm.twoFaCodeSending"
+              @click="sendEmail2faCode"
+              style="min-width: 100px;"
+            >
+              重新发送
+            </el-button>
+          </div>
+        </el-form-item>
+
+        <!-- TOTP方式：显示切换到备用码的链接 -->
+        <div v-if="emailForm.twoFaMethod === 'totp'" style="margin-top: -12px; margin-bottom: 16px; text-align: right;">
+          <el-button type="text" size="small" @click="toggleEmailBackupCode">
+            [[ emailForm.useBackup ? '使用验证器' : '使用备用验证码' ]]
+          </el-button>
+        </div>
+      </template>
     </el-form>
 
     <template #footer>

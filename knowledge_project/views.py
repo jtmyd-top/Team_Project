@@ -57,6 +57,7 @@ import threading  # 用于延迟删除文件
 import pyotp  # 用于 TOTP 两因素认证
 import qrcode  # 用于生成 QR 码
 import base64  # 用于编码 QR 码图片
+from .decorators import verify_2fa_for_request, require_2fa_verified  # 导入装饰器
 
 # 定义富文本分页函数
 # 定义富文本分页函数
@@ -186,11 +187,11 @@ class SendEmailCodeView(View):
 
         # 2) 限流（维持你现有阈值）
         hourly_attempts = cache.get(hourly_key, 0)
-        if hourly_attempts >= 3:
+        if hourly_attempts >= 30:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         daily_attempts = cache.get(daily_key, 0)
-        if daily_attempts >= 5:
+        if daily_attempts >= 50:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         # 3) 解析参数
@@ -1061,8 +1062,12 @@ def update_profile(request):
 
 @login_required
 @require_http_methods(["POST"])
+@require_2fa_verified
 def update_email(request):
-    """验证密码、图形验证码、邮箱验证码后修改邮箱"""
+    """
+    修改邮箱
+    需要验证：当前密码、新邮箱验证码、2FA验证码
+    """
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -1071,24 +1076,15 @@ def update_email(request):
     current_password = data.get("password", "")
     new_email = data.get("new_email", "").strip()
     code = data.get("code", "").strip()
-    image_captcha_code = data.get("image_captcha_code", "").upper().strip()
 
-    if not current_password or not new_email or not code or not image_captcha_code:
+    if not current_password or not new_email or not code:
         return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
 
     # 1) 校验当前密码
     if not request.user.check_password(current_password):
         return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
 
-    # 2) 校验图形验证码（建议与“发送验证码”时使用同一个 /captcha/ 接口，确认时再刷一次）
-    session_captcha = request.session.get("captcha_code", "").upper()
-    if not session_captcha or session_captcha != image_captcha_code:
-        return JsonResponse({"status": "error", "message": "图形验证码错误"}, status=400)
-    # 用一次就作废，防复用
-    if "captcha_code" in request.session:
-        del request.session["captcha_code"]
-
-    # 3) 校验邮箱验证码（含有效期）
+    # 2) 校验邮箱验证码（验证新邮箱所有权）
     info = request.session.get("registration_verification")
     if not info or info.get("email") != new_email or info.get("code") != code:
         return JsonResponse({"status": "error", "message": "邮箱验证码错误或邮箱不匹配"}, status=400)
@@ -1097,11 +1093,11 @@ def update_email(request):
     if time.time() - float(info.get("timestamp", 0)) > 600:
         return JsonResponse({"status": "error", "message": "邮箱验证码已过期，请重新获取"}, status=400)
 
-    # 4) 检查邮箱是否已被占用（再兜底）
+    # 3) 检查邮箱是否已被占用（再兜底）
     if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
         return JsonResponse({"status": "error", "message": "该邮箱已被绑定"}, status=400)
 
-    # 5) 更新邮箱
+    # 4) 更新邮箱
     user = request.user
     user.email = new_email
     user.save(update_fields=["email"])
@@ -1157,10 +1153,74 @@ def toggle_profile_like(request):
 
 @login_required
 @require_http_methods(["POST"])
+def send_operation_2fa_code(request):
+    """
+    为敏感操作发送2FA验证码
+    - TOTP用户：不需要发送邮件，直接使用验证器应用
+    - Email用户：发送6位验证码到当前邮箱（5分钟有效期）
+
+    使用场景：修改密码、修改邮箱等敏感操作
+    """
+    user = request.user
+    profile = getattr(user, 'profile', None)
+
+    # 检查用户是否启用了2FA
+    if not profile or not profile.two_fa_enabled:
+        return JsonResponse({
+            'status': 'success',
+            'message': '未启用两因素认证，无需验证',
+            'requires_2fa': False
+        })
+
+    # TOTP用户不需要发送邮件
+    if profile.two_fa_method == 'totp':
+        return JsonResponse({
+            'status': 'success',
+            'message': '请使用验证器应用生成验证码',
+            'requires_2fa': True,
+            'method': 'totp'
+        })
+
+    # Email用户：生成并发送验证码
+    elif profile.two_fa_method == 'email':
+        email_code = ''.join(random.choices(string.digits, k=6))
+        request.session['operation_2fa_email_code'] = email_code
+        request.session['operation_2fa_email_time'] = time.time()
+
+        try:
+            send_mail(
+                '操作验证码',
+                f'您正在进行敏感操作，验证码是：{email_code}。5分钟内有效。',
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            return JsonResponse({
+                'status': 'success',
+                'message': '验证码已发送至您的邮箱',
+                'requires_2fa': True,
+                'method': 'email'
+            })
+        except Exception as e:
+            logger.error(f"发送操作验证码失败: {e}")
+            return JsonResponse({
+                'status': 'error',
+                'message': '发送验证码失败，请稍后重试'
+            }, status=500)
+
+    return JsonResponse({
+        'status': 'error',
+        'message': '未知的2FA验证方式'
+    }, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+@require_2fa_verified
 def change_password(request):
     """
     修改密码
-    需要验证：当前密码、图形验证码、邮箱验证码
+    需要验证：当前密码、2FA验证码
     """
     try:
         data = json.loads(request.body)
@@ -1170,11 +1230,9 @@ def change_password(request):
     current_password = data.get("current_password", "")
     new_password = data.get("new_password", "")
     confirm_password = data.get("confirm_password", "")
-    image_captcha_code = data.get("image_captcha_code", "").upper().strip()
-    email_code = data.get("email_code", "").strip()
 
     # 1) 验证必要参数
-    if not all([current_password, new_password, confirm_password, image_captcha_code, email_code]):
+    if not all([current_password, new_password, confirm_password]):
         return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
 
     # 2) 验证当前密码
@@ -1189,38 +1247,10 @@ def change_password(request):
     if len(new_password) < 8:
         return JsonResponse({"status": "error", "message": "新密码长度至少为8位"}, status=400)
 
-    # 5) 验证图形验证码
-    session_captcha = request.session.get("captcha_code", "").upper()
-    if not session_captcha or session_captcha != image_captcha_code:
-        return JsonResponse({"status": "error", "message": "图形验证码错误"}, status=400)
-
-    # 用一次就作废
-    if "captcha_code" in request.session:
-        del request.session["captcha_code"]
-
-    # 6) 验证邮箱验证码
-    verification = request.session.get("registration_verification")
-    if not verification:
-        return JsonResponse({"status": "error", "message": "邮箱验证码已过期"}, status=400)
-
-    if verification.get("email") != request.user.email:
-        return JsonResponse({"status": "error", "message": "邮箱验证码不匹配"}, status=400)
-
-    if verification.get("code") != email_code:
-        return JsonResponse({"status": "error", "message": "邮箱验证码错误"}, status=400)
-
-    # 检查有效期（10分钟）
-    if time.time() - float(verification.get("timestamp", 0)) > 600:
-        return JsonResponse({"status": "error", "message": "邮箱验证码已过期"}, status=400)
-
-    # 7) 更新密码
+    # 5) 更新密码
     user = request.user
     user.set_password(new_password)
     user.save()
-
-    # 清除验证码 session
-    if "registration_verification" in request.session:
-        del request.session["registration_verification"]
 
     # 重新登录用户（因为密码已更改）
     from django.contrib.auth import update_session_auth_hash
@@ -1439,9 +1469,135 @@ def generate_backup_codes_list():
     生成10个8位数字+字母的备用验证码
     """
     codes = []
-    for _ in range(10):
+    for _ in range(5):
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         codes.append(code)
     return codes
 
 
+# ==================== 两因素认证登录验证 API ====================
+
+@require_http_methods(["POST"])
+def verify_2fa_login(request):
+    """
+    验证2FA登录码
+    支持三种验证方式：
+    1. TOTP验证器码
+    2. 邮箱验证码
+    3. 备用验证码
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'status': 'error', 'message': 'JSON格式错误'}, status=400)
+
+    code = data.get('code', '').strip()
+    use_backup = data.get('use_backup', False)  # 是否使用备用码
+
+    # 从session获取待验证的用户ID
+    pending_user_id = request.session.get('pending_2fa_user_id')
+    if not pending_user_id:
+        return JsonResponse({'status': 'error', 'message': '会话已过期，请重新登录'}, status=400)
+
+    try:
+        user = User.objects.get(id=pending_user_id)
+        profile = user.profile
+    except User.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '用户不存在'}, status=400)
+
+    # 验证2FA码
+    if use_backup:
+        # 使用备用验证码
+        if not profile.backup_codes:
+            return JsonResponse({'status': 'error', 'message': '没有可用的备用验证码'}, status=400)
+
+        # 检查备用码是否匹配
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+        if code_hash in profile.backup_codes:
+            # 备用码验证成功，删除已使用的备用码
+            profile.backup_codes.remove(code_hash)
+            profile.save(update_fields=['backup_codes'])
+        else:
+            return JsonResponse({'status': 'error', 'message': '备用验证码错误'}, status=400)
+
+    elif profile.two_fa_method == 'totp':
+        # TOTP验证器
+        if not profile.totp_secret:
+            return JsonResponse({'status': 'error', 'message': '2FA配置错误'}, status=400)
+
+        totp = pyotp.TOTP(profile.totp_secret)
+        if not totp.verify(code, valid_window=1):
+            return JsonResponse({'status': 'error', 'message': '验证码错误'}, status=400)
+
+    elif profile.two_fa_method == 'email':
+        # 邮箱验证码
+        session_code = request.session.get('2fa_email_code')
+        session_timestamp = request.session.get('2fa_email_timestamp')
+
+        if not session_code or not session_timestamp:
+            return JsonResponse({'status': 'error', 'message': '验证码已过期'}, status=400)
+
+        # 检查有效期（5分钟）
+        if time.time() - float(session_timestamp) > 300:
+            return JsonResponse({'status': 'error', 'message': '验证码已过期'}, status=400)
+
+        if session_code != code:
+            return JsonResponse({'status': 'error', 'message': '验证码错误'}, status=400)
+
+        # 清除已使用的邮箱验证码
+        if '2fa_email_code' in request.session:
+            del request.session['2fa_email_code']
+        if '2fa_email_timestamp' in request.session:
+            del request.session['2fa_email_timestamp']
+
+    # 2FA验证成功，完成登录
+    login(request, user)
+
+    # 清除session中的临时数据
+    if 'pending_2fa_user_id' in request.session:
+        del request.session['pending_2fa_user_id']
+    if 'pending_2fa_method' in request.session:
+        del request.session['pending_2fa_method']
+
+    return JsonResponse({
+        'status': 'success',
+        'message': '登录成功',
+        'redirect_url': reverse('home')
+    })
+
+
+@require_http_methods(["POST"])
+def resend_2fa_email(request):
+    """
+    重新发送2FA邮箱验证码
+    """
+    pending_user_id = request.session.get('pending_2fa_user_id')
+    if not pending_user_id:
+        return JsonResponse({'status': 'error', 'message': '会话已过期'}, status=400)
+
+    try:
+        user = User.objects.get(id=pending_user_id)
+        profile = user.profile
+    except User.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '用户不存在'}, status=400)
+
+    if profile.two_fa_method != 'email':
+        return JsonResponse({'status': 'error', 'message': '当前不是邮箱验证方式'}, status=400)
+
+    # 生成并发送新的验证码
+    email_code = ''.join(random.choices(string.digits, k=6))
+    request.session['2fa_email_code'] = email_code
+    request.session['2fa_email_timestamp'] = time.time()
+
+    try:
+        send_mail(
+            '登录验证码',
+            f'您的登录验证码是：{email_code}。5分钟内有效。',
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+            fail_silently=False,
+        )
+        return JsonResponse({'status': 'success', 'message': '验证码已重新发送'})
+    except Exception as e:
+        logger.error(f"重新发送2FA邮件失败: {e}")
+        return JsonResponse({'status': 'error', 'message': '发送失败，请稍后重试'}, status=500)

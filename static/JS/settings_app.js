@@ -154,6 +154,12 @@ createApp({
       code: "",
       codeSending: false,
       codeCountdown: 0,
+      // ✅ 2FA相关
+      show2FA: false,          // 是否显示2FA输入框
+      twoFaMethod: '',         // 2FA方式：totp | email
+      twoFaCode: '',           // 2FA验证码
+      useBackup: false,        // 是否使用备用码
+      twoFaCodeSending: false, // 2FA验证码发送中
     });
     const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -273,21 +279,47 @@ createApp({
       if (!emailForm.imageCaptcha) return ElMessage.warning("请输入图片验证码");
       if (!emailForm.code) return ElMessage.warning("请输入邮箱验证码");
 
+      // 如果显示2FA输入框，验证2FA验证码
+      if (emailForm.show2FA && !emailForm.twoFaCode) {
+        return ElMessage.warning("请输入两因素验证码");
+      }
+
       try {
+        const requestBody = {
+          password: emailForm.password,
+          new_email: emailForm.new_email.trim(),
+          code: emailForm.code.trim(),
+          image_captcha_code: emailForm.imageCaptcha.trim(),
+        };
+
+        // 如果已显示2FA输入框，添加2FA验证码
+        if (emailForm.show2FA) {
+          requestBody.two_fa_code = emailForm.twoFaCode;
+          requestBody.use_backup = emailForm.useBackup;
+        }
+
         const res = await fetch(window.API_ENDPOINTS.updateEmail, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...csrfHeader },
-          body: JSON.stringify({
-            password: emailForm.password,
-            new_email: emailForm.new_email.trim(),
-            code: emailForm.code.trim(),
-            image_captcha_code: emailForm.imageCaptcha.trim(),
-          }),
+          body: JSON.stringify(requestBody),
         });
         const data = await res.json();
-        if (res.ok && data.status === "success") {
+
+        if (data.status === "require_2fa") {
+          // 需要2FA验证，显示2FA输入框
+          emailForm.show2FA = true;
+          emailForm.twoFaMethod = data.method;
+
+          // 如果是邮箱验证方式，自动发送验证码
+          if (data.method === 'email') {
+            await sendEmail2faCode();
+          } else {
+            ElMessage.info("请输入验证器应用中的验证码");
+          }
+        } else if (res.ok && data.status === "success") {
           profile.email = data.email;
           showEmailDialog.value = false;
+          resetEmailForm();
           ElMessage.success("邮箱修改成功");
         } else {
           ElMessage.error(data.message || "邮箱修改失败");
@@ -295,8 +327,57 @@ createApp({
       } catch {
         ElMessage.error("网络错误");
       } finally {
-        refreshCaptcha();
-        emailForm.imageCaptcha = "";
+        if (!emailForm.show2FA) {
+          refreshCaptcha();
+          emailForm.imageCaptcha = "";
+        }
+      }
+    };
+
+    // 重置邮箱表单
+    const resetEmailForm = () => {
+      emailForm.password = '';
+      emailForm.new_email = '';
+      emailForm.imageCaptcha = '';
+      emailForm.code = '';
+      emailForm.show2FA = false;
+      emailForm.twoFaCode = '';
+      emailForm.twoFaMethod = '';
+      emailForm.useBackup = false;
+      refreshCaptcha();
+    };
+
+    // 发送修改邮箱的2FA验证码（邮箱方式）
+    const sendEmail2faCode = async () => {
+      emailForm.twoFaCodeSending = true;
+      try {
+        const res = await fetch('/api/security/send-operation-2fa/', {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...csrfHeader },
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          if (data.requires_2fa) {
+            ElMessage.success("验证码已发送至您的邮箱");
+          }
+        } else {
+          ElMessage.error(data.message || "发送验证码失败");
+        }
+      } catch {
+        ElMessage.error("网络错误");
+      } finally {
+        emailForm.twoFaCodeSending = false;
+      }
+    };
+
+    // 切换到备用验证码模式（邮箱修改）
+    const toggleEmailBackupCode = () => {
+      emailForm.useBackup = !emailForm.useBackup;
+      emailForm.twoFaCode = '';
+      if (emailForm.useBackup) {
+        ElMessage.info("已切换到备用验证码模式，请输入8位备用码");
+      } else {
+        ElMessage.info("已切换回验证器模式，请输入6位验证码");
       }
     };
 
@@ -405,6 +486,12 @@ createApp({
       emailCode: '',
       codeSending: false,
       codeCountdown: 0,
+      // ✅ 2FA相关
+      show2FA: false,          // 是否显示2FA输入框
+      twoFaMethod: '',         // 2FA方式：totp | email
+      twoFaCode: '',           // 2FA验证码
+      useBackup: false,        // 是否使用备用码
+      twoFaCodeSending: false, // 2FA验证码发送中
     });
 
     // 发送修改密码的邮箱验证码
@@ -454,38 +541,98 @@ createApp({
       if (!passwordForm.confirm) return ElMessage.warning("请确认新密码");
       if (passwordForm.new !== passwordForm.confirm) return ElMessage.warning("两次输入的密码不一致");
       if (passwordForm.new.length < 8) return ElMessage.warning("新密码至少8位");
-      if (!passwordForm.imageCaptcha) return ElMessage.warning("请输入图片验证码");
-      if (!passwordForm.emailCode) return ElMessage.warning("请输入邮箱验证码");
+
+      // 如果显示2FA输入框，验证2FA验证码
+      if (passwordForm.show2FA && !passwordForm.twoFaCode) {
+        return ElMessage.warning("请输入两因素验证码");
+      }
 
       try {
+        const requestBody = {
+          current_password: passwordForm.current,
+          new_password: passwordForm.new,
+          confirm_password: passwordForm.confirm,
+        };
+
+        // 如果已显示2FA输入框，添加2FA验证码
+        if (passwordForm.show2FA) {
+          requestBody.two_fa_code = passwordForm.twoFaCode;
+          requestBody.use_backup = passwordForm.useBackup;
+        }
+
         const res = await fetch('/api/security/change-password/', {
           method: "POST",
           headers: { "Content-Type": "application/json", ...csrfHeader },
-          body: JSON.stringify({
-            current_password: passwordForm.current,
-            new_password: passwordForm.new,
-            confirm_password: passwordForm.confirm,
-            image_captcha_code: passwordForm.imageCaptcha,
-            email_code: passwordForm.emailCode,
-          }),
+          body: JSON.stringify(requestBody),
         });
         const data = await res.json();
-        if (res.ok && data.status === "success") {
+
+        if (data.status === "require_2fa") {
+          // 需要2FA验证，显示2FA输入框
+          passwordForm.show2FA = true;
+          passwordForm.twoFaMethod = data.method;
+
+          // 如果是邮箱验证方式，自动发送验证码
+          if (data.method === 'email') {
+            await sendPassword2faCode();
+          } else {
+            ElMessage.info("请输入验证器应用中的验证码");
+          }
+        } else if (res.ok && data.status === "success") {
           ElMessage.success("密码修改成功");
           showPasswordDialog.value = false;
           // 重置表单
-          passwordForm.current = '';
-          passwordForm.new = '';
-          passwordForm.confirm = '';
-          passwordForm.imageCaptcha = '';
-          passwordForm.emailCode = '';
+          resetPasswordForm();
         } else {
           ElMessage.error(data.message || "密码修改失败");
         }
       } catch {
         ElMessage.error("网络错误");
+      }
+    };
+
+    // 重置密码表单
+    const resetPasswordForm = () => {
+      passwordForm.current = '';
+      passwordForm.new = '';
+      passwordForm.confirm = '';
+      passwordForm.show2FA = false;
+      passwordForm.twoFaCode = '';
+      passwordForm.twoFaMethod = '';
+      passwordForm.useBackup = false;
+    };
+
+    // 发送修改密码的2FA验证码（邮箱方式）
+    const sendPassword2faCode = async () => {
+      passwordForm.twoFaCodeSending = true;
+      try {
+        const res = await fetch('/api/security/send-operation-2fa/', {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...csrfHeader },
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          if (data.requires_2fa) {
+            ElMessage.success("验证码已发送至您的邮箱");
+          }
+        } else {
+          ElMessage.error(data.message || "发送验证码失败");
+        }
+      } catch {
+        ElMessage.error("网络错误");
       } finally {
-        refreshCaptcha();
+        passwordForm.twoFaCodeSending = false;
+      }
+    };
+
+    // 切换到备用验证码模式（密码修改）
+    const togglePasswordBackupCode = () => {
+      passwordForm.useBackup = !passwordForm.useBackup;
+      passwordForm.twoFaCode = '';
+      if (passwordForm.useBackup) {
+        ElMessage.info("已切换到备用验证码模式，请输入8位备用码");
+      } else {
+        ElMessage.info("已切换回验证器模式，请输入6位验证码");
       }
     };
 
@@ -737,6 +884,12 @@ createApp({
       passwordForm,
       sendPasswordEmailCode,
       changePassword,
+      resetPasswordForm,
+      sendPassword2faCode,
+      togglePasswordBackupCode,
+      resetEmailForm,
+      sendEmail2faCode,
+      toggleEmailBackupCode,
       show2faSetupDialog,
       twoFaSetup,
       start2faSetup,
