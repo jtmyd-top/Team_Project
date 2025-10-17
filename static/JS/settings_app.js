@@ -25,6 +25,15 @@ createApp({
     const videoMuted = ref(true);      // 是否静音（默认静音）
     const bannerVideo = ref(null);     // video元素的引用
 
+    // ✅ 通知偏好设置状态
+    const notifications = reactive({
+      notify_login: initialData.notify_login !== undefined ? initialData.notify_login : true,
+      notify_password_change: initialData.notify_password_change !== undefined ? initialData.notify_password_change : true,
+      notify_password_reset: initialData.notify_password_reset !== undefined ? initialData.notify_password_reset : true,
+      notify_note_activities: initialData.notify_note_activities !== undefined ? initialData.notify_note_activities : false,
+      notify_profile_likes: initialData.notify_profile_likes !== undefined ? initialData.notify_profile_likes : true,
+    });
+
     // ✅ 工具函数：判断 URL 是否为视频
     function isVideoUrl(url) {
       const videoExtensions = ['.mp4', '.webm', '.ogg'];
@@ -664,11 +673,17 @@ createApp({
             twoFaSetup.qrCode = data.qr_code;
             twoFaSetup.secret = data.secret;
           } else {
-            // 邮箱方式直接启用
-            security.twoFaEnabled = true;
-            security.twoFaMethod = 'email';
-            show2faSetupDialog.value = false;
-            ElMessage.success("邮箱两因素认证已启用");
+            // 邮箱方式直接启用 - 等待后端确认
+            if (data.two_fa_enabled === true) {
+              // 只有在后端确认启用成功后才更新前端状态
+              security.twoFaEnabled = true;
+              security.twoFaMethod = 'email';
+              show2faSetupDialog.value = false;
+              ElMessage.success("邮箱两因素认证已启用");
+            } else {
+              // 如果后端没有确认启用，显示错误
+              ElMessage.error("启用邮箱两因素认证失败，请重试");
+            }
           }
         } else {
           ElMessage.error(data.message || "启用失败");
@@ -845,6 +860,51 @@ createApp({
       backupCodes.newCodes = null;
     };
 
+    // ==================== 通知偏好设置相关 ====================
+
+    // 加载通知偏好设置
+    const loadNotificationPreferences = async () => {
+      try {
+        const res = await fetch('/api/notification-preferences/', {
+          method: "GET",
+          headers: { ...csrfHeader },
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          // 更新通知偏好设置状态
+          if (data.preferences) {
+            Object.assign(notifications, data.preferences);
+          }
+        }
+      } catch (error) {
+        console.error("加载通知偏好设置失败:", error);
+      }
+    };
+
+    // 保存通知偏好设置
+    const saveNotificationPreferences = async () => {
+      try {
+        const res = await fetch('/api/notification-preferences/', {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...csrfHeader },
+          body: JSON.stringify(notifications),
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          ElMessage.success("通知偏好设置已保存");
+        } else {
+          ElMessage.error(data.message || "保存失败");
+        }
+      } catch {
+        ElMessage.error("网络错误");
+      }
+    };
+
+    // 在组件挂载时加载通知偏好设置
+    onMounted(() => {
+      loadNotificationPreferences();
+    });
+
     return {
       active,
       profile,
@@ -905,6 +965,9 @@ createApp({
       regenerateBackupCodes,
       copyNewBackupCodes,
       closeBackupCodesDialog,
+      // ✅ 通知偏好设置相关
+      notifications,
+      saveNotificationPreferences,
     };
   },
 }).use(ElementPlus).mount("#settings-app");

@@ -38,6 +38,9 @@ urlpatterns = [
     path('api/security/disable-2fa/', views.disable_2fa, name='disable_2fa'),
     path('api/security/regenerate-backup-codes/', views.regenerate_backup_codes, name='regenerate_backup_codes'),
 
+    # ==================== 通知偏好设置 API ====================
+    path('api/notification-preferences/', views.notification_preferences, name='notification_preferences'),
+
     # ==================== 2FA登录验证 API ====================
     path('api/2fa/verify/', views.verify_2fa_login, name='verify_2fa_login'),
     path('api/2fa/resend-email/', views.resend_2fa_email, name='resend_2fa_email'),

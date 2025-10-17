@@ -53,6 +53,7 @@ from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.contrib.auth.hashers import check_password
+from django.db import transaction  # 添加事务支持
 import threading  # 用于延迟删除文件
 import pyotp  # 用于 TOTP 两因素认证
 import qrcode  # 用于生成 QR 码
@@ -275,13 +276,27 @@ class SendEmailCodeView(View):
         else:
             cache.incr(daily_key)
 
-        # 8) 把验证码写入 session，沿用你现有的 key
-        request.session['registration_verification'] = {
+        # 8) 把验证码写入 session，使用不同的 key 避免冲突
+        # 根据不同用途使用不同的 session key，避免被覆盖
+        if purpose == 'change':
+            # 修改邮箱专用 key
+            session_key = 'email_change_verification'
+        elif purpose == 'password_change':
+            # 修改密码专用 key
+            session_key = 'password_change_verification'
+        else:
+            # 注册专用 key
+            session_key = 'registration_verification'
+
+        request.session[session_key] = {
             'code': email_code,
             'email': email,
             'timestamp': time.time(),
             'purpose': purpose,  # 记录用途，方便后续需要时校验
         }
+
+        # 确保 session 立即保存
+        request.session.modified = True
 
         return JsonResponse({'status': 'success', 'message': ok_message})
 
@@ -886,28 +901,38 @@ def settings_view(request):
     用户个人设置页面
     """
     user = request.user
-    profile = getattr(user, "profile", None)
+
+    # 确保 profile 存在
+    try:
+        profile = user.profile
+    except Profile.DoesNotExist:
+        # 如果 profile 不存在，创建一个
+        profile = Profile.objects.create(user=user)
+        logger.info(f"Created profile for user {user.id} in settings_view")
 
     # 获取当前用户的笔记数量
     notes_count = Note.objects.filter(author=user).count()
 
     # 检查当前用户是否已经点赞过自己的资料
-    is_liked = ProfileLike.objects.filter(liker=user, profile=profile).exists() if profile else False
+    is_liked = ProfileLike.objects.filter(liker=user, profile=profile).exists()
 
     context = {
-        "avatar_url": profile.avatar.url if profile and profile.avatar else "/static/img/default-avatar.png",
+        "avatar_url": profile.avatar.url if profile.avatar else "/static/img/default-avatar.png",
         "nickname": user.username,
         "email": user.email,
-        "bio": profile.bio if profile and profile.bio else "",
-        "likes_count": profile.likes_count if profile else 0,
+        "bio": profile.bio if profile.bio else "",
+        "likes_count": profile.likes_count,
         "notes_count": notes_count,
         "views_count": 0,  # 暂时默认为0，后续可以添加访问统计功能
         "is_liked": is_liked,
-        # ✅ 添加 2FA 状态
-        "two_fa_enabled": profile.two_fa_enabled if profile else False,
-        "two_fa_method": profile.two_fa_method if profile else 'totp',
+        # ✅ 添加 2FA 状态 - 现在 profile 一定存在
+        "two_fa_enabled": profile.two_fa_enabled,
+        "two_fa_method": profile.two_fa_method or 'totp',
     }
-    print(context)
+
+    # 添加调试日志
+    logger.info(f"Settings view for user {user.id}: 2FA enabled={profile.two_fa_enabled}, method={profile.two_fa_method}")
+
     return render(request, "settings/setting.html", context)
 @login_required
 @require_http_methods(["POST"])
@@ -1085,12 +1110,17 @@ def update_email(request):
         return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
 
     # 2) 校验邮箱验证码（验证新邮箱所有权）
-    info = request.session.get("registration_verification")
+    # 使用专门的 session key 避免被其他操作覆盖
+    info = request.session.get("email_change_verification")
     if not info or info.get("email") != new_email or info.get("code") != code:
+        # 添加调试日志
+        logger.info(f"Email verification failed - Session info: {info}, Expected email: {new_email}, Provided code: {code}")
         return JsonResponse({"status": "error", "message": "邮箱验证码错误或邮箱不匹配"}, status=400)
 
-    # 有效期 10 分钟
-    if time.time() - float(info.get("timestamp", 0)) > 600:
+    # 有效期 15 分钟（增加到15分钟，给用户更多时间）
+    elapsed_time = time.time() - float(info.get("timestamp", 0))
+    if elapsed_time > 900:  # 15分钟 = 900秒
+        logger.info(f"Email verification code expired - Elapsed time: {elapsed_time} seconds")
         return JsonResponse({"status": "error", "message": "邮箱验证码已过期，请重新获取"}, status=400)
 
     # 3) 检查邮箱是否已被占用（再兜底）
@@ -1103,8 +1133,8 @@ def update_email(request):
     user.save(update_fields=["email"])
 
     # 作废验证码 session
-    if "registration_verification" in request.session:
-        del request.session["registration_verification"]
+    if "email_change_verification" in request.session:
+        del request.session["email_change_verification"]
 
     return JsonResponse({"status": "success", "email": user.email, "message": "邮箱修改成功"})
 
@@ -1261,6 +1291,7 @@ def change_password(request):
 
 @login_required
 @require_http_methods(["POST"])
+@transaction.atomic  # 添加事务装饰器
 def enable_2fa(request):
     """
     启用两因素认证
@@ -1273,7 +1304,14 @@ def enable_2fa(request):
         return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
 
     method = data.get("method", "totp")  # 'totp' 或 'email'
-    profile = request.user.profile
+
+    # 确保profile存在
+    try:
+        profile = request.user.profile
+    except Profile.DoesNotExist:
+        # 如果profile不存在，创建一个
+        profile = Profile.objects.create(user=request.user)
+        logger.info(f"Created profile for user {request.user.id}")
 
     # 如果已经启用2FA，不允许重复启用
     if profile.two_fa_enabled:
@@ -1312,12 +1350,30 @@ def enable_2fa(request):
         })
 
     elif method == "email":
-        # 邮箱验证方式，直接标记为待验证状态
-        request.session['temp_2fa_method'] = 'email'
+        # 邮箱验证方式，直接启用（不需要额外验证步骤）
+        profile.two_fa_enabled = True
+        profile.two_fa_method = 'email'
+        profile.save(update_fields=['two_fa_enabled', 'two_fa_method'])
+
+        # 强制提交事务
+        transaction.commit()
+
+        # 添加日志记录，确认保存成功
+        logger.info(f"Email 2FA enabled for user {request.user.id}: enabled={profile.two_fa_enabled}, method={profile.two_fa_method}")
+
+        # 重新查询确认已保存
+        profile.refresh_from_db()
+        logger.info(f"After refresh: enabled={profile.two_fa_enabled}, method={profile.two_fa_method}")
+
+        # 验证确实已保存到数据库
+        verified_profile = Profile.objects.get(user=request.user)
+        logger.info(f"Verified from DB: enabled={verified_profile.two_fa_enabled}, method={verified_profile.two_fa_method}")
 
         return JsonResponse({
             "status": "success",
-            "message": "邮箱验证方式已准备就绪",
+            "message": "邮箱两因素认证已启用",
+            "two_fa_enabled": verified_profile.two_fa_enabled,  # 返回数据库中的实际值
+            "two_fa_method": verified_profile.two_fa_method,    # 返回数据库中的实际方式
             "requires_verification": False  # 邮箱方式不需要额外验证步骤
         })
 
@@ -1601,3 +1657,81 @@ def resend_2fa_email(request):
     except Exception as e:
         logger.error(f"重新发送2FA邮件失败: {e}")
         return JsonResponse({'status': 'error', 'message': '发送失败，请稍后重试'}, status=500)
+
+
+# ==================== 通知偏好设置 API ====================
+@login_required
+@require_http_methods(["GET", "POST"])
+def notification_preferences(request):
+    """
+    获取或更新用户的通知偏好设置
+    GET: 返回当前通知偏好
+    POST: 更新通知偏好
+    """
+    user = request.user
+
+    # 确保profile存在
+    try:
+        profile = user.profile
+    except Profile.DoesNotExist:
+        profile = Profile.objects.create(user=user)
+        logger.info(f"Created profile for user {user.id} in notification_preferences")
+
+    if request.method == "GET":
+        # 返回当前的通知偏好设置
+        return JsonResponse({
+            "status": "success",
+            "preferences": {
+                "notify_login": profile.notify_login,
+                "notify_password_change": profile.notify_password_change,
+                "notify_password_reset": profile.notify_password_reset,
+                "notify_note_activities": profile.notify_note_activities,
+                "notify_profile_likes": profile.notify_profile_likes,
+            }
+        })
+
+    elif request.method == "POST":
+        # 更新通知偏好设置
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+        # 更新各个通知选项（只更新前端传递的字段）
+        update_fields = []
+
+        if "notify_login" in data:
+            profile.notify_login = bool(data["notify_login"])
+            update_fields.append("notify_login")
+
+        if "notify_password_change" in data:
+            profile.notify_password_change = bool(data["notify_password_change"])
+            update_fields.append("notify_password_change")
+
+        if "notify_password_reset" in data:
+            profile.notify_password_reset = bool(data["notify_password_reset"])
+            update_fields.append("notify_password_reset")
+
+        if "notify_note_activities" in data:
+            profile.notify_note_activities = bool(data["notify_note_activities"])
+            update_fields.append("notify_note_activities")
+
+        if "notify_profile_likes" in data:
+            profile.notify_profile_likes = bool(data["notify_profile_likes"])
+            update_fields.append("notify_profile_likes")
+
+        # 保存更新
+        if update_fields:
+            profile.save(update_fields=update_fields)
+            logger.info(f"Updated notification preferences for user {user.id}: {update_fields}")
+
+            return JsonResponse({
+                "status": "success",
+                "message": "通知偏好设置已更新",
+                "updated_fields": update_fields
+            })
+        else:
+            return JsonResponse({
+                "status": "warning",
+                "message": "没有需要更新的字段"
+            })

@@ -867,8 +867,105 @@
     <!-- ==================== 其他标签页占位 ==================== -->
     <div v-if="active === 'notifications'" class="settings-content-card">
       <div class="form-section">
-        <h3 class="form-section-title">通知偏好</h3>
-        <p style="color: #909399;">此功能正在开发中...</p>
+        <h3 class="form-section-title">邮件通知偏好</h3>
+        <p style="color: #606266; margin-bottom: 24px;">
+          选择您希望接收邮件通知的场景。虽然部分功能尚未完善，但您可以提前配置您的偏好设置。
+        </p>
+
+        <div style="max-width: 600px;">
+          <!-- 账户安全类通知 -->
+          <div style="margin-bottom: 32px;">
+            <h4 style="font-size: 16px; margin-bottom: 16px; color: #303133;">
+              <i class="fas fa-shield-alt" style="color: #409EFF;"></i> 账户安全
+            </h4>
+
+            <el-form label-position="left" label-width="280px">
+              <el-form-item label="账户登录通知" style="margin-bottom: 20px;">
+                <el-switch
+                  v-model="notifications.notify_login"
+                  @change="saveNotificationPreferences"
+                  active-text="开启"
+                  inactive-text="关闭">
+                </el-switch>
+                <div style="color: #909399; font-size: 12px; margin-top: 4px;">
+                  当有新设备或异常登录时，发送邮件提醒
+                </div>
+              </el-form-item>
+
+              <el-form-item label="密码修改通知" style="margin-bottom: 20px;">
+                <el-switch
+                  v-model="notifications.notify_password_change"
+                  @change="saveNotificationPreferences"
+                  active-text="开启"
+                  inactive-text="关闭">
+                </el-switch>
+                <div style="color: #909399; font-size: 12px; margin-top: 4px;">
+                  密码修改成功后，发送邮件确认
+                </div>
+              </el-form-item>
+
+              <el-form-item label="密码重置通知" style="margin-bottom: 20px;">
+                <el-switch
+                  v-model="notifications.notify_password_reset"
+                  @change="saveNotificationPreferences"
+                  active-text="开启"
+                  inactive-text="关闭">
+                </el-switch>
+                <div style="color: #909399; font-size: 12px; margin-top: 4px;">
+                  当请求密码重置时，发送邮件通知
+                </div>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <!-- 内容互动类通知 -->
+          <div style="margin-bottom: 32px;">
+            <h4 style="font-size: 16px; margin-bottom: 16px; color: #303133;">
+              <i class="fas fa-bell" style="color: #67C23A;"></i> 内容与互动
+            </h4>
+
+            <el-form label-position="left" label-width="280px">
+              <el-form-item label="笔记活动通知" style="margin-bottom: 20px;">
+                <el-switch
+                  v-model="notifications.notify_note_activities"
+                  @change="saveNotificationPreferences"
+                  active-text="开启"
+                  inactive-text="关闭">
+                </el-switch>
+                <div style="color: #909399; font-size: 12px; margin-top: 4px;">
+                  笔记创建、修改或删除时发送通知（功能开发中）
+                </div>
+              </el-form-item>
+
+              <el-form-item label="获得点赞通知" style="margin-bottom: 20px;">
+                <el-switch
+                  v-model="notifications.notify_profile_likes"
+                  @change="saveNotificationPreferences"
+                  active-text="开启"
+                  inactive-text="关闭">
+                </el-switch>
+                <div style="color: #909399; font-size: 12px; margin-top: 4px;">
+                  当您的个人空间或作品被点赞时接收通知
+                </div>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <!-- 提示信息 -->
+          <el-alert
+            type="info"
+            :closable="false"
+            style="margin-top: 24px;">
+            <template #title>
+              <i class="fas fa-info-circle"></i> 提示
+            </template>
+            <div style="font-size: 13px;">
+              • 所有邮件通知都会发送到您的注册邮箱：<strong>[[ profile.email ]]</strong><br>
+              • 部分功能正在开发中，开关设置会在功能上线后生效<br>
+              • 您可以随时回到这里调整您的通知偏好
+            </div>
+          </el-alert>
+        </div>
       </div>
     </div>
 

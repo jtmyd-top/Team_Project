@@ -210,6 +210,33 @@ class Profile(models.Model):
         help_text="用于 TOTP 设备丢失时的一次性备用码"
     )
 
+    # ==================== 邮件通知偏好设置 ====================
+    notify_login = models.BooleanField(
+        default=True,
+        verbose_name="登录通知",
+        help_text="账户登录时发送邮件通知"
+    )
+    notify_password_change = models.BooleanField(
+        default=True,
+        verbose_name="密码修改通知",
+        help_text="密码修改时发送邮件通知"
+    )
+    notify_password_reset = models.BooleanField(
+        default=True,
+        verbose_name="密码重置通知",
+        help_text="密码重置时发送邮件通知"
+    )
+    notify_note_activities = models.BooleanField(
+        default=False,
+        verbose_name="笔记活动通知",
+        help_text="笔记创建/修改/删除时发送邮件通知"
+    )
+    notify_profile_likes = models.BooleanField(
+        default=True,
+        verbose_name="点赞通知",
+        help_text="个人空间或作品被点赞时发送邮件通知"
+    )
+
     def clean_bio(self):
         """净化用户输入的富文本内容"""
         from nh3 import clean
