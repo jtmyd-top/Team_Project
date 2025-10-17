@@ -1,3 +1,5 @@
+import { request, createDebouncedRequest, useCountdown } from '/static/JS/utils/request.js';
+
 const { createApp, ref, reactive, watch, computed, nextTick, onMounted } = Vue;
 
 createApp({
@@ -34,71 +36,154 @@ createApp({
       notify_profile_likes: initialData.notify_profile_likes !== undefined ? initialData.notify_profile_likes : true,
     });
 
+    // ✅ 添加加载状态管理
+    const loadingStates = reactive({
+      notificationSaving: false,  // 通知偏好保存中
+      profileSaving: false,        // 个人资料保存中
+      bioSaving: false,            // 个性签名保存中
+      likeSaving: false,           // 点赞操作中
+      notificationLoading: false,  // 通知偏好加载中
+    });
+
+    // ✅ 保存通知偏好的原始状态（用于错误时回滚）
+    const notificationsOriginal = ref({});
+
+    // ✅ 防抖计时器
+    let notificationSaveTimer = null;
+
     // ✅ 工具函数：判断 URL 是否为视频
     function isVideoUrl(url) {
       const videoExtensions = ['.mp4', '.webm', '.ogg'];
       return videoExtensions.some(ext => url.toLowerCase().includes(ext));
     }
 
-    // ✅ 检测视频是否有音轨
+    // ✅ 检测视频是否有音轨（改进版，带调试信息）
     const checkVideoAudio = async () => {
+      console.log('开始检测视频音频...');
       await nextTick();  // 确保DOM已渲染
       const video = bannerVideo.value;
-      if (!video) return;
+      if (!video) {
+        console.log('视频元素未找到');
+        return;
+      }
 
       try {
         // 等待视频元数据加载完成
         if (video.readyState < 1) {
+          console.log('等待视频元数据加载...');
           await new Promise(resolve => {
             video.addEventListener('loadedmetadata', resolve, { once: true });
           });
         }
 
-        // 检查是否有音频轨道
+        console.log('视频元数据已加载，readyState:', video.readyState);
+        console.log('视频时长:', video.duration);
+
+        // 方法1：检查是否有音频轨道（最可靠）
+        if (video.audioTracks && video.audioTracks.length !== undefined) {
+          console.log('audioTracks数量:', video.audioTracks.length);
+          videoHasAudio.value = video.audioTracks.length > 0;
+          console.log('使用audioTracks API检测，有音频:', videoHasAudio.value);
+          return;
+        }
+
+        // 方法2：Firefox特有API
         if (video.mozHasAudio !== undefined) {
-          // Firefox
           videoHasAudio.value = video.mozHasAudio;
-        } else if (video.webkitAudioDecodedByteCount !== undefined) {
-          // Chrome/Safari
+          console.log('使用Firefox API检测，有音频:', videoHasAudio.value);
+          return;
+        }
+
+        // 方法3：Chrome/Safari特有API（需要等待一些数据加载）
+        if (video.webkitAudioDecodedByteCount !== undefined) {
+          // 等待一小段时间让音频数据加载
+          await new Promise(resolve => setTimeout(resolve, 500));
           videoHasAudio.value = video.webkitAudioDecodedByteCount > 0;
-        } else if (video.audioTracks && video.audioTracks.length > 0) {
-          // 标准 API
-          videoHasAudio.value = true;
+          console.log('webkitAudioDecodedByteCount:', video.webkitAudioDecodedByteCount);
+          console.log('使用Chrome/Safari API检测，有音频:', videoHasAudio.value);
+          return;
+        }
+
+        // 方法4：使用Web Audio API分析（备用方案）
+        console.log('尝试使用Web Audio API检测...');
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          const context = new AudioContext();
+          try {
+            const source = context.createMediaElementSource(video);
+            const analyser = context.createAnalyser();
+            source.connect(analyser);
+            analyser.connect(context.destination);
+
+            // 播放一小段时间来检测音频
+            video.volume = 0; // 静音播放
+            const playPromise = video.play();
+            if (playPromise) {
+              await playPromise;
+              // 等待一些帧
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+
+            // 检查是否有任何音频数据
+            const hasAudio = dataArray.some(value => value > 0);
+            videoHasAudio.value = hasAudio;
+
+            console.log('音频数据分析结果:', hasAudio ? '有音频' : '无音频');
+            console.log('音频数据样本:', dataArray.slice(0, 10));
+
+            // 暂停并重置
+            video.pause();
+            video.currentTime = 0;
+            video.volume = 1;
+
+            // 清理
+            source.disconnect();
+            analyser.disconnect();
+            context.close();
+          } catch (err) {
+            console.error('Web Audio API检测失败:', err);
+            context.close();
+            // 如果Web Audio API失败，默认认为有音频（显示按钮让用户控制）
+            videoHasAudio.value = true;
+          }
         } else {
-          // 备用方案：尝试播放一小段来检测
-          const context = new (window.AudioContext || window.webkitAudioContext)();
-          const source = context.createMediaElementSource(video);
-          const analyser = context.createAnalyser();
-          source.connect(analyser);
-          analyser.connect(context.destination);
-
-          const bufferLength = analyser.frequencyBinCount;
-          const dataArray = new Uint8Array(bufferLength);
-
-          // 检查音频数据
-          analyser.getByteFrequencyData(dataArray);
-          const hasAudio = dataArray.some(value => value > 0);
-          videoHasAudio.value = hasAudio;
-
-          // 清理
-          source.disconnect();
-          analyser.disconnect();
-          context.close();
+          // 如果没有任何检测方法可用，默认显示音量按钮
+          console.log('无可用的音频检测API，默认显示音量按钮');
+          videoHasAudio.value = true;
         }
       } catch (error) {
-        console.warn('检测视频音频失败:', error);
-        // 出错时假设没有音频，不显示按钮
-        videoHasAudio.value = false;
+        console.error('检测视频音频失败:', error);
+        // 出错时默认显示按钮，让用户可以控制
+        videoHasAudio.value = true;
       }
+
+      console.log('最终检测结果 - videoHasAudio:', videoHasAudio.value);
+      console.log('profile.bannerIsVideo:', profile.bannerIsVideo);
     };
 
-    // ✅ 切换视频静音状态
-    const toggleVideoMute = () => {
+    // ✅ 切换视频静音状态（改进版：处理自动播放策略）
+    const toggleVideoMute = async () => {
       const video = bannerVideo.value;
       if (!video) return;
 
       videoMuted.value = !videoMuted.value;
       video.muted = videoMuted.value;
+
+      // 当取消静音时，尝试播放视频（某些浏览器要求）
+      if (!videoMuted.value) {
+        try {
+          await video.play();
+        } catch (error) {
+          ElMessage.warning("浏览器阻止了自动播放，请手动点击视频播放");
+          // 恢复静音状态
+          videoMuted.value = true;
+          video.muted = true;
+        }
+      }
     };
 
     const active = ref("profile");
@@ -155,6 +240,10 @@ createApp({
       return true;
     });
 
+    // 使用倒计时hook
+    const emailCountdown = useCountdown();
+    const passwordCountdown = useCountdown();
+
     const showEmailDialog = ref(false);
     const emailForm = reactive({
       password: "",
@@ -162,7 +251,6 @@ createApp({
       imageCaptcha: "",
       code: "",
       codeSending: false,
-      codeCountdown: 0,
       // ✅ 2FA相关
       show2FA: false,          // 是否显示2FA输入框
       twoFaMethod: '',         // 2FA方式：totp | email
@@ -178,14 +266,45 @@ createApp({
       message: ''
     });
 
-    // 防抖工具
-    const debounce = (fn, delay = 400) => {
-      let t;
-      return (...args) => {
-        clearTimeout(t);
-        t = setTimeout(() => fn(...args), delay);
-      };
+    // 创建防抖的邮箱检查函数（带AbortController）
+    const checkEmailAvailabilityCore = async (signal) => {
+      const email = emailForm.new_email.trim();
+      if (!email) {
+        emailCheck.status = null;
+        emailCheck.message = '';
+        return;
+      }
+      if (!EMAIL_REGEX.test(email)) {
+        emailCheck.status = 'invalid';
+        emailCheck.message = '邮箱格式不正确';
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `${window.API_ENDPOINTS.checkEmail}?email=${encodeURIComponent(email)}&exclude_self=1`,
+          { signal }
+        );
+        const data = await res.json();
+        if (data.is_taken) {
+          emailCheck.status = 'taken';
+          emailCheck.message = '该邮箱已被绑定';
+        } else {
+          emailCheck.status = 'ok';
+          emailCheck.message = '';
+        }
+      } catch (error) {
+        // 如果是取消的请求，不更新状态
+        if (error.name === 'AbortError') {
+          return;
+        }
+        emailCheck.status = 'invalid';
+        emailCheck.message = '邮箱检查失败，请稍后再试';
+      }
     };
+
+    // 使用createDebouncedRequest创建防抖函数
+    const checkEmailAvailability = createDebouncedRequest(checkEmailAvailabilityCore, 400);
 
     const editBio = () => {
       bioDraft.value = profile.bio || "";
@@ -198,6 +317,9 @@ createApp({
     };
 
     const saveBio = async () => {
+      if (loadingStates.bioSaving) return; // 防止重复请求
+
+      loadingStates.bioSaving = true;
       try {
         const res = await fetch(window.API_ENDPOINTS.updateProfile, {
           method: "POST",
@@ -213,40 +335,18 @@ createApp({
         } else {
           ElMessage.error(data.message || "保存失败");
         }
-      } catch {
+      } catch (error) {
         ElMessage.error("网络错误");
+        console.error("保存个性签名失败:", error);
+      } finally {
+        loadingStates.bioSaving = false;
       }
     };
-
-    // 检查邮箱可用性（输入时实时检查）
-    const checkEmailAvailability = debounce(async () => {
-      const email = emailForm.new_email.trim();
-      if (!email) { emailCheck.status = null; emailCheck.message = ''; return; }
-      if (!EMAIL_REGEX.test(email)) {
-        emailCheck.status = 'invalid';
-        emailCheck.message = '邮箱格式不正确';
-        return;
-      }
-      try {
-        const res = await fetch(`${window.API_ENDPOINTS.checkEmail}?email=${encodeURIComponent(email)}&exclude_self=1`);
-        const data = await res.json();
-        if (data.is_taken) {
-          emailCheck.status = 'taken';
-          emailCheck.message = '该邮箱已被绑定';
-        } else {
-          emailCheck.status = 'ok';
-          emailCheck.message = '';
-        }
-      } catch {
-        emailCheck.status = 'invalid';
-        emailCheck.message = '邮箱检查失败，请稍后再试';
-      }
-    }, 400);
 
     // 监听邮箱输入变化
     watch(() => emailForm.new_email, checkEmailAvailability);
 
-    // 发送邮箱验证码
+    // 发送邮箱验证码（改进版：添加finally确保状态恢复）
     const sendEmailCode = async () => {
       const email = emailForm.new_email.trim();
       if (!EMAIL_REGEX.test(email)) return ElMessage.warning("请输入正确邮箱");
@@ -261,13 +361,13 @@ createApp({
           body: JSON.stringify({
             email,
             image_captcha_code: emailForm.imageCaptcha,
-            "purpose": "change"
+            "purpose": "email_change"  // 统一改为 email_change
           }),
         });
         const data = await res.json();
         if (res.ok && data.status === "success") {
           ElMessage.success("验证码已发送到新邮箱");
-          startCountdown();
+          emailCountdown.start(60);  // 使用倒计时hook
           refreshCaptcha();
           emailForm.imageCaptcha = "";
         } else {
@@ -277,8 +377,11 @@ createApp({
         }
       } catch {
         ElMessage.error("网络错误");
+        refreshCaptcha();
+        emailForm.imageCaptcha = "";
+      } finally {
+        emailForm.codeSending = false;  // 确保状态恢复
       }
-      emailForm.codeSending = false;
     };
 
     // 确认修改邮箱
@@ -390,14 +493,6 @@ createApp({
       }
     };
 
-    const startCountdown = () => {
-      emailForm.codeCountdown = 60;
-      const timer = setInterval(() => {
-        emailForm.codeCountdown--;
-        if (emailForm.codeCountdown <= 0) clearInterval(timer);
-      }, 1000);
-    };
-
     const openEmailDialog = () => {
       emailForm.password = "";
       emailForm.new_email = "";
@@ -428,7 +523,9 @@ createApp({
 
     const saveProfile = async () => {
       if (!await validateUsername(profile.nickname)) return;
+      if (loadingStates.profileSaving) return; // 防止重复请求
 
+      loadingStates.profileSaving = true;
       try {
         const res = await fetch(window.API_ENDPOINTS.updateProfile, {
           method: "POST",
@@ -452,13 +549,26 @@ createApp({
         } else {
           ElMessage.error(data.message || "更新失败");
         }
-      } catch (e) {
+      } catch (error) {
         ElMessage.error("网络错误");
+        console.error("保存个人资料失败:", error);
+      } finally {
+        loadingStates.profileSaving = false;
       }
     };
 
-    // ✅ 点赞切换功能
+    // ✅ 点赞切换功能（改进版：添加加载状态）
     const toggleLike = async () => {
+      if (loadingStates.likeSaving) return; // 防止重复请求
+
+      // 乐观更新UI
+      const previousState = isLiked.value;
+      const previousCount = profile.likes_count;
+
+      isLiked.value = !isLiked.value;
+      profile.likes_count += isLiked.value ? 1 : -1;
+
+      loadingStates.likeSaving = true;
       try {
         const res = await fetch(window.API_ENDPOINTS.toggleLike || '/api/toggle-like/', {
           method: "POST",
@@ -466,14 +576,24 @@ createApp({
         });
         const data = await res.json();
         if (res.ok && data.status === "success") {
+          // 使用服务器返回的实际值更新
           isLiked.value = data.is_liked;
           profile.likes_count = data.likes_count;
           ElMessage.success(data.is_liked ? "已点赞 ❤️" : "已取消点赞");
         } else {
+          // 错误时回滚
+          isLiked.value = previousState;
+          profile.likes_count = previousCount;
           ElMessage.error(data.message || "操作失败");
         }
-      } catch {
+      } catch (error) {
+        // 网络错误时回滚
+        isLiked.value = previousState;
+        profile.likes_count = previousCount;
         ElMessage.error("网络错误");
+        console.error("点赞操作失败:", error);
+      } finally {
+        loadingStates.likeSaving = false;
       }
     };
 
@@ -521,7 +641,7 @@ createApp({
         const data = await res.json();
         if (res.ok && data.status === "success") {
           ElMessage.success("验证码已发送到您的邮箱");
-          startPasswordCountdown();
+          passwordCountdown.start(60);  // 使用倒计时hook
           refreshCaptcha();
           passwordForm.imageCaptcha = "";
         } else {
@@ -531,16 +651,11 @@ createApp({
         }
       } catch {
         ElMessage.error("网络错误");
+        refreshCaptcha();
+        passwordForm.imageCaptcha = "";
+      } finally {
+        passwordForm.codeSending = false;
       }
-      passwordForm.codeSending = false;
-    };
-
-    const startPasswordCountdown = () => {
-      passwordForm.codeCountdown = 60;
-      const timer = setInterval(() => {
-        passwordForm.codeCountdown--;
-        if (passwordForm.codeCountdown <= 0) clearInterval(timer);
-      }, 1000);
     };
 
     // 提交修改密码
@@ -862,8 +977,9 @@ createApp({
 
     // ==================== 通知偏好设置相关 ====================
 
-    // 加载通知偏好设置
+    // 加载通知偏好设置（改进版：添加加载状态）
     const loadNotificationPreferences = async () => {
+      loadingStates.notificationLoading = true;
       try {
         const res = await fetch('/api/notification-preferences/', {
           method: "GET",
@@ -874,30 +990,104 @@ createApp({
           // 更新通知偏好设置状态
           if (data.preferences) {
             Object.assign(notifications, data.preferences);
+            // 保存原始状态以便错误时回滚
+            notificationsOriginal.value = { ...data.preferences };
           }
+        } else {
+          ElMessage.warning("加载通知偏好设置失败，使用默认设置");
         }
       } catch (error) {
         console.error("加载通知偏好设置失败:", error);
+        ElMessage.warning("网络错误，无法加载通知偏好设置");
+      } finally {
+        loadingStates.notificationLoading = false;
       }
     };
 
-    // 保存通知偏好设置
-    const saveNotificationPreferences = async () => {
-      try {
-        const res = await fetch('/api/notification-preferences/', {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...csrfHeader },
-          body: JSON.stringify(notifications),
-        });
-        const data = await res.json();
-        if (res.ok && data.status === "success") {
-          ElMessage.success("通知偏好设置已保存");
-        } else {
-          ElMessage.error(data.message || "保存失败");
-        }
-      } catch {
-        ElMessage.error("网络错误");
+    // 保存通知偏好设置（改进版：防抖、加载状态、错误处理）
+    const saveNotificationPreferences = async (fieldName = null) => {
+      // 清除之前的防抖计时器
+      if (notificationSaveTimer) {
+        clearTimeout(notificationSaveTimer);
       }
+
+      // 设置防抖延迟（500ms）
+      notificationSaveTimer = setTimeout(async () => {
+        // 如果正在保存，避免重复请求
+        if (loadingStates.notificationSaving) {
+          console.log("正在保存中，跳过重复请求");
+          return;
+        }
+
+        loadingStates.notificationSaving = true;
+        const currentSettings = { ...notifications };
+
+        try {
+          const res = await fetch('/api/notification-preferences/', {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...csrfHeader },
+            body: JSON.stringify(notifications),
+          });
+
+          if (!res.ok) {
+            // 处理不同的HTTP错误状态
+            if (res.status === 401) {
+              throw new Error("未授权，请重新登录");
+            } else if (res.status === 403) {
+              throw new Error("没有权限修改通知设置");
+            } else if (res.status === 500) {
+              throw new Error("服务器内部错误，请稍后重试");
+            } else if (res.status === 429) {
+              throw new Error("操作过于频繁，请稍后再试");
+            }
+          }
+
+          const data = await res.json();
+
+          if (data.status === "success") {
+            // 更新原始状态为当前成功保存的状态
+            notificationsOriginal.value = { ...currentSettings };
+
+            // 显示具体更改的字段信息
+            if (fieldName && data.updated_fields) {
+              const fieldNameMap = {
+                'notify_login': '登录通知',
+                'notify_password_change': '密码修改通知',
+                'notify_password_reset': '密码重置通知',
+                'notify_note_activities': '笔记活动通知',
+                'notify_profile_likes': '点赞通知'
+              };
+              const fieldLabel = fieldNameMap[fieldName] || fieldName;
+              const status = notifications[fieldName] ? '已开启' : '已关闭';
+              ElMessage.success(`${fieldLabel}${status}`);
+            } else {
+              ElMessage.success("通知偏好设置已保存");
+            }
+          } else if (data.status === "warning") {
+            ElMessage.warning(data.message || "没有需要更新的字段");
+          } else {
+            throw new Error(data.message || "保存失败");
+          }
+        } catch (error) {
+          // 错误时回滚到原始状态
+          if (notificationsOriginal.value && Object.keys(notificationsOriginal.value).length > 0) {
+            Object.assign(notifications, notificationsOriginal.value);
+          }
+
+          // 显示详细的错误信息
+          if (error.message) {
+            ElMessage.error(error.message);
+          } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+            ElMessage.error("网络连接失败，请检查网络设置");
+          } else {
+            ElMessage.error("保存失败，请稍后重试");
+          }
+
+          console.error("保存通知偏好设置失败:", error);
+        } finally {
+          loadingStates.notificationSaving = false;
+        }
+      }, 500); // 500ms 防抖延迟
     };
 
     // 在组件挂载时加载通知偏好设置
@@ -911,11 +1101,12 @@ createApp({
       csrfHeader,
       showEmailDialog,
       emailForm,
+      emailCountdown,  // 使用倒计时hook
+      passwordCountdown,  // 使用倒计时hook
       openEmailDialog,
       saveProfile,
       changeEmail,
       sendEmailCode,
-      startCountdown,
       refreshCaptcha,
       captchaUrl,
       handleAvatarSuccess,
@@ -968,6 +1159,8 @@ createApp({
       // ✅ 通知偏好设置相关
       notifications,
       saveNotificationPreferences,
+      // ✅ 加载状态管理
+      loadingStates,
     };
   },
 }).use(ElementPlus).mount("#settings-app");

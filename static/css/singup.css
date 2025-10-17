@@ -1,0 +1,369 @@
+ /* 主容器样式 */
+        #signup-app {
+            max-width: 450px;
+            width: 90%;
+            padding: 2.5em;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            background-color: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(1px);
+            text-align: center;
+            color: #333;
+        }
+
+        /* 输入框聚焦时图标变色 */
+        .form-input:focus ~ .input-icon,
+        .form-input:not(:placeholder-shown) ~ .input-icon {
+            color: #007bff; /* 聚焦或有内容时，图标变色 */
+        }
+
+        /* 表单组基础样式 */
+        .form-group {
+            position: relative;
+            margin-bottom: 2em;
+        }
+
+        /* 悬浮标签样式 */
+        .floating-label {
+            position: absolute;
+            top: 1em;
+            left: 2.8em;
+            font-size: 1em;
+            color: #7e7a7a;
+            pointer-events: none;
+            transition: all 0.2s ease-in-out;
+        }
+
+        /* 输入框样式 */
+        .form-input {
+            width: 100%;
+            padding: 1em 1em 1em 2.8em;
+            box-sizing: border-box;
+            border: none;
+            border-bottom: 2px solid #ccc;
+            background-color: transparent;
+            font-size: 1em;
+            color: #333;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-bottom-color: #007bff;
+        }
+
+        /* 输入框聚焦或非空时悬浮标签动画 */
+        .form-input:focus + .floating-label,
+        .form-input:not(:placeholder-shown) + .floating-label {
+            top: -1em;
+            left: 2.8em;
+            font-size: 0.8em;
+            color: #007bff;
+        }
+
+        /* 图标通用样式 */
+        .input-icon {
+            position: absolute;
+            top: 0.9em;
+            left: 0.5em;
+            font-size: 1.2em;
+            color: #6c757d; /* 初始颜色 */
+            transition: color 0.2s ease-in-out;
+            z-index: 2; /* 确保图标在输入框之上 */
+        }
+
+        /* 验证规则列表样式 */
+        .validation-rules {
+            list-style-type: none;
+            padding: 0;
+            margin: 0.8em 0 0 0.5em;
+            text-align: left;
+            font-size: 0.85em;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+        }
+
+        /* 输入框聚焦时显示验证规则 */
+        .form-input:focus ~ .validation-rules {
+            max-height: 200px;
+            opacity: 1;
+        }
+
+        /* 验证项样式 */
+        .validation-rules li {
+            margin-bottom: 0.5em;
+            transition: color 0.3s;
+        }
+
+        .validation-rules li.invalid {
+            color: #d9534f;
+        }
+
+        .validation-rules li.valid {
+            color: #28a745;
+            text-decoration: line-through;
+        }
+
+        /* 验证项前缀图标 */
+        .validation-rules li::before {
+            display: inline-block;
+            width: 1.5em;
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            transition: content 0.3s;
+        }
+
+        .validation-rules li.invalid::before {
+            content: "\f00d"; /* Font Awesome 的红色叉号 */
+        }
+
+        .validation-rules li.valid::before {
+            content: "\f00c"; /* Font Awesome 的绿色对勾 */
+        }
+
+        /* 字段错误提示 */
+        .field-error {
+            color: #d9534f;
+            font-size: 0.85em;
+            text-align: left;
+            margin-top: 0.5em;
+        }
+
+        /* 验证码组布局 */
+        .captcha-group {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+        }
+
+        /* 提交按钮样式 */
+        .submit-btn {
+            width: 100%;
+            padding: 0.8em;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1.1em;
+            margin-top: 1em;
+        }
+
+        /* 登录链接样式 */
+        .login-link {
+            text-align: center;
+            margin-top: 1.5em;
+        }
+
+        .login-link a {
+            color: #555;
+            text-decoration: none;
+        }
+
+        /* 【任务三】服务器错误提示样式 */
+        .server-errors {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 1em;
+            margin-bottom: 1.5em;
+            text-align: left;
+        }
+
+        .server-errors ul {
+            list-style-type: none;
+            padding-left: 0;
+            margin: 0;
+        }
+
+        .server-errors li {
+            margin-bottom: 0.5em;
+        }
+
+        /* 密码可见性切换图标样式 */
+        .input-passwd {
+            position: absolute;
+            top: 0.9em;
+            right: 0.5em;
+            font-size: 1.2em;
+            color: #6c757d;
+            cursor: pointer;
+            transition: color 0.2s ease-in-out;
+            z-index: 2;
+        }
+        /* 新增：模态框样式 */
+    .modal-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1050;
+    }
+    .modal-content {
+        background: white; padding: 2em; border-radius: 15px; width: 90%; max-width: 400px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    .modal-actions { margin-top: 1.5em; text-align: right; }
+    .modal-actions button { margin-left: 1em; }
+    /* --- 弹窗美化样式 --- */
+
+/* 遮罩层：半透明黑色背景 */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5); /* 更深的遮罩，突出弹窗 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050;
+    animation: fadeIn 0.3s ease-in-out; /* 淡入动效 */
+}
+
+/* 弹窗内容区：核心的毛玻璃效果 */
+.modal-content {
+    width: 90%;
+    max-width: 420px;
+    padding: 2.5em;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.87); /* 更柔和的阴影 */
+
+    /* 核心：毛玻璃效果 */
+    background: rgba(255, 255, 255, 0.75); /* 半透明白色背景 */
+    backdrop-filter: blur(8px); /* 模糊背景 */
+    -webkit-backdrop-filter: blur(8px); /* 兼容Safari */
+    border: 1px solid rgba(255, 255, 255, 0.18); /* 微妙的边框 */
+
+    animation: scaleUp 0.3s ease-in-out; /* 放大+淡入动效 */
+}
+
+.modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+    color: #333;
+    font-size: 1.5em;
+}
+
+.modal-content h3 .fas {
+    margin-right: 0.5em;
+    color: #007bff;
+}
+
+.modal-description {
+    color: #555;
+    margin-bottom: 2em;
+}
+
+/* 弹窗内的输入框也需要美化 */
+.modal-content .form-input {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+}
+
+.modal-content .form-input:focus {
+    background-color: rgba(255, 255, 255, 0.8);
+}
+
+.captcha-image {
+    cursor: pointer;
+    border-radius: 8px; /* 图片也加圆角 */
+    height: 48px; /* 调整高度以匹配输入框 */
+    border: 1px solid rgba(255, 255, 255, 0.95);
+    transition: transform 0.2s;
+}
+
+.captcha-image:hover {
+    transform: scale(1.05); /* 悬停时轻微放大 */
+}
+
+.modal-error {
+    color: #d9534f;
+    font-weight: 500;
+    background-color: rgba(248, 215, 218, 0.8);
+    padding: 0.5em 1em;
+    border-radius: 8px;
+    margin-top: 1em;
+    text-align: center;
+}
+
+/* 按钮区域 */
+.modal-actions {
+    margin-top: 2em;
+    display: flex;
+    justify-content: flex-end; /* 按钮靠右 */
+    gap: 1em; /* 按钮间距 */
+}
+
+.modal-actions button {
+    padding: 0.8em 1.5em;
+    border: none;
+    border-radius: 25px; /* 胶囊形状 */
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+/* 取消按钮（次要按钮） */
+.btn-cancel {
+    background: transparent;
+    color: #555;
+    box-shadow: inset 0 0 0 2px #ccc;
+}
+
+.btn-cancel:hover {
+    background: #f0f0f0;
+    color: #333;
+}
+
+/* 确认按钮（主要按钮） */
+.btn-confirm {
+    background-color: #28a745; /* 使用您主页的绿色 */
+    color: white;
+}
+
+.btn-confirm:hover {
+    background-color: #218838; /* 悬停时颜色加深 */
+    transform: translateY(-2px); /* 悬停时轻微上浮 */
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+}
+.modal-content {
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 16px;
+    padding: 2em;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    animation: scaleUp 0.3s ease-in-out;
+}
+.modal-description {
+    font-size: 1rem;
+    margin: 1em 0;
+}
+
+/* --- 动效定义 --- */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+    from { transform: scale(0.9) translateY(20px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+}
+.empty-state {
+    text-align: center;
+    margin-top: 3em;
+    color: #666;
+}
+
+.empty-illustration {
+    margin-bottom: 1em;
+    opacity: 0.8;
+}
+.note-meta-empty {
+    margin-top: 0.5em;
+    color: #888;
+    font-style: italic;
+}

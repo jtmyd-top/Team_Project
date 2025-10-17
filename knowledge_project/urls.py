@@ -45,6 +45,9 @@ urlpatterns = [
     path('api/2fa/verify/', views.verify_2fa_login, name='verify_2fa_login'),
     path('api/2fa/resend-email/', views.resend_2fa_email, name='resend_2fa_email'),
 
+    # ==================== 测试页面 ====================
+    path('test/video-audio/', views.test_video_audio, name='test_video_audio'),
+
     #path("logout/", views.logout_view, name="logout"),
 ]
 

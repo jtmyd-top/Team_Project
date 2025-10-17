@@ -895,6 +895,15 @@ def public_notes_list_view(request):
     """
     # 不再需要进行分页或查询数据，直接渲染模板
     return render(request, 'knowledge/public_notes_list.html')
+
+
+def test_video_audio(request):
+    """
+    视频音频检测测试页面
+    """
+    return render(request, 'test_video_audio.html')
+
+
 @login_required
 def settings_view(request):
     """
