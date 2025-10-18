@@ -418,6 +418,10 @@ class CustomLoginView(View):
             else:
                 # 没有启用2FA，直接登录
                 login(request, user)
+
+                # 发送登录通知
+                self.send_login_notification(request, user)
+
                 return JsonResponse({
                     'status': 'success',
                     'message': '登录成功！',
@@ -429,6 +433,116 @@ class CustomLoginView(View):
             'status': 'error',
             'message': '用户名或密码不正确'
         }, status=400)
+
+    def send_login_notification(self, request, user):
+        """
+        发送登录通知邮件
+        包含登录时间、IP地址、设备信息等
+        """
+        try:
+            # 检查用户是否启用了登录通知
+            profile = getattr(user, 'profile', None)
+            if not profile or not profile.notify_login:
+                return  # 用户未启用登录通知，直接返回
+
+            # 获取登录信息
+            ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
+            if ip_address:
+                ip_address = ip_address.split(',')[0].strip()
+            else:
+                ip_address = request.META.get('REMOTE_ADDR', '未知')
+
+            # 获取User-Agent信息
+            user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
+
+            # 简单解析设备和浏览器信息
+            device_info = self.parse_user_agent(user_agent)
+
+            # 获取登录时间（使用本地时区）
+            login_time = timezone.localtime(timezone.now())
+
+            # 构建邮件内容
+            email_subject = '账户登录通知'
+            email_body = f"""
+尊敬的 {user.username}：
+
+您的账户刚刚成功登录，以下是登录详情：
+
+登录时间：{login_time.strftime('%Y年%m月%d日 %H:%M:%S')}
+登录IP地址：{ip_address}
+登录设备：{device_info}
+
+如果这不是您本人的操作，请立即：
+1. 修改您的密码
+2. 启用两因素认证以增强账户安全性
+
+此邮件为系统自动发送，请勿回复。
+
+知识管理系统
+            """
+
+            # 异步发送邮件，避免阻塞登录流程
+            threading.Thread(
+                target=self._send_email_async,
+                args=(email_subject, email_body, [user.email]),
+                daemon=True
+            ).start()
+
+            logger.info(f"Login notification queued for user {user.id} from IP {ip_address}")
+
+        except Exception as e:
+            # 登录通知发送失败不应影响正常登录
+            logger.error(f"Failed to send login notification for user {user.id}: {e}")
+
+    def parse_user_agent(self, user_agent):
+        """
+        简单解析User-Agent字符串，提取设备和浏览器信息
+        """
+        user_agent_lower = user_agent.lower()
+
+        # 检测操作系统
+        os_info = "未知系统"
+        if 'windows' in user_agent_lower:
+            os_info = "Windows"
+        elif 'mac' in user_agent_lower:
+            os_info = "macOS"
+        elif 'linux' in user_agent_lower:
+            os_info = "Linux"
+        elif 'android' in user_agent_lower:
+            os_info = "Android"
+        elif 'iphone' in user_agent_lower or 'ipad' in user_agent_lower:
+            os_info = "iOS"
+
+        # 检测浏览器
+        browser_info = "未知浏览器"
+        if 'chrome' in user_agent_lower and 'edge' not in user_agent_lower:
+            browser_info = "Chrome"
+        elif 'firefox' in user_agent_lower:
+            browser_info = "Firefox"
+        elif 'safari' in user_agent_lower and 'chrome' not in user_agent_lower:
+            browser_info = "Safari"
+        elif 'edge' in user_agent_lower:
+            browser_info = "Edge"
+        elif 'opera' in user_agent_lower:
+            browser_info = "Opera"
+
+        return f"{os_info} - {browser_info}"
+
+    def _send_email_async(self, subject, body, recipients):
+        """
+        异步发送邮件的辅助方法
+        """
+        try:
+            send_mail(
+                subject,
+                body,
+                settings.DEFAULT_FROM_EMAIL,
+                recipients,
+                fail_silently=False,
+            )
+            logger.info(f"Login notification email sent to {recipients}")
+        except Exception as e:
+            logger.error(f"Failed to send email: {e}")
 
 
 class SignUpView(View):
@@ -1046,7 +1160,8 @@ def upload_avatar(request):
         return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
 
-
+@login_required
+@require_http_methods(["POST"])
 def update_profile(request):
     """
     通用更新接口：可以单独更新昵称或 bio。
@@ -1617,6 +1732,9 @@ def verify_2fa_login(request):
 
     # 2FA验证成功，完成登录
     login(request, user)
+
+    # 发送登录通知（使用CustomLoginView的静态方法）
+    CustomLoginView().send_login_notification(request, user)
 
     # 清除session中的临时数据
     if 'pending_2fa_user_id' in request.session:
