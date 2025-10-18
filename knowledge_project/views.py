@@ -22,6 +22,7 @@ import time
 import re
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
+import requests
 from bs4 import BeautifulSoup, Tag,NavigableString
 from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
@@ -416,11 +417,11 @@ class CustomLoginView(View):
                     'email_sent': profile.two_fa_method == 'email'
                 })
             else:
-                # 没有启用2FA，直接登录
+            # 没有启用2FA，直接登录
                 login(request, user)
 
                 # 发送登录通知
-                self.send_login_notification(request, user)
+                self.send_login_notification(request, user, login_method="标准密码登录")
 
                 return JsonResponse({
                     'status': 'success',
@@ -434,10 +435,10 @@ class CustomLoginView(View):
             'message': '用户名或密码不正确'
         }, status=400)
 
-    def send_login_notification(self, request, user):
+    def send_login_notification(self, request, user, login_method="未知"):
         """
         发送登录通知邮件
-        包含登录时间、IP地址、设备信息等
+        包含登录时间、IP地址、设备信息、IP归属地、登录方式等
         """
         try:
             # 检查用户是否启用了登录通知
@@ -446,11 +447,35 @@ class CustomLoginView(View):
                 return  # 用户未启用登录通知，直接返回
 
             # 获取登录信息
+            # 优先从 X-Forwarded-For 获取 IP，适用于大多数反向代理
             ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
             if ip_address:
+                # X-Forwarded-For 可能包含多个IP，取第一个
                 ip_address = ip_address.split(',')[0].strip()
             else:
-                ip_address = request.META.get('REMOTE_ADDR', '未知')
+                # 其次尝试 X-Real-IP，一些代理软件使用这个头
+                ip_address = request.META.get('HTTP_X_REAL_IP')
+                if not ip_address:
+                    # 最后回退到 REMOTE_ADDR
+                    ip_address = request.META.get('REMOTE_ADDR', '未知')
+
+            # 获取IP归属地
+            ip_location = "未知"
+            try:
+                # 使用 ip-api.com 查询IP地址信息，设置超时
+                # 注意：在生产环境中，建议使用更可靠的、有API密钥的商业服务
+                response = requests.get(f"http://ip-api.com/json/{ip_address}?lang=zh-CN", timeout=3)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status') == 'success':
+                        country = data.get('country', '')
+                        region = data.get('regionName', '')
+                        city = data.get('city', '')
+                        ip_location = f"{country} {region} {city}".strip()
+            except requests.RequestException:
+                # 如果API请求失败，则保持为“未知”
+                pass
+
 
             # 获取User-Agent信息
             user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
@@ -470,7 +495,9 @@ class CustomLoginView(View):
 
 登录时间：{login_time.strftime('%Y年%m月%d日 %H:%M:%S')}
 登录IP地址：{ip_address}
+IP所在地：{ip_location}
 登录设备：{device_info}
+登录方式：{login_method}
 
 如果这不是您本人的操作，请立即：
 1. 修改您的密码
@@ -540,9 +567,61 @@ class CustomLoginView(View):
                 recipients,
                 fail_silently=False,
             )
-            logger.info(f"Login notification email sent to {recipients}")
+            logger.info(f"Email sent to {recipients} with subject '{subject}'")
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
+
+    def send_password_change_notification(self, request, user):
+        """
+        发送密码修改成功通知邮件
+        """
+        try:
+            profile = getattr(user, 'profile', None)
+            if not profile or not profile.notify_password_change:
+                return
+
+            # 复用IP地址获取逻辑
+            ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
+            if ip_address:
+                ip_address = ip_address.split(',')[0].strip()
+            else:
+                ip_address = request.META.get('HTTP_X_REAL_IP')
+                if not ip_address:
+                    ip_address = request.META.get('REMOTE_ADDR', '未知')
+            
+            # 复用User-Agent解析逻辑
+            user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
+            device_info = self.parse_user_agent(user_agent)
+            
+            change_time = timezone.localtime(timezone.now())
+
+            email_subject = '账户密码修改通知'
+            email_body = f"""
+尊敬的 {user.username}：
+
+您的账户密码已于 {change_time.strftime('%Y年%m月%d日 %H:%M:%S')} 被成功修改。
+
+操作详情：
+- 操作IP地址：{ip_address}
+- 操作设备：{device_info}
+
+如果这不是您本人的操作，您的账户可能存在安全风险。请立即通过“忘记密码”功能重置您的密码，并检查您的账户安全设置。
+
+此邮件为系统自动发送，请勿回复。
+
+知识管理系统
+            """
+
+            threading.Thread(
+                target=self._send_email_async,
+                args=(email_subject, email_body, [user.email]),
+                daemon=True
+            ).start()
+
+            logger.info(f"Password change notification queued for user {user.id}")
+
+        except Exception as e:
+            logger.error(f"Failed to send password change notification for user {user.id}: {e}")
 
 
 class SignUpView(View):
@@ -1410,6 +1489,9 @@ def change_password(request):
     from django.contrib.auth import update_session_auth_hash
     update_session_auth_hash(request, user)
 
+    # 发送密码修改通知
+    CustomLoginView().send_password_change_notification(request, user)
+
     return JsonResponse({"status": "success", "message": "密码修改成功"})
 
 
@@ -1730,11 +1812,19 @@ def verify_2fa_login(request):
         if '2fa_email_timestamp' in request.session:
             del request.session['2fa_email_timestamp']
 
+    # 2FA验证成功，构建登录方式描述
+    login_method_detail = "两因素认证 (验证码)"
+    if use_backup:
+        # 备用码脱敏处理：显示前3位和后3位
+        masked_code = f"{code[:3]}***{code[-3:]}" if len(code) > 6 else f"{code[:3]}***"
+        login_method_detail = f"两因素认证 (备用码: {masked_code}，该备用码已失效)"
+
+
     # 2FA验证成功，完成登录
     login(request, user)
 
     # 发送登录通知（使用CustomLoginView的静态方法）
-    CustomLoginView().send_login_notification(request, user)
+    CustomLoginView().send_login_notification(request, user, login_method=login_method_detail)
 
     # 清除session中的临时数据
     if 'pending_2fa_user_id' in request.session:
