@@ -571,6 +571,93 @@ IP所在地：{ip_location}
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
 
+
+# ==================== 笔记活动通知辅助函数 ====================
+def send_note_activity_notification(request, user, note_title, action_type):
+    """
+    发送笔记活动通知邮件
+    
+    参数:
+        request: HTTP请求对象
+        user: 用户对象
+        note_title: 笔记标题
+        action_type: 操作类型 ('created', 'updated', 'deleted')
+    """
+    try:
+        # 检查用户是否启用了笔记活动通知
+        profile = getattr(user, 'profile', None)
+        if not profile or not profile.notify_note_activities:
+            return  # 用户未启用笔记活动通知
+        
+        # 获取操作信息
+        ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
+        if ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+        else:
+            ip_address = request.META.get('HTTP_X_REAL_IP')
+            if not ip_address:
+                ip_address = request.META.get('REMOTE_ADDR', '未知')
+        
+        user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
+        device_info = CustomLoginView().parse_user_agent(user_agent)
+        operation_time = timezone.localtime(timezone.now())
+        
+        # 根据操作类型设置邮件内容
+        action_map = {
+            'created': '创建',
+            'updated': '修改',
+            'deleted': '删除'
+        }
+        action_text = action_map.get(action_type, '操作')
+        
+        email_subject = f'笔记{action_text}通知'
+        email_body = f"""
+尊敬的 {user.username}：
+
+您于 {operation_time.strftime('%Y年%m月%d日 %H:%M:%S')} {action_text}了笔记「{note_title}」。
+
+操作详情：
+- 操作IP地址：{ip_address}
+- 操作设备：{device_info}
+- 笔记标题：{note_title}
+
+如果这不是您本人的操作，请立即检查您的账户安全。
+
+此邮件为系统自动发送，请勿回复。
+
+知识管理系统
+        """
+        
+        # 异步发送邮件
+        threading.Thread(
+            target=_send_email_async_helper,
+            args=(email_subject, email_body, [user.email]),
+            daemon=True
+        ).start()
+        
+        logger.info(f"Note {action_type} notification queued for user {user.id}, note: {note_title}")
+        
+    except Exception as e:
+        # 通知发送失败不应影响正常操作
+        logger.error(f"Failed to send note {action_type} notification for user {user.id}: {e}")
+
+
+def _send_email_async_helper(subject, body, recipients):
+    """
+    异步发送邮件的辅助函数（用于笔记活动通知）
+    """
+    try:
+        send_mail(
+            subject,
+            body,
+            settings.DEFAULT_FROM_EMAIL,
+            recipients,
+            fail_silently=False,
+        )
+        logger.info(f"Email sent to {recipients} with subject '{subject}'")
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+
     def send_password_change_notification(self, request, user):
         """
         发送密码修改成功通知邮件
@@ -797,6 +884,9 @@ def note_detail_api(request, note_id):
 
             auto_generate_tags_for_note(Note, note, created=True)
         cache.delete(get_sidebar_cache_key(request.user.id))
+        
+        # 发送笔记修改通知
+        send_note_activity_notification(request, request.user, note.title, 'updated')
         # --- 在PUT响应中也进行时区转换 ---
         put_local_updated_at = timezone.localtime(note.updated_at)
         put_local_created_at = timezone.localtime(note.created_at)
@@ -824,9 +914,14 @@ def note_detail_api(request, note_id):
     if request.method == 'DELETE':
         try:
             note_id_for_log = note.id  # 在删除前保存ID，用于日志记录
+            note_title = note.title  # 在删除前保存标题，用于通知
             note.delete()
             # [优化] 使用辅助函数清理缓存
             cache.delete(get_sidebar_cache_key(request.user.id))
+            
+            # 发送笔记删除通知
+            send_note_activity_notification(request, request.user, note_title, 'deleted')
+            
             # 返回 200 OK 并附带成功信息是常见的做法。
             # 另一种选择是返回 status=204 (No Content)，此时响应体必须为空。
             return JsonResponse({'status': 'success', 'message': '笔记已成功删除'}, status=200)
@@ -1045,6 +1140,9 @@ def create_note_api(request):
 
         # 清除侧边栏缓存
         cache.delete(get_sidebar_cache_key(user.id))
+
+        # 发送笔记创建通知
+        send_note_activity_notification(request, user, new_note.title, 'created')
 
         return JsonResponse({
             'id': new_note.id,
