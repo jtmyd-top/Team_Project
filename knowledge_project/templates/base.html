@@ -8,9 +8,10 @@
     <meta charset="UTF-8">
     <title>{% block title %}知识协作平台{% endblock %}</title>
 
-    <link href="{% static 'fontawesome-free-6.7.2/css/all.css' %}" rel="stylesheet">
+    <!-- FontAwesome Web Fonts模式 - 只加载CSS,不加载JS -->
+    <link href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}" rel="stylesheet">
 
-     <link href="{% static 'css/base.css' %}" rel="stylesheet">
+    <link href="{% static 'css/base.css' %}" rel="stylesheet">
 <!--    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>-->
     <script src="{%static 'JS/vue/vue.global.js'%}"></script>
     <!-- Vue 3 -->
@@ -23,11 +24,6 @@
     <script src="{%static 'JS/element-plus/element-plus.js' %}"></script>
 
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
-    <!-- 2. CKEditor 5 核心和 Vue 组件 -->
-
-
-    <!-- 3. 其他库，如 FontAwesome -->
-    <script src="{% static 'fontawesome-free-6.7.2/js/all.js' %}"></script>
 
     {% block head_extra %}{% endblock %}
 
@@ -135,9 +131,6 @@ document.addEventListener("DOMContentLoaded", function() {
 
     <!-- 【关键修复】这里使用了您需要的 v4.1.0 版本 -->
      <!-- 2. 【核心】引入 CKEditor 4 脚本 -->
-
-    <!-- 3. 其他库，如 FontAwesome -->
-    <script src="{% static 'fontawesome-free-6.7.2/js/all.js' %}"></script>
 
     <!-- 4. 为子模板预留一个可以插入自己脚本的位置 -->
     {% block scripts %} {% endblock %}

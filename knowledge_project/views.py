@@ -1090,11 +1090,7 @@ def public_notes_list_view(request):
     return render(request, 'knowledge/public_notes_list.html')
 
 
-def test_video_audio(request):
-    """
-    视频音频检测测试页面
-    """
-    return render(request, 'test_video_audio.html')
+
 
 
 @login_required
@@ -1728,7 +1724,7 @@ def regenerate_backup_codes(request):
 
 def generate_backup_codes_list():
     """
-    生成10个8位数字+字母的备用验证码
+    生成5个8位数字+字母的备用验证码
     """
     codes = []
     for _ in range(5):

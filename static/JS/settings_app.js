@@ -26,6 +26,9 @@ createApp({
     const videoHasAudio = ref(false);  // 视频是否有声音
     const videoMuted = ref(true);      // 是否静音（默认静音）
     const bannerVideo = ref(null);     // video元素的引用
+    const videoVolume = ref(0);        // 视频音量 (0-1) - 初始为0表示静音
+    const volumeSliderVisible = ref(false); // 音量滑块是否可见
+    const previousVolume = ref(0.5);   // 保存之前的音量,用于取消静音时恢复
 
     // ✅ 通知偏好设置状态
     const notifications = reactive({
@@ -57,15 +60,17 @@ createApp({
       return videoExtensions.some(ext => url.toLowerCase().includes(ext));
     }
 
-    // ✅ 检测视频是否有音轨（改进版，带调试信息）
+    // ✅ 检测视频是否有音轨
     const checkVideoAudio = async () => {
       console.log('开始检测视频音频...');
       await nextTick();  // 确保DOM已渲染
       const video = bannerVideo.value;
       if (!video) {
+        videoHasAudio.value = false;
         console.log('视频元素未找到');
         return;
       }
+      videoHasAudio.value = false;
 
       try {
         // 等待视频元数据加载完成
@@ -161,29 +166,92 @@ createApp({
         videoHasAudio.value = true;
       }
 
+      // 如果检测到有音频，只设置初始音量，不自动播放声音
+      // 保持默认静音状态，让用户主动选择是否播放声音
+      if (videoHasAudio.value) {
+        const currentVideo = bannerVideo.value;
+        if (currentVideo) {
+          currentVideo.muted = true;
+          videoMuted.value = true;
+          currentVideo.volume = Number(videoVolume.value);
+        }
+      }
+
       console.log('最终检测结果 - videoHasAudio:', videoHasAudio.value);
       console.log('profile.bannerIsVideo:', profile.bannerIsVideo);
     };
 
-    // ✅ 切换视频静音状态（改进版：处理自动播放策略）
+    // ✅ 切换视频静音状态
     const toggleVideoMute = async () => {
       const video = bannerVideo.value;
       if (!video) return;
 
-      videoMuted.value = !videoMuted.value;
-      video.muted = videoMuted.value;
+      if (videoMuted.value) {
+        // 当前是静音状态，要取消静音
+        // 恢复到之前保存的音量，如果没有保存的音量或为0，则设置为0.5
+        const targetVolume = previousVolume.value > 0 ? previousVolume.value : 0.5;
 
-      // 当取消静音时，尝试播放视频（某些浏览器要求）
-      if (!videoMuted.value) {
-        try {
-          await video.play();
-        } catch (error) {
-          ElMessage.warning("浏览器阻止了自动播放，请手动点击视频播放");
-          // 恢复静音状态
-          videoMuted.value = true;
-          video.muted = true;
+        // 先设置视频属性
+        video.muted = false;
+        video.volume = targetVolume;
+
+        // 然后更新 Vue 状态
+        videoMuted.value = false;
+        videoVolume.value = targetVolume;
+
+        // 尝试播放视频（如果视频被暂停了）
+        if (video.paused) {
+          try {
+            await video.play();
+          } catch (error) {
+            console.log("用户交互后视频自动播放:", error);
+          }
         }
+
+        console.log('取消静音成功 - 音量:', targetVolume, '静音状态:', video.muted);
+
+      } else {
+        // 当前是非静音状态，要静音
+        // 保存当前音量以便恢复
+        if (videoVolume.value > 0) {
+          previousVolume.value = Number(videoVolume.value);
+        }
+
+      // 先设置视频属性
+      video.muted = true;
+      video.volume = 0; // 确保视频对象实际音量为0
+
+      // 然后更新 Vue 状态
+      videoMuted.value = true;
+      videoVolume.value = 0;
+
+        console.log('静音成功 - 保存音量:', previousVolume.value, '静音状态:', video.muted);
       }
+
+      // 强制 Vue 更新
+      await nextTick();
+
+      console.log('图标更新完成，当前类:', volumeIconClass.value);
+    };
+
+    // ✅ 更新视频音量 - 由于使用了v-model,videoVolume会自动更新,这里只需同步到video元素
+    const updateVideoVolume = () => {
+      const video = bannerVideo.value;
+      if (!video) return;
+
+      const volume = Number(videoVolume.value);
+      video.volume = volume;
+      
+      // 当音量大于0时，取消静音；音量为0时，设为静音
+      const newMutedState = volume === 0;
+      videoMuted.value = newMutedState;
+      video.muted = newMutedState;
+      
+      if (!newMutedState) {
+        previousVolume.value = volume;
+      }
+      
+      console.log('音量更新 - 音量:', volume, '静音状态:', newMutedState, '图标类:', volumeIconClass.value);
     };
 
     const active = ref("profile");
@@ -229,6 +297,25 @@ createApp({
         ElMessage.error(res?.message || "横幅上传失败，请稍后重试");
       }
     };
+
+    const volumeIconClass = computed(() => {
+      const volume = Number(videoVolume.value);
+      
+      // 优先根据音量值判断,而不是静音状态
+      // 因为静音状态可能与音量值不同步
+      if (volume === 0) {
+        return 'fas fa-volume-xmark';
+      }
+      if (volume > 0 && volume <= 0.5) {
+        return 'fas fa-volume-low';
+      }
+      return 'fas fa-volume-high';
+    });
+
+    // 监听videoVolume变化,确保图标能响应更新
+    watch(videoVolume, (newVolume) => {
+      console.log('videoVolume changed:', newVolume, 'new icon class:', volumeIconClass.value);
+    });
 
     // ✅ 计算属性：实时判断表单是否可提交
     const canSubmitEmail = computed(() => {
@@ -1129,6 +1216,10 @@ createApp({
       videoMuted,
       checkVideoAudio,
       toggleVideoMute,
+      videoVolume,
+      volumeSliderVisible,
+      updateVideoVolume,
+      volumeIconClass,
       // ✅ 账户安全相关
       security,
       showPasswordDialog,

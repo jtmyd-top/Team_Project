@@ -50,18 +50,33 @@
            class="banner-image"
            autoplay
            loop
-           muted
            playsinline
+           muted
            @loadedmetadata="checkVideoAudio">
     </video>
 
-    <!-- 音量控制按钮（只在视频有声音时显示） -->
-    <button v-if="profile.bannerIsVideo && videoHasAudio"
-            class="volume-control-btn"
-            @click="toggleVideoMute"
-            :title="videoMuted ? '播放声音' : '静音'">
-      <i :class="videoMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up'"></i>
-    </button>
+    <!-- 音量控制容器 -->
+    <div v-if="profile.bannerIsVideo && videoHasAudio"
+         class="volume-control-container"
+         @mouseenter.stop="volumeSliderVisible = true"
+         @mouseleave.stop="volumeSliderVisible = false">
+
+              <!-- 音量图标按钮 -->
+              <button class="volume-icon-btn" @click.stop="toggleVideoMute" :title="videoMuted ?  '静音':'播放声音'">
+                <i :class="volumeIconClass" :key="volumeIconClass"></i>
+              </button>
+
+      <!-- 音量调节滑块 -->
+      <div class="volume-slider-wrapper" :class="{ visible: volumeSliderVisible }">
+        <input type="range"
+               min="0"
+               max="1"
+               step="0.01"
+               v-model.number="videoVolume"
+               @input="updateVideoVolume"
+               class="volume-slider">
+      </div>
+    </div>
 
     <!-- 悬停遮罩和上传按钮 -->
     <div class="banner-overlay">
