@@ -1,0 +1,31 @@
+{
+    "configurations": [
+        {
+            "addSourceRootsToPythonpath": true,
+            "request": "launch",
+            "jinja": true,
+            "python": "${command:python.interpreterPath}",
+            "stopOnEntry": false,
+            "program": "${workspaceFolder}/manage.py",
+            "env": {},
+            "type": "python",
+            "logToFile": false,
+            "cwd": "${workspaceFolder}",
+            "subProcess": true,
+            "justMyCode": true,
+            "django": {
+                "port": 8000,
+                "host": "",
+                "runBrowser": false,
+                "commandLineOptions": [],
+                "testServer": false,
+                "noReload": false,
+                "runBrowserUri": "http://127.0.0.1:8000/",
+                "fixtures": []
+            },
+            "pythonArgs": [],
+            "name": "Python: Django Server",
+            "showReturnValue": true
+        }
+    ]
+}

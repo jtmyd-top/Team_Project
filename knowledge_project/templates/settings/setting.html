@@ -487,7 +487,7 @@
               <el-form-item label="账户登录通知" style="margin-bottom: 20px;">
                 <el-switch
                   v-model="notifications.notify_login"
-                  @change="saveNotificationPreferences"
+                  @change="saveNotificationPreferences('notify_login')"
                   active-text="开启"
                   inactive-text="关闭">
                 </el-switch>
@@ -499,7 +499,7 @@
               <el-form-item label="密码修改通知" style="margin-bottom: 20px;">
                 <el-switch
                   v-model="notifications.notify_password_change"
-                  @change="saveNotificationPreferences"
+                  @change="saveNotificationPreferences('notify_password_change')"
                   active-text="开启"
                   inactive-text="关闭">
                 </el-switch>
@@ -511,7 +511,7 @@
               <el-form-item label="密码重置通知" style="margin-bottom: 20px;">
                 <el-switch
                   v-model="notifications.notify_password_reset"
-                  @change="saveNotificationPreferences"
+                  @change="saveNotificationPreferences('notify_password_reset')"
                   active-text="开启"
                   inactive-text="关闭">
                 </el-switch>
@@ -532,7 +532,7 @@
               <el-form-item label="笔记活动通知" style="margin-bottom: 20px;">
                 <el-switch
                   v-model="notifications.notify_note_activities"
-                  @change="saveNotificationPreferences"
+                  @change="saveNotificationPreferences('notify_note_activities')"
                   active-text="开启"
                   inactive-text="关闭">
                 </el-switch>
@@ -544,7 +544,7 @@
               <el-form-item label="获得点赞通知" style="margin-bottom: 20px;">
                 <el-switch
                   v-model="notifications.notify_profile_likes"
-                  @change="saveNotificationPreferences"
+                  @change="saveNotificationPreferences('notify_profile_likes')"
                   active-text="开启"
                   inactive-text="关闭">
                 </el-switch>
@@ -576,7 +576,35 @@
     <div v-if="active === 'appearance'" class="settings-content-card">
       <div class="form-section">
         <h3 class="form-section-title">外观主题</h3>
-        <p style="color: #909399;">此功能正在开发中...</p>
+        <div class="theme-settings">
+          <div class="theme-option">
+            <label>主题模式：</label>
+            <el-radio-group v-model="themeSettings.mode" @change="saveThemeSettings">
+              <el-radio label="light">浅色</el-radio>
+              <el-radio label="dark">深色</el-radio>
+              <el-radio label="system">跟随系统</el-radio>
+            </el-radio-group>
+          </div>
+
+          <div class="theme-option">
+            <label>主色调：</label>
+            <el-color-picker 
+              v-model="themeSettings.primaryColor" 
+              show-alpha
+              @change="saveThemeSettings"
+              :predefine="predefinedColors"
+            ></el-color-picker>
+          </div>
+
+          <div class="theme-option">
+            <label>布局模式：</label>
+            <el-select v-model="themeSettings.layout" @change="saveThemeSettings">
+              <el-option label="默认布局" value="default"></el-option>
+              <el-option label="紧凑布局" value="compact"></el-option>
+              <el-option label="宽屏布局" value="wide"></el-option>
+            </el-select>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -698,7 +726,6 @@
 </div>
 
 
-<script src="{% static 'JS/vue/vue.global.js' %}"></script>
-<script src="{% static 'JS/element-plus/element-plus.js' %}"></script>
-<script src="{% static 'JS/settings_app.js' %}" type="module"></script>
+<!-- Vite 构建后的文件（已包含 Vue、Pinia、Element Plus 和所有组件） -->
+<script src="{% static 'JS/dist/settings.js' %}"></script>
 {% endblock %}

@@ -16,3 +16,4 @@ tests.py
 xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5
+node_modules

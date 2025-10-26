@@ -41,6 +41,9 @@ urlpatterns = [
     # ==================== 通知偏好设置 API ====================
     path('api/notification-preferences/', views.notification_preferences, name='notification_preferences'),
 
+    # ==================== 主题设置 API ====================
+    path('api/theme-settings/', views.theme_settings, name='theme_settings'),
+
     # ==================== 2FA登录验证 API ====================
     path('api/2fa/verify/', views.verify_2fa_login, name='verify_2fa_login'),
     path('api/2fa/resend-email/', views.resend_2fa_email, name='resend_2fa_email'),
@@ -50,4 +53,3 @@ urlpatterns = [
 
     #path("logout/", views.logout_view, name="logout"),
 ]
-

@@ -166,8 +166,20 @@ class Profile(models.Model):
         verbose_name="主页横幅"
     )
     theme = models.JSONField(
-        default=default_theme_settings,  # 使用可调用函数而不是字典实例
-        verbose_name="主题设置"
+        default=default_theme_settings,
+        verbose_name="主题设置",
+        help_text="存储用户界面主题配置"
+    )
+    layout_mode = models.CharField(
+        max_length=20,
+        choices=[('default', '默认布局'), ('compact', '紧凑布局'), ('wide', '宽屏布局')],
+        default='default',
+        verbose_name="界面布局"
+    )
+    last_theme_update = models.DateTimeField(
+        auto_now=True,
+        verbose_name="最后主题更新时间",
+        help_text="记录用户最后修改主题的时间"
     )
     allow_rich_bio = models.BooleanField(
         default=False,

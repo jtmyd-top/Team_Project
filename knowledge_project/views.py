@@ -1375,7 +1375,7 @@ def update_profile(request):
         if "username" in updated_fields:
             user.save(update_fields=["username"])
         if "bio" in updated_fields:
-            profile.save(update_fields=["bio", "last_updated"])
+            profile.save(update_fields=["bio"])
         print(response_data)
         return JsonResponse(response_data)
 
@@ -2040,6 +2040,81 @@ def notification_preferences(request):
                 "status": "success",
                 "message": "通知偏好设置已更新",
                 "updated_fields": update_fields
+            })
+        else:
+            return JsonResponse({
+                "status": "warning",
+                "message": "没有需要更新的字段"
+            })
+
+
+# ==================== 主题设置 API ====================
+@login_required
+@require_http_methods(["GET", "POST"])
+def theme_settings(request):
+    """
+    获取或更新用户的主题设置
+    GET: 返回当前主题设置
+    POST: 更新主题设置
+    """
+    user = request.user
+
+    # 确保profile存在
+    try:
+        profile = user.profile
+    except Profile.DoesNotExist:
+        profile = Profile.objects.create(user=user)
+        logger.info(f"Created profile for user {user.id} in theme_settings")
+
+    if request.method == "GET":
+        # 返回当前的主题设置
+        return JsonResponse({
+            "status": "success",
+            "theme_settings": {
+                "mode": profile.theme.get('mode', 'system'),
+                "primary_color": profile.theme.get('primary_color', '#2196F3'),
+                "layout": profile.layout_mode,
+            }
+        })
+
+    elif request.method == "POST":
+        # 更新主题设置
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+        # 更新theme字段（JSONField）
+        theme_updated = False
+        if "mode" in data:
+            profile.theme['mode'] = data['mode']
+            theme_updated = True
+
+        if "primaryColor" in data:
+            profile.theme['primary_color'] = data['primaryColor']
+            theme_updated = True
+
+        # 更新layout_mode字段
+        layout_updated = False
+        if "layout" in data:
+            profile.layout_mode = data['layout']
+            layout_updated = True
+
+        # 保存更新
+        update_fields = []
+        if theme_updated:
+            update_fields.append('theme')
+            update_fields.append('last_theme_update')
+        if layout_updated:
+            update_fields.append('layout_mode')
+
+        if update_fields:
+            profile.save(update_fields=update_fields)
+            logger.info(f"Updated theme settings for user {user.id}")
+
+            return JsonResponse({
+                "status": "success",
+                "message": "主题设置已保存"
             })
         else:
             return JsonResponse({

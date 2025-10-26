@@ -1,0 +1,5 @@
+{
+    "python.django.project.supportEnabled": true,
+    "python.django.project.projectRoot": "d:\\Team Project\\Team_Project\\Team_Project",
+    "python.django.project.settingsPath": "d:\\Team Project\\Team_Project\\Team_Project\\settings.py"
+}

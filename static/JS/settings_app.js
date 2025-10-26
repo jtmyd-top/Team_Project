@@ -1,6 +1,6 @@
 import { request, createDebouncedRequest, useCountdown } from '/static/JS/utils/request.js';
 
-const { createApp, ref, reactive, watch, computed, nextTick, onMounted } = Vue;
+const { createApp, ref, reactive, watch, computed, nextTick, onMounted, onUnmounted } = Vue;
 
 createApp({
   delimiters: ['[[', ']]'], // 使用自定义分隔符避免与Django模板冲突
@@ -254,7 +254,8 @@ createApp({
       console.log('音量更新 - 音量:', volume, '静音状态:', newMutedState, '图标类:', volumeIconClass.value);
     };
 
-    const active = ref("profile");
+    // 从localStorage读取上次激活的标签页，如果不存在则默认为"profile"
+    const active = ref(localStorage.getItem('settings_active_tab') || "profile");
     const { ElMessage } = ElementPlus;
     const usernameRegex = /^[a-z][a-z0-9_]{5,}$/;
 
@@ -301,16 +302,108 @@ createApp({
     const volumeIconClass = computed(() => {
       const volume = Number(videoVolume.value);
       
-      // 优先根据音量值判断,而不是静音状态
-      // 因为静音状态可能与音量值不同步
+      // 使用FontAwesome的SVG图标名称
       if (volume === 0) {
-        return 'fas fa-volume-xmark';
+        return 'fas fa-volume-mute';
       }
       if (volume > 0 && volume <= 0.5) {
-        return 'fas fa-volume-low';
+        return 'fas fa-volume-down';
       }
-      return 'fas fa-volume-high';
+      return 'fas fa-volume-up';
     });
+
+    // 添加图标更新强制刷新逻辑
+    const forceIconUpdate = () => {
+      const icons = document.querySelectorAll('.fa-volume-mute, .fa-volume-down, .fa-volume-up');
+      icons.forEach(icon => {
+        const parent = icon.parentElement;
+        if (parent) {
+          // 添加随机参数强制重新渲染
+          const random = Date.now();
+          const i = document.createElement('i');
+          i.className = `${icon.className}?refresh=${random}`.replace('?refresh=', ' ');
+          parent.replaceChild(i, icon);
+          
+          // 使用FontAwesome的API重新处理图标
+          if (window.FontAwesome && window.FontAwesome.dom) {
+            window.FontAwesome.dom.i2svg({ node: parent });
+          }
+        }
+      });
+    };
+
+    // 添加MutationObserver监听DOM变化
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.addedNodes.length) {
+          if (window.FontAwesome && window.FontAwesome.dom) {
+            window.FontAwesome.dom.i2svg();
+          }
+        }
+      });
+    });
+
+    // 监听音量变化时强制刷新图标
+    watch(videoVolume, () => {
+      nextTick(() => {
+        forceIconUpdate();
+        // 开始观察body元素的变化
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true
+        });
+      });
+    });
+
+    // 组件卸载时断开观察
+    onUnmounted(() => {
+      observer.disconnect();
+    });
+
+    // 主题设置相关逻辑
+    const themeSettings = reactive({
+      mode: 'system',
+      primaryColor: '#2196F3',
+      layout: 'default'
+    });
+
+    const predefinedColors = [
+      '#2196F3', // 默认蓝
+      '#673AB7', // 深紫
+      '#E91E63', // 粉红
+      '#4CAF50', // 绿色
+      '#FF9800', // 橙色
+      '#795548', // 棕色
+      '#9C27B0'  // 紫色
+    ];
+
+    const saveThemeSettings = async () => {
+      console.log('保存主题设置:', themeSettings);
+      
+      try {
+        const res = await fetch('/api/theme-settings/', {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...csrfHeader },
+          body: JSON.stringify({
+            mode: themeSettings.mode,
+            primaryColor: themeSettings.primaryColor,  // 前端使用驼峰命名
+            layout: themeSettings.layout
+          }),
+        });
+        
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          ElMessage.success("主题设置已保存");
+          console.log('主题设置保存成功');
+        } else {
+          ElMessage.error(data.message || "保存失败");
+          console.error('保存失败:', data);
+        }
+      } catch (error) {
+        ElMessage.error("网络错误");
+        console.error("保存主题设置失败:", error);
+      }
+    };
 
     // 监听videoVolume变化,确保图标能响应更新
     watch(videoVolume, (newVolume) => {
@@ -1177,9 +1270,37 @@ createApp({
       }, 500); // 500ms 防抖延迟
     };
 
-    // 在组件挂载时加载通知偏好设置
+    // ==================== 加载主题设置 ====================
+    const loadThemeSettings = async () => {
+      try {
+        const res = await fetch('/api/theme-settings/', {
+          method: "GET",
+          headers: { ...csrfHeader },
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "success" && data.theme_settings) {
+          // 更新主题设置状态
+          Object.assign(themeSettings, {
+            mode: data.theme_settings.mode || 'system',
+            primaryColor: data.theme_settings.primary_color || '#2196F3',
+            layout: data.theme_settings.layout || 'default'
+          });
+          console.log('主题设置已加载:', themeSettings);
+        }
+      } catch (error) {
+        console.error("加载主题设置失败:", error);
+      }
+    };
+
+    // 监听active标签页变化，保存到localStorage
+    watch(active, (newValue) => {
+      localStorage.setItem('settings_active_tab', newValue);
+    });
+
+    // 在组件挂载时加载通知偏好设置和主题设置
     onMounted(() => {
       loadNotificationPreferences();
+      loadThemeSettings();
     });
 
     return {
@@ -1252,6 +1373,10 @@ createApp({
       saveNotificationPreferences,
       // ✅ 加载状态管理
       loadingStates,
+      // ✅ 主题设置相关
+      themeSettings,
+      predefinedColors,
+      saveThemeSettings,
     };
   },
 }).use(ElementPlus).mount("#settings-app");
