@@ -224,16 +224,16 @@ class SendEmailCodeView(View):
             mail_subject = '密码修改验证码'
             ok_message   = '验证码已发送至您的邮箱'
 
-        elif purpose == 'change':
-            # 修改邮箱：发送验证码到新邮箱，验证新邮箱的所有权
+        elif purpose == 'email_change':
+            # 修改邮箱:发送验证码到新邮箱,验证新邮箱的所有权
             if not request.user.is_authenticated:
                 return JsonResponse({'status': 'error', 'message': '未登录用户无法修改邮箱'}, status=403)
 
-            # 禁止把新邮箱改成当前邮箱（防止滥发验证码）
+            # 禁止把新邮箱改成当前邮箱(防止滥发验证码)
             if email and request.user.email and email.lower() == request.user.email.lower():
-                return JsonResponse({'status': 'error', 'message': '该邮箱与当前绑定邮箱一致，无需修改'}, status=400)
+                return JsonResponse({'status': 'error', 'message': '该邮箱与当前绑定邮箱一致,无需修改'}, status=400)
 
-            # 修改邮箱：排除自己判断占用
+            # 修改邮箱:排除自己判断占用
             check = _check_email_availability(request, email, exclude_self=True)
             if not check['ok']:
                 return JsonResponse({'status': 'error', 'message': check['message']}, status=400)
@@ -279,7 +279,7 @@ class SendEmailCodeView(View):
 
         # 8) 把验证码写入 session，使用不同的 key 避免冲突
         # 根据不同用途使用不同的 session key，避免被覆盖
-        if purpose == 'change':
+        if purpose == 'email_change':
             # 修改邮箱专用 key
             session_key = 'email_change_verification'
         elif purpose == 'password_change':
@@ -658,32 +658,33 @@ def _send_email_async_helper(subject, body, recipients):
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
 
-    def send_password_change_notification(self, request, user):
-        """
-        发送密码修改成功通知邮件
-        """
-        try:
-            profile = getattr(user, 'profile', None)
-            if not profile or not profile.notify_password_change:
-                return
 
-            # 复用IP地址获取逻辑
-            ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
-            if ip_address:
-                ip_address = ip_address.split(',')[0].strip()
-            else:
-                ip_address = request.META.get('HTTP_X_REAL_IP')
-                if not ip_address:
-                    ip_address = request.META.get('REMOTE_ADDR', '未知')
-            
-            # 复用User-Agent解析逻辑
-            user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
-            device_info = self.parse_user_agent(user_agent)
-            
-            change_time = timezone.localtime(timezone.now())
+def send_password_change_notification(request, user):
+    """
+    发送密码修改成功通知邮件（独立函数版本）
+    """
+    try:
+        profile = getattr(user, 'profile', None)
+        if not profile or not profile.notify_password_change:
+            return
 
-            email_subject = '账户密码修改通知'
-            email_body = f"""
+        # 获取IP地址
+        ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
+        if ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+        else:
+            ip_address = request.META.get('HTTP_X_REAL_IP')
+            if not ip_address:
+                ip_address = request.META.get('REMOTE_ADDR', '未知')
+        
+        # 解析User-Agent
+        user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
+        device_info = CustomLoginView().parse_user_agent(user_agent)
+        
+        change_time = timezone.localtime(timezone.now())
+
+        email_subject = '账户密码修改通知'
+        email_body = f"""
 尊敬的 {user.username}：
 
 您的账户密码已于 {change_time.strftime('%Y年%m月%d日 %H:%M:%S')} 被成功修改。
@@ -692,23 +693,23 @@ def _send_email_async_helper(subject, body, recipients):
 - 操作IP地址：{ip_address}
 - 操作设备：{device_info}
 
-如果这不是您本人的操作，您的账户可能存在安全风险。请立即通过“忘记密码”功能重置您的密码，并检查您的账户安全设置。
+如果这不是您本人的操作，您的账户可能存在安全风险。请立即通过"忘记密码"功能重置您的密码，并检查您的账户安全设置。
 
 此邮件为系统自动发送，请勿回复。
 
 知识管理系统
-            """
+        """
 
-            threading.Thread(
-                target=self._send_email_async,
-                args=(email_subject, email_body, [user.email]),
-                daemon=True
-            ).start()
+        threading.Thread(
+            target=_send_email_async_helper,
+            args=(email_subject, email_body, [user.email]),
+            daemon=True
+        ).start()
 
-            logger.info(f"Password change notification queued for user {user.id}")
+        logger.info(f"Password change notification queued for user {user.id}")
 
-        except Exception as e:
-            logger.error(f"Failed to send password change notification for user {user.id}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to send password change notification for user {user.id}: {e}")
 
 
 class SignUpView(View):
@@ -1409,16 +1410,26 @@ def update_email(request):
     # 2) 校验邮箱验证码（验证新邮箱所有权）
     # 使用专门的 session key 避免被其他操作覆盖
     info = request.session.get("email_change_verification")
-    if not info or info.get("email") != new_email or info.get("code") != code:
-        # 添加调试日志
-        logger.info(f"Email verification failed - Session info: {info}, Expected email: {new_email}, Provided code: {code}")
-        return JsonResponse({"status": "error", "message": "邮箱验证码错误或邮箱不匹配"}, status=400)
-
+    
+    # 先检查验证码是否存在和有效期
+    if not info:
+        logger.info("Email verification info not found in session")
+        return JsonResponse({"status": "error", "message": "邮箱验证码已失效，请重新获取"}, status=400)
+    
     # 有效期 15 分钟（增加到15分钟，给用户更多时间）
     elapsed_time = time.time() - float(info.get("timestamp", 0))
     if elapsed_time > 900:  # 15分钟 = 900秒
         logger.info(f"Email verification code expired - Elapsed time: {elapsed_time} seconds")
+        # 验证码过期后清除session
+        if "email_change_verification" in request.session:
+            del request.session["email_change_verification"]
         return JsonResponse({"status": "error", "message": "邮箱验证码已过期，请重新获取"}, status=400)
+    
+    # 验证邮箱和验证码是否匹配
+    if info.get("email") != new_email or info.get("code") != code:
+        # 【关键修复】验证失败时不要删除session，允许用户重试
+        logger.info(f"Email verification failed - Session email: {info.get('email')}, Expected: {new_email}, Session code: {info.get('code')}, Provided: {code}")
+        return JsonResponse({"status": "error", "message": "邮箱验证码错误或邮箱不匹配"}, status=400)
 
     # 3) 检查邮箱是否已被占用（再兜底）
     if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
@@ -1584,7 +1595,7 @@ def change_password(request):
     update_session_auth_hash(request, user)
 
     # 发送密码修改通知
-    CustomLoginView().send_password_change_notification(request, user)
+    send_password_change_notification(request, user)
 
     return JsonResponse({"status": "success", "message": "密码修改成功"})
 

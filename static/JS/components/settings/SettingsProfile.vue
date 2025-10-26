@@ -28,19 +28,29 @@
 
       <!-- 邮箱设置 -->
       <div class="form-section">
-        <h3 class="form-section-title">
-          <i class="fas fa-envelope"></i> 邮箱地址
-        </h3>
-        
-        <div class="email-display">
-          <div class="email-info">
-            <label>当前邮箱：</label>
-            <span class="email-value">{{ userStore.email }}</span>
-          </div>
-          <el-button type="primary" @click="showEmailDialog = true">
-            修改邮箱
-          </el-button>
-        </div>
+        <h3 class="form-section-title">邮箱地址</h3>
+        <el-form label-position="left" label-width="100px">
+          <el-form-item label="邮箱">
+            <el-input 
+              v-model="tempEmail" 
+              placeholder="请输入新的邮箱地址">
+              <template #append>
+                <el-button 
+                  type="primary" 
+                  :disabled="!emailChanged"
+                  @click="openEmailChangeDialog">
+                  修改
+                </el-button>
+              </template>
+            </el-input>
+            <div class="form-hint">
+              <span v-if="!emailChanged">当前邮箱：{{ userStore.email }}</span>
+              <span v-else style="color: #409EFF;">
+                <i class="fas fa-info-circle"></i> 修改邮箱需要进行安全验证
+              </span>
+            </div>
+          </el-form-item>
+        </el-form>
       </div>
     </div>
 
@@ -126,6 +136,7 @@
               style="flex: 1;">
             </el-input>
             <el-button
+              type="primary"
               :disabled="!canSendCode || emailCountdown.counting"
               :loading="emailForm.codeSending"
               @click="sendEmailCode">
@@ -239,6 +250,26 @@ const emailCheck = reactive({
 // 邮箱正则
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// 临时邮箱（用于输入新邮箱）
+const tempEmail = ref(userStore.email);
+
+// 邮箱是否改变
+const emailChanged = computed(() => {
+  return tempEmail.value.trim() !== userStore.email && 
+         EMAIL_REGEX.test(tempEmail.value.trim());
+});
+
+/**
+ * 打开邮箱修改对话框
+ */
+const openEmailChangeDialog = async () => {
+  if (emailChanged.value) {
+    emailForm.new_email = tempEmail.value.trim();
+    showEmailDialog.value = true;
+    // 立即触发邮箱可用性检查（不使用防抖）
+    await checkEmailAvailabilityCore();
+  }
+};
 
 /**
  * 编辑个性签名
@@ -468,6 +499,7 @@ const changeEmail = async () => {
       }
     } else if (data.status === "success") {
       userStore.updateEmail(data.email);
+      tempEmail.value = data.email; // 更新临时邮箱为新邮箱
       showEmailDialog.value = false;
       resetEmailForm();
       ElMessage.success("邮箱修改成功");
@@ -498,6 +530,7 @@ const resetEmailForm = () => {
   emailForm.useBackup = false;
   emailCheck.status = null;
   emailCheck.message = '';
+  tempEmail.value = userStore.email; // 重置为当前邮箱
   refreshCaptcha();
 };
 

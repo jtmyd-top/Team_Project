@@ -6,9 +6,10 @@
       "type": "python",
       "request": "launch",
       "program": "D:/Team Project/Team_Project/manage.py",
-      "args": ["runserver"],
+      "args": ["runserver","0.0.0.0:80"],
       "django": true,
-      "justMyCode": true
+      "justMyCode": true,
+      "python": "D:/Team Project/Team_Project/.venv/Scripts/python.exe"
     }
   ]
 }

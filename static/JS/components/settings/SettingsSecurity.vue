@@ -379,6 +379,11 @@ const changePassword = async () => {
   if (!passwordForm.confirm) return ElMessage.warning("请确认新密码");
   if (passwordForm.new !== passwordForm.confirm) return ElMessage.warning("两次输入的密码不一致");
   if (passwordForm.new.length < 8) return ElMessage.warning("新密码至少8位");
+  
+  // 检查新密码是否与旧密码相同
+  if (passwordForm.current === passwordForm.new) {
+    return ElMessage.warning("新密码不能与旧密码一致");
+  }
 
   if (passwordForm.show2FA && !passwordForm.twoFaCode) {
     return ElMessage.warning("请输入两因素验证码");
