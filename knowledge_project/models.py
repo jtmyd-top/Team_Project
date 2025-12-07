@@ -135,9 +135,12 @@ def user_avatar_path(instance, filename):
 def default_theme_settings():
     """为 JSONField 提供默认主题设置的可调用函数"""
     return {
-        'mode': 'system',
-        'primary_color': '#2196F3',
-        'dark_mode': False
+        'mode': 'light',
+        'primary_color': '#409EFF',
+        'font_size': 14,
+        'compact_mode': False,
+        'animations': True,
+        'dark_mode': False  # 保留兼容性
     }
 
 class Profile(models.Model):

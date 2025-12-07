@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python manage.py shell:*)"
+      "Bash(python manage.py shell:*)",
+      "Bash(npm run build:*)",
+      "Bash(python:*)",
+      "Bash(del:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

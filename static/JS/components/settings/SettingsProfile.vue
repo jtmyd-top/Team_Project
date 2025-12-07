@@ -1,15 +1,18 @@
 <template>
-  <div class="settings-content-card">
-    <!-- 用户名和邮箱并排 -->
-    <div class="form-row">
-      <!-- 用户名修改 -->
-      <div class="form-section">
-        <h3 class="form-section-title">用户名</h3>
-        <el-form label-position="left" label-width="100px">
+  <div class="profile-settings-container">
+    <!-- 区域 1: 账户信息 (用户名和邮箱) -->
+    <div class="form-section">
+      <h3 class="form-section-title">账户信息</h3>
+      <div class="form-row">
+        <!-- 用户名修改 -->
+        <el-form label-position="top">
           <el-form-item label="用户名">
             <el-input 
               v-model="userStore.nickname" 
               placeholder="至少6位，以小写字母开头">
+              <template #prefix>
+                <i class="fas fa-user"></i>
+              </template>
               <template #append>
                 <el-button 
                   type="primary" 
@@ -24,20 +27,19 @@
             </div>
           </el-form-item>
         </el-form>
-      </div>
 
-      <!-- 邮箱设置 -->
-      <div class="form-section">
-        <h3 class="form-section-title">邮箱地址</h3>
-        <el-form label-position="left" label-width="100px">
+        <!-- 邮箱设置 -->
+        <el-form label-position="top">
           <el-form-item label="邮箱">
             <el-input 
               v-model="tempEmail" 
               placeholder="请输入新的邮箱地址">
+              <template #prefix>
+                <i class="fas fa-envelope"></i>
+              </template>
               <template #append>
-                <el-button 
-                  type="primary" 
-                  :disabled="!emailChanged"
+                <el-button
+                  type="primary"
                   @click="openEmailChangeDialog">
                   修改
                 </el-button>
@@ -54,7 +56,7 @@
       </div>
     </div>
 
-    <!-- 个性签名 -->
+    <!-- 区域 2: 个性签名 -->
     <div class="form-section">
       <h3 class="form-section-title">个性签名</h3>
       <div v-if="!bioEditing" class="bio-display">
@@ -73,6 +75,9 @@
           maxlength="200"
           show-word-limit
           placeholder="介绍一下自己吧...">
+          <template #prefix>
+            <i class="fas fa-pen"></i>
+          </template>
         </el-input>
         <div style="margin-top: 12px;">
           <el-button @click="cancelBio">取消</el-button>
@@ -94,6 +99,9 @@
             v-model="emailForm.new_email"
             placeholder="请输入新的邮箱地址"
             @input="checkEmailAvailability">
+            <template #prefix>
+              <i class="fas fa-envelope"></i>
+            </template>
             <template #suffix>
               <i v-if="emailCheck.status === 'ok'" class="fas fa-check-circle" style="color: #67C23A;"></i>
               <i v-else-if="emailCheck.status === 'taken'" class="fas fa-times-circle" style="color: #F56C6C;"></i>
@@ -111,6 +119,9 @@
             type="password"
             placeholder="请输入当前密码"
             show-password>
+            <template #prefix>
+              <i class="fas fa-lock"></i>
+            </template>
           </el-input>
         </el-form-item>
 
@@ -120,6 +131,9 @@
               v-model="emailForm.imageCaptcha"
               placeholder="请输入图片验证码"
               style="flex: 1;">
+              <template #prefix>
+                <i class="fas fa-shield-alt"></i>
+              </template>
             </el-input>
             <img 
               :src="captchaUrl" 
@@ -134,6 +148,9 @@
               v-model="emailForm.code"
               placeholder="请输入邮箱验证码"
               style="flex: 1;">
+              <template #prefix>
+                <i class="fas fa-key"></i>
+              </template>
             </el-input>
             <el-button
               type="primary"
@@ -163,6 +180,9 @@
               v-model="emailForm.twoFaCode"
               :placeholder="emailForm.useBackup ? '请输入8位备用码' : '请输入6位验证码'"
               maxlength="8">
+              <template #prefix>
+                <i class="fas fa-mobile-alt"></i>
+              </template>
             </el-input>
           </el-form-item>
 
@@ -263,12 +283,16 @@ const emailChanged = computed(() => {
  * 打开邮箱修改对话框
  */
 const openEmailChangeDialog = async () => {
-  if (emailChanged.value) {
-    emailForm.new_email = tempEmail.value.trim();
-    showEmailDialog.value = true;
-    // 立即触发邮箱可用性检查（不使用防抖）
-    await checkEmailAvailabilityCore();
+  // 检查邮箱是否有效改变
+  if (!emailChanged.value) {
+    ElMessage.warning('请先输入新的邮箱地址');
+    return;
   }
+
+  emailForm.new_email = tempEmail.value.trim();
+  showEmailDialog.value = true;
+  // 立即触发邮箱可用性检查（不使用防抖）
+  await checkEmailAvailabilityCore();
 };
 
 /**
@@ -564,11 +588,32 @@ const toggleEmailBackupCode = () => {
 </script>
 
 <style scoped>
-.settings-content-card {
-  background: white;
-  border-radius: 8px;
+.profile-settings-container {
+  /* 移除 flex 布局，让 form-section 自然堆叠 */
+}
+
+/* 表单区域 - 这是分层卡片的核心 */
+.form-section {
   padding: 24px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border-radius: 8px;
+}
+
+/* 奇数区域为白色，偶数区域为浅灰 */
+.form-section:nth-of-type(odd) {
+  background-color: #fff;
+}
+
+.form-section:nth-of-type(even) {
+  background-color: #f9f9fa;
+}
+
+.form-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e4e7ed;
 }
 
 /* 表单行 - 并排布局 */
@@ -576,25 +621,12 @@ const toggleEmailBackupCode = () => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
-  margin-bottom: 24px;
 }
 
 @media (max-width: 768px) {
   .form-row {
     grid-template-columns: 1fr;
   }
-}
-
-/* 表单区域 */
-.form-section {
-  margin-bottom: 32px;
-}
-
-.form-section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 16px;
 }
 
 .form-hint {
@@ -645,5 +677,91 @@ const toggleEmailBackupCode = () => {
 
 .bio-edit {
   max-width: 100%;
+}
+
+/* 强制覆盖 Element Plus 输入框组的 append 按钮样式 */
+.form-section :deep(.el-input-group__append) {
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.form-section :deep(.el-input-group__append .el-button) {
+  background-color: #409EFF !important;
+  color: #ffffff !important;
+  border-color: #409EFF !important;
+  margin: 0 !important;
+}
+
+.form-section :deep(.el-input-group__append .el-button:hover) {
+  background-color: #66b1ff !important;
+  border-color: #66b1ff !important;
+}
+
+/* 增加输入框高度 */
+.form-section :deep(.el-input__wrapper) {
+  min-height: 48px !important;
+  padding: 8px 12px !important;
+  
+}
+
+.form-section :deep(.el-input__inner) {
+  height: 32px !important;
+  line-height: 32px !important;
+}
+
+/* 确保 textarea 也有合适的高度 */
+.form-section :deep(.el-textarea__inner) {
+  min-height: 100px !important;
+  padding: 12px !important;
+}
+
+/* 输入框动画效果 */
+.form-section :deep(.el-input__wrapper) {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border: 1px solid #dcdfe6 !important;
+}
+
+.form-section :deep(.el-input__wrapper:hover) {
+  border-color: #c0c4cc !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+.form-section :deep(.el-input__wrapper.is-focus) {
+  border-color: #409EFF !important;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15) !important;
+  transform: translateY(-1px);
+}
+
+/* Textarea 动画效果 */
+.form-section :deep(.el-textarea__inner) {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border: 1px solid #dcdfe6 !important;
+}
+
+.form-section :deep(.el-textarea__inner:hover) {
+  border-color: #c0c4cc !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+.form-section :deep(.el-textarea__inner:focus) {
+  border-color: #409EFF !important;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15) !important;
+}
+
+/* 按钮悬停动画 */
+.form-section :deep(.el-button) {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.form-section :deep(.el-button:hover) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3) !important;
+}
+
+.form-section :deep(.el-button:active) {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.2) !important;
 }
 </style>

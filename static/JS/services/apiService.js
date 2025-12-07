@@ -1,5 +1,5 @@
 // services/apiService.js - 统一的API请求服务
-import { request } from '/static/JS/utils/request.js';
+// 改为直接使用fetch，避免ES6模块问题
 
 const csrfToken = window.SETTINGS_INITIAL?.csrfToken || "";
 const csrfHeader = { "X-CSRFToken": csrfToken };
@@ -50,7 +50,7 @@ async function getRequest(url, params = {}) {
 /**
  * API 服务对象
  */
-export const apiService = {
+const apiService = {
   // ==================== 个人资料相关 ====================
   
   /**
@@ -177,4 +177,11 @@ export const apiService = {
   },
 };
 
+// 将apiService挂载到window对象上，使其全局可用
+window.apiService = apiService;
+
+// ES6 导出
+export { apiService };
+
+// 默认导出
 export default apiService;

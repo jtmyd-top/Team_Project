@@ -178,7 +178,7 @@ class SendEmailCodeView(View):
     验证图片验证码 -> 发送邮箱验证码
     兼容三种业务：
     - 注册: purpose='register'（默认）
-    - 修改邮箱: purpose='change'
+    - 修改邮箱: purpose='email_change'
     - 修改密码: purpose='password_change'
     """
     def post(self, request, *args, **kwargs):
@@ -189,11 +189,11 @@ class SendEmailCodeView(View):
 
         # 2) 限流（维持你现有阈值）
         hourly_attempts = cache.get(hourly_key, 0)
-        if hourly_attempts >= 30:
+        if hourly_attempts >= 3:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         daily_attempts = cache.get(daily_key, 0)
-        if daily_attempts >= 50:
+        if daily_attempts >= 5:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         # 3) 解析参数
@@ -204,7 +204,23 @@ class SendEmailCodeView(View):
 
         email = (data.get('email') or '').strip()
         image_captcha_code = (data.get('image_captcha_code') or '').strip().upper()
-        purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'change' | 'password_change'
+        purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'email_change' | 'password_change'
+
+        # 3.5) 新增：检查该项目（用途）的每日发送次数限制（每个项目每天最多3次）
+        # 使用用户ID（如果已登录）或IP地址来标识用户
+        if request.user.is_authenticated:
+            user_identifier = f"user_{request.user.id}"
+        else:
+            user_identifier = f"ip_{ip_address}"
+        
+        purpose_daily_key = f"email_code_daily_{purpose}_{user_identifier}"
+        purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+        
+        if purpose_daily_attempts >= 3:
+            return JsonResponse({
+                'status': 'error',
+                'message': '您今天已达到该操作的验证码发送上限（3次），请明天再试。'
+            }, status=429)
 
         # 4) 校验图片验证码（并单次使用）
         session_code = (request.session.get('captcha_code') or '').upper()
@@ -277,7 +293,18 @@ class SendEmailCodeView(View):
         else:
             cache.incr(daily_key)
 
-        # 8) 把验证码写入 session，使用不同的 key 避免冲突
+        # 8) 发送成功后，更新该项目的每日发送次数
+        if purpose_daily_attempts == 0:
+            # 第一次发送，设置过期时间为到第二天凌晨
+            import datetime
+            now = timezone.now()
+            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+            seconds_until_tomorrow = int((tomorrow - now).total_seconds())
+            cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
+        else:
+            cache.incr(purpose_daily_key)
+
+        # 9) 把验证码写入 session，使用不同的 key 避免冲突
         # 根据不同用途使用不同的 session key，避免被覆盖
         if purpose == 'email_change':
             # 修改邮箱专用 key
@@ -391,6 +418,18 @@ class CustomLoginView(View):
 
                 # 如果是邮箱验证方式，立即发送验证码
                 if profile.two_fa_method == 'email':
+                    # 检查登录2FA邮件的每日发送次数限制（每天最多3次）
+                    ip_address = request.META.get('REMOTE_ADDR')
+                    user_identifier = f"user_{user.id}"
+                    purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
+                    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+                    
+                    if purpose_daily_attempts >= 3:
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': '您今天已达到登录验证码发送上限（3次），请明天再试。'
+                        }, status=429)
+                    
                     email_code = ''.join(random.choices(string.digits, k=6))
                     request.session['2fa_email_code'] = email_code
                     request.session['2fa_email_timestamp'] = time.time()
@@ -403,6 +442,17 @@ class CustomLoginView(View):
                             [user.email],
                             fail_silently=False,
                         )
+                        
+                        # 发送成功后，更新计数
+                        if purpose_daily_attempts == 0:
+                            import datetime
+                            now = timezone.now()
+                            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+                            seconds_until_tomorrow = int((tomorrow - now).total_seconds())
+                            cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
+                        else:
+                            cache.incr(purpose_daily_key)
+                            
                     except Exception as e:
                         logger.error(f"发送2FA邮件失败: {e}")
                         return JsonResponse({
@@ -1385,11 +1435,11 @@ def update_profile(request):
 
 @login_required
 @require_http_methods(["POST"])
-@require_2fa_verified
 def update_email(request):
     """
-    修改邮箱
-    需要验证：当前密码、新邮箱验证码、2FA验证码
+    修改邮箱 (安全分步验证版)
+    1. 验证密码 + 新邮箱验证码
+    2. 如果需要，再验证 2FA
     """
     try:
         data = json.loads(request.body)
@@ -1399,6 +1449,8 @@ def update_email(request):
     current_password = data.get("password", "")
     new_email = data.get("new_email", "").strip()
     code = data.get("code", "").strip()
+    two_fa_code = data.get("two_fa_code", "").strip()
+    use_backup = data.get("use_backup", False)
 
     if not current_password or not new_email or not code:
         return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
@@ -1407,40 +1459,45 @@ def update_email(request):
     if not request.user.check_password(current_password):
         return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
 
-    # 2) 校验邮箱验证码（验证新邮箱所有权）
-    # 使用专门的 session key 避免被其他操作覆盖
+    # 2) 校验新邮箱的验证码
     info = request.session.get("email_change_verification")
-    
-    # 先检查验证码是否存在和有效期
-    if not info:
-        logger.info("Email verification info not found in session")
-        return JsonResponse({"status": "error", "message": "邮箱验证码已失效，请重新获取"}, status=400)
-    
-    # 有效期 15 分钟（增加到15分钟，给用户更多时间）
-    elapsed_time = time.time() - float(info.get("timestamp", 0))
-    if elapsed_time > 900:  # 15分钟 = 900秒
-        logger.info(f"Email verification code expired - Elapsed time: {elapsed_time} seconds")
-        # 验证码过期后清除session
-        if "email_change_verification" in request.session:
-            del request.session["email_change_verification"]
-        return JsonResponse({"status": "error", "message": "邮箱验证码已过期，请重新获取"}, status=400)
-    
-    # 验证邮箱和验证码是否匹配
-    if info.get("email") != new_email or info.get("code") != code:
-        # 【关键修复】验证失败时不要删除session，允许用户重试
-        logger.info(f"Email verification failed - Session email: {info.get('email')}, Expected: {new_email}, Session code: {info.get('code')}, Provided: {code}")
-        return JsonResponse({"status": "error", "message": "邮箱验证码错误或邮箱不匹配"}, status=400)
+    if not info or info.get("email") != new_email or info.get("code") != code:
+        return JsonResponse({"status": "error", "message": "新邮箱的验证码错误或已过期"}, status=400)
 
-    # 3) 检查邮箱是否已被占用（再兜底）
+    # 3) 检查邮箱是否已被占用
     if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
         return JsonResponse({"status": "error", "message": "该邮箱已被绑定"}, status=400)
 
-    # 4) 更新邮箱
+    # 4) 检查并执行 2FA 验证
+    profile = getattr(request.user, 'profile', None)
+    if profile and profile.two_fa_enabled:
+        if not two_fa_code:
+            # 如果需要 2FA 但未提供验证码，则要求输入
+            # 【修复】不在这里发送邮件，由前端决定是否需要发送
+            # 这样可以避免重复发送，并且让前端控制倒计时
+            return JsonResponse({
+                'status': 'require_2fa',
+                'message': '需要两因素认证以完成操作',
+                'method': profile.two_fa_method
+            })
+        
+        # 如果提供了 2FA 验证码，则进行验证
+        from .decorators import verify_2fa_for_request
+        success, message = verify_2fa_for_request(request, two_fa_code, use_backup)
+        if not success:
+            return JsonResponse({
+                'status': 'error',
+                'code': 'invalid_2fa',
+                'message': message
+            }, status=400)
+        # 2FA 验证通过，继续执行
+
+    # 5) 所有验证通过，更新邮箱
     user = request.user
     user.email = new_email
     user.save(update_fields=["email"])
 
-    # 作废验证码 session
+    # 作废新邮箱的验证码 session
     if "email_change_verification" in request.session:
         del request.session["email_change_verification"]
 
@@ -1493,16 +1550,13 @@ def toggle_profile_like(request):
 @require_http_methods(["POST"])
 def send_operation_2fa_code(request):
     """
-    为敏感操作发送2FA验证码
+    为敏感操作发送2FA验证码 (已修复)
     - TOTP用户：不需要发送邮件，直接使用验证器应用
-    - Email用户：发送6位验证码到当前邮箱（5分钟有效期）
-
-    使用场景：修改密码、修改邮箱等敏感操作
+    - Email用户：发送6位验证码到当前邮箱（5分钟有效期），使用缓存存储
     """
     user = request.user
     profile = getattr(user, 'profile', None)
 
-    # 检查用户是否启用了2FA
     if not profile or not profile.two_fa_enabled:
         return JsonResponse({
             'status': 'success',
@@ -1510,7 +1564,6 @@ def send_operation_2fa_code(request):
             'requires_2fa': False
         })
 
-    # TOTP用户不需要发送邮件
     if profile.two_fa_method == 'totp':
         return JsonResponse({
             'status': 'success',
@@ -1519,32 +1572,22 @@ def send_operation_2fa_code(request):
             'method': 'totp'
         })
 
-    # Email用户：生成并发送验证码
     elif profile.two_fa_method == 'email':
-        email_code = ''.join(random.choices(string.digits, k=6))
-        request.session['operation_2fa_email_code'] = email_code
-        request.session['operation_2fa_email_time'] = time.time()
-
-        try:
-            send_mail(
-                '操作验证码',
-                f'您正在进行敏感操作，验证码是：{email_code}。5分钟内有效。',
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
+        # 使用 decorators.py 中的辅助函数，它会正确地使用缓存
+        from .decorators import send_operation_2fa_email
+        success, message = send_operation_2fa_email(user, operation_type='general')
+        if success:
             return JsonResponse({
                 'status': 'success',
                 'message': '验证码已发送至您的邮箱',
                 'requires_2fa': True,
                 'method': 'email'
             })
-        except Exception as e:
-            logger.error(f"发送操作验证码失败: {e}")
+        else:
             return JsonResponse({
                 'status': 'error',
-                'message': '发送验证码失败，请稍后重试'
-            }, status=500)
+                'message': message or '发送验证码失败，请稍后重试'
+            }, status=429)
 
     return JsonResponse({
         'status': 'error',
@@ -1554,11 +1597,11 @@ def send_operation_2fa_code(request):
 
 @login_required
 @require_http_methods(["POST"])
-@require_2fa_verified
 def change_password(request):
     """
-    修改密码
-    需要验证：当前密码、2FA验证码
+    修改密码 (安全分步验证版)
+    1. 验证当前密码和新密码
+    2. 如果需要，再验证 2FA
     """
     try:
         data = json.loads(request.body)
@@ -1568,24 +1611,51 @@ def change_password(request):
     current_password = data.get("current_password", "")
     new_password = data.get("new_password", "")
     confirm_password = data.get("confirm_password", "")
+    two_fa_code = data.get("two_fa_code", "").strip()
+    use_backup = data.get("use_backup", False)
 
-    # 1) 验证必要参数
+    # 1) 基础验证
     if not all([current_password, new_password, confirm_password]):
         return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
-
-    # 2) 验证当前密码
     if not request.user.check_password(current_password):
         return JsonResponse({"status": "error", "message": "当前密码错误"}, status=400)
-
-    # 3) 验证新密码和确认密码
     if new_password != confirm_password:
         return JsonResponse({"status": "error", "message": "两次输入的新密码不一致"}, status=400)
-
-    # 4) 验证密码强度（至少8位）
     if len(new_password) < 8:
         return JsonResponse({"status": "error", "message": "新密码长度至少为8位"}, status=400)
 
-    # 5) 更新密码
+    # 2) 检查并执行 2FA 验证
+    profile = getattr(request.user, 'profile', None)
+    if profile and profile.two_fa_enabled:
+        if not two_fa_code:
+            # 如果需要 2FA 但未提供验证码，则要求输入
+            if profile.two_fa_method == 'email':
+                from .decorators import send_operation_2fa_email
+                success, message = send_operation_2fa_email(request.user, operation_type='password_change')
+                if not success:
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': message
+                    }, status=429)
+            
+            return JsonResponse({
+                'status': 'require_2fa',
+                'message': '需要两因素认证以完成操作',
+                'method': profile.two_fa_method
+            })
+        
+        # 如果提供了 2FA 验证码，则进行验证
+        from .decorators import verify_2fa_for_request
+        success, message = verify_2fa_for_request(request, two_fa_code, use_backup)
+        if not success:
+            return JsonResponse({
+                'status': 'error',
+                'code': 'invalid_2fa',
+                'message': message
+            }, status=400)
+        # 2FA 验证通过，继续执行
+
+    # 3) 所有验证通过，更新密码
     user = request.user
     user.set_password(new_password)
     user.save()
@@ -1661,31 +1731,37 @@ def enable_2fa(request):
         })
 
     elif method == "email":
-        # 邮箱验证方式，直接启用（不需要额外验证步骤）
+        # 邮箱验证方式，直接启用，并生成备用码
         profile.two_fa_enabled = True
         profile.two_fa_method = 'email'
-        profile.save(update_fields=['two_fa_enabled', 'two_fa_method'])
+        
+        # 生成备用码
+        backup_codes = generate_backup_codes_list()
+        profile.backup_codes = [hashlib.sha256(code.encode()).hexdigest() for code in backup_codes]
+        
+        profile.save(update_fields=['two_fa_enabled', 'two_fa_method', 'backup_codes'])
 
-        # 强制提交事务
-        transaction.commit()
-
-        # 添加日志记录，确认保存成功
-        logger.info(f"Email 2FA enabled for user {request.user.id}: enabled={profile.two_fa_enabled}, method={profile.two_fa_method}")
-
-        # 重新查询确认已保存
-        profile.refresh_from_db()
-        logger.info(f"After refresh: enabled={profile.two_fa_enabled}, method={profile.two_fa_method}")
-
-        # 验证确实已保存到数据库
-        verified_profile = Profile.objects.get(user=request.user)
-        logger.info(f"Verified from DB: enabled={verified_profile.two_fa_enabled}, method={verified_profile.two_fa_method}")
+        # 添加日志记录
+        logger.info(f"Email 2FA enabled for user {request.user.id} with backup codes.")
 
         return JsonResponse({
             "status": "success",
             "message": "邮箱两因素认证已启用",
-            "two_fa_enabled": verified_profile.two_fa_enabled,  # 返回数据库中的实际值
-            "two_fa_method": verified_profile.two_fa_method,    # 返回数据库中的实际方式
-            "requires_verification": False  # 邮箱方式不需要额外验证步骤
+            "two_fa_enabled": profile.two_fa_enabled,
+            "two_fa_method": profile.two_fa_method,
+            "backup_codes": backup_codes,  # 返回明文备用码供用户保存
+            "requires_verification": False,
+            "rate_limit_warning": {
+                "title": "重要提醒：验证码发送频率限制",
+                "message": "为了保护您的账户安全，登录验证码每天最多发送3次。建议妥善保管以下备用验证码，以便在需要时使用。",
+                "details": [
+                    "登录时每天最多可发送3次验证码",
+                    "超过限制后需等到第二天凌晨重置",
+                    "请务必保存下方的备用验证码",
+                    "每个备用码仅可使用一次",
+                    "丢失备用码可在设置中重新生成"
+                ]
+            }
         })
 
     else:
@@ -1947,7 +2023,7 @@ def verify_2fa_login(request):
 @require_http_methods(["POST"])
 def resend_2fa_email(request):
     """
-    重新发送2FA邮箱验证码
+    重新发送2FA邮箱验证码（带频率限制）
     """
     pending_user_id = request.session.get('pending_2fa_user_id')
     if not pending_user_id:
@@ -1962,6 +2038,17 @@ def resend_2fa_email(request):
     if profile.two_fa_method != 'email':
         return JsonResponse({'status': 'error', 'message': '当前不是邮箱验证方式'}, status=400)
 
+    # 检查登录2FA邮件的每日发送次数限制（每天最多3次）
+    user_identifier = f"user_{user.id}"
+    purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
+    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+    
+    if purpose_daily_attempts >= 3:
+        return JsonResponse({
+            'status': 'error',
+            'message': '您今天已达到登录验证码发送上限（3次），请明天再试。'
+        }, status=429)
+
     # 生成并发送新的验证码
     email_code = ''.join(random.choices(string.digits, k=6))
     request.session['2fa_email_code'] = email_code
@@ -1975,6 +2062,17 @@ def resend_2fa_email(request):
             [user.email],
             fail_silently=False,
         )
+        
+        # 发送成功后，更新计数
+        if purpose_daily_attempts == 0:
+            import datetime
+            now = timezone.now()
+            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+            seconds_until_tomorrow = int((tomorrow - now).total_seconds())
+            cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
+        else:
+            cache.incr(purpose_daily_key)
+            
         return JsonResponse({'status': 'success', 'message': '验证码已重新发送'})
     except Exception as e:
         logger.error(f"重新发送2FA邮件失败: {e}")
@@ -2081,9 +2179,12 @@ def theme_settings(request):
         # 返回当前的主题设置
         return JsonResponse({
             "status": "success",
-            "theme_settings": {
-                "mode": profile.theme.get('mode', 'system'),
-                "primary_color": profile.theme.get('primary_color', '#2196F3'),
+            "settings": {  # 改为 settings 以匹配前端期望
+                "mode": profile.theme.get('mode', 'light'),
+                "primary_color": profile.theme.get('primary_color', '#409EFF'),
+                "font_size": profile.theme.get('font_size', 14),
+                "compact_mode": profile.theme.get('compact_mode', False),
+                "animations": profile.theme.get('animations', True),
                 "layout": profile.layout_mode,
             }
         })
@@ -2095,14 +2196,35 @@ def theme_settings(request):
         except json.JSONDecodeError:
             return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
 
-        # 更新theme字段（JSONField）
+        # 更新theme字段（JSONField）- 支持所有主题相关字段
         theme_updated = False
+
+        # 处理模式设置
         if "mode" in data:
             profile.theme['mode'] = data['mode']
             theme_updated = True
 
-        if "primaryColor" in data:
+        # 处理主题色 - 支持两种命名方式
+        if "primary_color" in data:
+            profile.theme['primary_color'] = data['primary_color']
+            theme_updated = True
+        elif "primaryColor" in data:  # 兼容旧版本
             profile.theme['primary_color'] = data['primaryColor']
+            theme_updated = True
+
+        # 处理字体大小
+        if "font_size" in data:
+            profile.theme['font_size'] = int(data['font_size'])
+            theme_updated = True
+
+        # 处理紧凑模式
+        if "compact_mode" in data:
+            profile.theme['compact_mode'] = bool(data['compact_mode'])
+            theme_updated = True
+
+        # 处理动画设置
+        if "animations" in data:
+            profile.theme['animations'] = bool(data['animations'])
             theme_updated = True
 
         # 更新layout_mode字段
@@ -2121,14 +2243,33 @@ def theme_settings(request):
 
         if update_fields:
             profile.save(update_fields=update_fields)
-            logger.info(f"Updated theme settings for user {user.id}")
+            logger.info(f"Updated theme settings for user {user.id}: {data}")
 
             return JsonResponse({
                 "status": "success",
-                "message": "主题设置已保存"
+                "message": "主题设置已保存",
+                "settings": {  # 返回更新后的设置
+                    "mode": profile.theme.get('mode', 'light'),
+                    "primary_color": profile.theme.get('primary_color', '#409EFF'),
+                    "font_size": profile.theme.get('font_size', 14),
+                    "compact_mode": profile.theme.get('compact_mode', False),
+                    "animations": profile.theme.get('animations', True),
+                    "layout": profile.layout_mode,
+                }
             })
         else:
             return JsonResponse({
                 "status": "warning",
                 "message": "没有需要更新的字段"
             })
+
+
+# ==================== 主题测试页面 ====================
+def theme_test_view(request):
+    """
+    主题功能测试页面
+    """
+    from django.shortcuts import render
+    # 不需要登录，方便测试
+    return render(request, 'theme_test.html')
+

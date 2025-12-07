@@ -244,27 +244,62 @@ def require_2fa_verified(view_func):
 
 def send_operation_2fa_email(user, operation_type='general'):
     """
-    发送操作验证码邮件
+    发送操作验证码邮件（带防重复机制和每日限制）
 
     Args:
         user: 用户对象
         operation_type: 操作类型 ('email_change', 'password_change', 'general')
+    
+    Returns:
+        (success: bool, message: str) - 成功返回(True, ''), 失败返回(False, 错误信息)
     """
     import random
+    import datetime
     from django.core.mail import send_mail
     from django.conf import settings
+    from django.utils import timezone
 
+    cache_key = f'op2fa:{user.id}'
+    
+    # 【防重复机制】检查是否在90秒内已经发送过验证码
+    send_lock_key = f'op2fa_send_lock:{user.id}:{operation_type}'
+    if cache.get(send_lock_key):
+        logger.info(f"用户 {user.id} 的{operation_type}验证码发送过于频繁，已跳过")
+        # 如果已有验证码，返回True表示不需要再发送
+        return True, ''
+    
+    # 【新增】每日发送次数限制（每个操作类型每天最多3次）
+    user_identifier = f"user_{user.id}"
+    purpose_daily_key = f"email_code_daily_{operation_type}_2fa_{user_identifier}"
+    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+    
+    if purpose_daily_attempts >= 3:
+        logger.warning(f"用户 {user.id} 的{operation_type}验证码今日发送次数已达上限")
+        return False, '您今天已达到该操作的验证码发送上限（3次），请明天再试。'
+    
     # 生成6位验证码
     code = ''.join(random.choices('0123456789', k=6))
 
     # 存储到缓存（5分钟有效）
-    cache_key = f'op2fa:{user.id}'
     cache.set(cache_key, code, timeout=300)
+    
+    # 设置发送锁，90秒内不允许重复发送同类型的验证码
+    cache.set(send_lock_key, True, timeout=90)
+    
+    # 【新增】更新每日发送次数
+    if purpose_daily_attempts == 0:
+        # 第一次发送，设置过期时间为到第二天凌晨
+        now = timezone.now()
+        tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+        seconds_until_tomorrow = int((tomorrow - now).total_seconds())
+        cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
+    else:
+        cache.incr(purpose_daily_key)
 
     # 根据操作类型选择邮件标题
     subjects = {
-        'email_change': '邮箱修改验证码',
-        'password_change': '密码修改验证码',
+        'email_change': '操作验证码（邮箱修改安全验证）',
+        'password_change': '操作验证码（密码修改安全验证）',
         'general': '操作验证码'
     }
     subject = subjects.get(operation_type, '操作验证码')
@@ -273,13 +308,15 @@ def send_operation_2fa_email(user, operation_type='general'):
     try:
         send_mail(
             subject,
-            f'您的{subject}是：{code}\n\n5分钟内有效，请勿泄露给他人。',
+            f'您的{subject}是：{code}。5分钟内有效，请勿泄露给他人。',
             settings.DEFAULT_FROM_EMAIL,
             [user.email],
             fail_silently=False
         )
-        logger.info(f"向用户 {user.id} 发送了{subject}")
-        return True
+        logger.info(f"向用户 {user.id} 发送了{subject}，验证码：{code}")
+        return True, ''
     except Exception as e:
         logger.error(f"发送{subject}失败: {e}", exc_info=True)
-        return False
+        # 发送失败时删除锁，允许重试
+        cache.delete(send_lock_key)
+        return False, '验证码发送失败，请稍后重试'

@@ -25,6 +25,13 @@
 
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
 
+    <!-- API服务 - 为主题管理器提供API调用 -->
+    <script src="{% static 'JS/utils/request.js' %}"></script>
+    <script src="{% static 'JS/services/apiService.js' %}"></script>
+
+    <!-- 主题管理器 - 尽早加载以避免闪烁 -->
+    <script src="{% static 'JS/theme-manager.js' %}"></script>
+
     {% block head_extra %}{% endblock %}
 
 </head>

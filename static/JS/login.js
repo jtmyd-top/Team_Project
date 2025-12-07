@@ -216,7 +216,7 @@ createApp({
 
         // 启动重发倒计时
         const startResendCountdown = () => {
-            resendCountdown.value = 60;
+            resendCountdown.value = 120;
             const timer = setInterval(() => {
                 resendCountdown.value--;
                 if (resendCountdown.value <= 0) {
