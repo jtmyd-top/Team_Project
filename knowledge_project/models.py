@@ -356,6 +356,98 @@ class ProfileLike(models.Model):
         return f"{self.liker.username} 点赞了 {self.profile.user.username}"
 
 
+class PasswordResetToken(models.Model):
+    """密码重置令牌模型"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='password_reset_token')
+    token = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = '密码重置令牌'
+        verbose_name_plural = '密码重置令牌'
+        indexes = [
+            models.Index(fields=['token']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    @property
+    def is_expired(self):
+        """检查令牌是否已过期"""
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+    def save(self, *args, **kwargs):
+        # 创建时设置过期时间为24小时后
+        if not self.pk:
+            from django.utils import timezone
+            from datetime import timedelta
+            self.expires_at = timezone.now() + timedelta(hours=24)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.user.username} - {self.token[:8]}...'
+
+
+class PasswordResetAttempt(models.Model):
+    """密码重置尝试记录，用于频率限制"""
+    email = models.EmailField('邮箱', db_index=True)
+    ip_address = models.GenericIPAddressField('IP地址', db_index=True)
+    fingerprint = models.CharField('客户端指纹', max_length=64, db_index=True)
+    attempted_at = models.DateTimeField('尝试时间', auto_now_add=True)
+    is_successful = models.BooleanField('是否成功', default=False)
+    user_agent = models.TextField('用户代理', blank=True)
+
+    class Meta:
+        verbose_name = '密码重置尝试'
+        verbose_name_plural = '密码重置尝试'
+        indexes = [
+            models.Index(fields=['email', 'attempted_at']),
+            models.Index(fields=['ip_address', 'attempted_at']),
+            models.Index(fields=['fingerprint', 'attempted_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.email} - {self.ip_address} - {self.attempted_at.strftime("%Y-%m-%d %H:%M")}'
+
+
+class CaptchaSession(models.Model):
+    """验证码会话"""
+    captcha_id = models.CharField('验证码ID', max_length=64, unique=True, db_index=True)
+    captcha_text = models.CharField('验证码文本', max_length=6)
+    expires_at = models.DateTimeField('过期时间', db_index=True)
+    is_used = models.BooleanField('是否已使用', default=False)
+    ip_address = models.GenericIPAddressField('IP地址', db_index=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '验证码会话'
+        verbose_name_plural = '验证码会话'
+        indexes = [
+            models.Index(fields=['captcha_id']),
+            models.Index(fields=['expires_at']),
+            models.Index(fields=['ip_address']),
+        ]
+
+    @property
+    def is_expired(self):
+        """检查验证码是否已过期"""
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+    def save(self, *args, **kwargs):
+        # 设置5分钟过期
+        if not self.pk:
+            from django.utils import timezone
+            from datetime import timedelta
+            self.expires_at = timezone.now() + timedelta(minutes=5)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'Captcha {self.captcha_id[:8]}...'
+
+
 # ---------------- 头像抓取逻辑 ----------------
 def _http_get(url):
     try:

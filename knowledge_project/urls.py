@@ -12,6 +12,11 @@ urlpatterns = [
     path('check-username/', check_username, name='check_username'),
     path('send-email-code/', views.SendEmailCodeView.as_view(), name='send_email_code'),
     path('login/', CustomLoginView.as_view(), name='login'),
+    path('forgot-password/', views.forgot_password_view, name='forgot_password'),
+    path('password-reset/', views.password_reset_api, name='password_reset_api'),
+    path('reset-password/<int:user_id>/<str:token>/', views.reset_password_view, name='reset_password'),
+    path('api/captcha/', views.captcha_api, name='captcha_api'),
+    path('api/validate-captcha/', views.validate_captcha_api, name='validate_captcha_api'),
     path('api/notes/search/', views.search_notes_api, name='api_search_notes'),
     path('api/notes/<int:note_id>/', views.note_detail_api, name='api_note_detail'),
     path('api/notes/all/', views.get_all_notes_api, name='get_all_notes_api'),
@@ -43,6 +48,9 @@ urlpatterns = [
 
     # ==================== 主题设置 API ====================
     path('api/theme-settings/', views.theme_settings, name='theme_settings'),
+
+    # ==================== 登录API ====================
+    path('api/login/', views.login_api, name='login_api'),
 
     # ==================== 2FA登录验证 API ====================
     path('api/2fa/verify/', views.verify_2fa_login, name='verify_2fa_login'),

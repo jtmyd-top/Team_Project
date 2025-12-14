@@ -26,6 +26,13 @@ createApp({
 
         // --- 数据初始化 ---
         onMounted(() => {
+            // 初始化主题管理器
+            if (window.themeManager) {
+                window.themeManager.initialize().catch(error => {
+                    console.error('主题初始化失败:', error);
+                });
+            }
+
             const getJsonData = (id) => {
                 const el = document.getElementById(id);
                 if (el && el.textContent) return JSON.parse(el.textContent);

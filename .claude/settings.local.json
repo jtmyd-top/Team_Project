@@ -5,7 +5,11 @@
       "Bash(npm run build:*)",
       "Bash(python:*)",
       "Bash(del:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(dir:*)",
+      "Bash(timeout:*)",
+      "Bash(npm run build:auth:*)",
+      "Bash(npm run)"
     ],
     "deny": [],
     "ask": []

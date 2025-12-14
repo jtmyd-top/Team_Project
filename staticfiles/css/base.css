@@ -1,11 +1,166 @@
-/* 全局样式 */
+/* ==================== 主题系统 ==================== */
+
+/* CSS 变量定义 - 默认浅色主题 */
+:root {
+  /* 基础颜色 */
+  --primary-color: #409EFF;
+  --primary-color-light: #79bbff;
+  --primary-color-dark: #337ecc;
+
+  /* 背景颜色 */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #e9ecef;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+
+  /* 文字颜色 */
+  --text-primary: #303133;
+  --text-secondary: #606266;
+  --text-tertiary: #909399;
+  --text-inverse: #ffffff;
+
+  /* 边框和分割线 */
+  --border-color: #dcdfe6;
+  --border-light: #e4e7ed;
+  --divider-color: #f0f0f0;
+
+  /* 阴影 */
+  --shadow-light: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-base: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 6px rgba(0, 0, 0, 0.04);
+  --shadow-dark: 0 4px 8px rgba(0, 0, 0, 0.12), 0 0 12px rgba(0, 0, 0, 0.04);
+
+  /* 交互状态 */
+  --hover-bg: #f5f7fa;
+  --active-bg: #ecf5ff;
+  --disabled-bg: #f5f7fa;
+  --disabled-text: #c0c4cc;
+
+  /* 尺寸 */
+  --font-size-base: 14px;
+  --border-radius-small: 4px;
+  --border-radius-base: 8px;
+  --border-radius-large: 12px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+
+  /* 过渡动画 */
+  --transition-base: all 0.3s ease;
+  --transition-fast: all 0.2s ease;
+}
+
+/* 深色主题 */
+[data-theme="dark"] {
+  /* 基础颜色 */
+  --primary-color: #409EFF;
+  --primary-color-light: #79bbff;
+  --primary-color-dark: #66b1ff;
+
+  /* 背景颜色 */
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #2d2d2d;
+  --bg-tertiary: #3a3a3a;
+  --bg-overlay: rgba(0, 0, 0, 0.8);
+
+  /* 文字颜色 */
+  --text-primary: #e5eaf3;
+  --text-secondary: #cfd3dc;
+  --text-tertiary: #a3a6ad;
+  --text-inverse: #ffffff;
+
+  /* 边框和分割线 */
+  --border-color: #4c4d4f;
+  --border-light: #3a3a3a;
+  --divider-color: #2d2d2d;
+
+  /* 阴影 */
+  --shadow-light: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-base: 0 2px 4px rgba(0, 0, 0, 0.3), 0 0 6px rgba(0, 0, 0, 0.1);
+  --shadow-dark: 0 4px 8px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 0, 0, 0.1);
+
+  /* 交互状态 */
+  --hover-bg: #3a3a3a;
+  --active-bg: #4a4a4a;
+  --disabled-bg: #2d2d2d;
+  --disabled-text: #6c6e72;
+}
+
+/* 自动主题 - 跟随系统偏好 */
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    /* 基础颜色 */
+    --primary-color: #409EFF;
+    --primary-color-light: #79bbff;
+    --primary-color-dark: #66b1ff;
+
+    /* 背景颜色 */
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --bg-tertiary: #3a3a3a;
+    --bg-overlay: rgba(0, 0, 0, 0.8);
+
+    /* 文字颜色 */
+    --text-primary: #e5eaf3;
+    --text-secondary: #cfd3dc;
+    --text-tertiary: #a3a6ad;
+    --text-inverse: #ffffff;
+
+    /* 边框和分割线 */
+    --border-color: #4c4d4f;
+    --border-light: #3a3a3a;
+    --divider-color: #2d2d2d;
+
+    /* 阴影 */
+    --shadow-light: 0 2px 4px rgba(0, 0, 0, 0.2);
+    --shadow-base: 0 2px 4px rgba(0, 0, 0, 0.3), 0 0 6px rgba(0, 0, 0, 0.1);
+    --shadow-dark: 0 4px 8px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 0, 0, 0.1);
+
+    /* 交互状态 */
+    --hover-bg: #3a3a3a;
+    --active-bg: #4a4a4a;
+    --disabled-bg: #2d2d2d;
+    --disabled-text: #6c6e72;
+  }
+}
+
+/* 字体大小系统 */
+html {
+  font-size: var(--font-size-base);
+}
+
+/* 紧凑模式 */
+body.compact-mode {
+  /* 减少间距 */
+  --spacing-xs: 2px;
+  --spacing-sm: 4px;
+  --spacing-md: 8px;
+  --spacing-lg: 12px;
+
+  /* 减小字体 */
+  --font-size-base: 12px;
+
+  /* 减小边框圆角 */
+  --border-radius-small: 2px;
+  --border-radius-base: 4px;
+  --border-radius-large: 6px;
+}
+
+/* 禁用动画 */
+body.no-animations * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ==================== 全局样式 ==================== */
 html, body {
   height: 100%;
   margin: 0;
   font-family: sans-serif;
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   line-height: 1.6;
-  background-color: #f4f7f6;
+  background-color: var(--bg-secondary);
   background-image: url("../img/白金极简纹理.jpg");
   background-size: cover;
   background-position: center;
@@ -13,6 +168,8 @@ html, body {
   background-attachment: fixed;
   display: flex;
   flex-direction: column;
+  color: var(--text-primary);
+  transition: var(--transition-base);
 }
 
 header {
@@ -29,32 +186,32 @@ main {
 }
 
 nav {
-  border-bottom: 1px solid rgba(0,0,0,.1);
+  border-bottom: 1px solid var(--border-light);
   padding: .5em 1em;
-  box-shadow: 0 2px 4px rgba(0,0,0,.05);
-  background-color: rgba(255,255,255,.1);
+  box-shadow: var(--shadow-light);
+  background-color: var(--bg-primary);
   display: flex;
   align-items: center;
   justify-content: space-between; /* 未登录时 nav-right 不存在，左侧自然靠左 */
+  transition: var(--transition-base);
 }
 
 .nav-left, .nav-right {
   display: flex;
   align-items: center;
-  gap: 1em;
+  gap: var(--spacing-md);
 }
 
 nav a {
   text-decoration: none;
-  color: #333;
+  color: var(--text-primary);
   font-weight: 600;
-  transition: color .3s;
+  transition: var(--transition-base);
 }
-nav a:hover { color: #007BFF; }
+nav a:hover { color: var(--primary-color); }
 
 /* 用户菜单 */
 .user-menu {
-  position: relative;
   display: inline-block;
 }
 
@@ -68,13 +225,13 @@ nav a:hover { color: #007BFF; }
 }
 
 .user-menu-trigger:hover {
-  background-color: #f0f0f0;
+  background-color: var(--hover-bg);
 }
 
 .user-menu-trigger span {
   margin: 0 6px;
   font-weight: 500;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .user-menu-trigger .fa-chevron-down {
@@ -84,17 +241,17 @@ nav a:hover { color: #007BFF; }
 }
 
 .user-card {
-  position: absolute;
   top: calc(100% + 10px);
   right: 0;
   width: 240px;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-  border: 1px solid #eee;
+  background: var(--bg-primary);
+  border-radius: var(--border-radius-base);
+  box-shadow: var(--shadow-dark);
+  border: 1px solid var(--border-light);
   display: none;
   overflow: hidden;
   z-index: 1000;
+  transition: var(--transition-base);
 }
 
 .user-card.show {
@@ -107,7 +264,8 @@ nav a:hover { color: #007BFF; }
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  background: #f9f9f9;
+  background: var(--bg-secondary);
+  transition: var(--transition-base);
 }
 
 .user-avatar {
@@ -125,12 +283,12 @@ nav a:hover { color: #007BFF; }
 
 .user-info-dropdown .username {
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .user-info-dropdown .email {
   font-size: 0.85em;
-  color: #777;
+  color: var(--text-secondary);
 }
 
 /* 菜单项 */
@@ -147,48 +305,59 @@ nav a:hover { color: #007BFF; }
   width: 100%;
   padding: 10px 16px;
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary);
   text-decoration: none;
   background: none;
   border: none;
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: var(--transition-fast);
 }
 
 .user-card-menu li a:hover,
 .logout-btn:hover {
-  background-color: #f5f7fa;
-  color: #007bff;
+  background-color: var(--hover-bg);
+  color: var(--primary-color);
 }
 
 .user-card-menu li i {
   width: 18px;
   margin-right: 10px;
   text-align: center;
-  color: #555;
+  color: var(--text-tertiary);
+  transition: var(--transition-fast);
+}
+
+.user-card-menu li a:hover i {
+  color: var(--primary-color);
 }
 
 .user-card-menu .divider {
   height: 1px;
-  background: #e0e0e0;
+  background: var(--divider-color);
   margin: 6px 0;
 }
 
 /* 退出按钮特殊样式 */
 .logout-btn {
   font-weight: 500;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-light);
   border-radius: 0;
   text-align: left;
+  color: #e53e3e; /* 保持红色作为退出按钮的警示色 */
 }
 
 .logout-btn:hover {
-  background-color: #ffecec;
-  color: #d9534f;
+  background-color: rgba(229, 62, 62, 0.1);
+  color: #c53030;
 }
 
 .logout-btn i {
-  color: #d9534f;
+  color: #e53e3e;
+  transition: var(--transition-fast);
+}
+
+.logout-btn:hover i {
+  color: #c53030;
 }
 
 /* 动画 */

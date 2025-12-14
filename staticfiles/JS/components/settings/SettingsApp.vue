@@ -407,12 +407,14 @@ const updateVideoVolume = () => {
 
 <style scoped>
 .settings-container {
-  max-width: 1200px; /* 限制最大宽度 */
-  margin: 24px auto; /* 居中并添加上下边距 */
-  background: white; /* 白色背景 */
-  border-radius: 12px; /* 圆角 */
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* 阴影 */
+  width: 1200px; /* 限制最大宽度 */
+  margin: var(--spacing-lg, 24px) auto; /* 居中并添加上下边距 */
+  background: var(--bg-primary, white); /* 使用主题变量 */
+  border-radius: var(--border-radius-base, 12px); /* 圆角 */
+  box-shadow: var(--shadow-base, 0 4px 12px rgba(0,0,0,0.1)); /* 阴影 */
   overflow: hidden; /* 确保圆角生效 */
+  max-width:80%;
+  transition: var(--transition-base, all 0.3s ease);
 }
 
 /* ==================== 第一层：横幅 ==================== */
@@ -420,9 +422,10 @@ const updateVideoVolume = () => {
   position: relative;
   width: 100%;
   height: 60vh; /* 增加高度 */
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--primary-color, #667eea) 0%, #764ba2 100%);
   overflow: hidden;
-  border-radius: 12px 12px 0 0; /* 顶部圆角 */
+  border-radius: var(--border-radius-base, 12px) var(--border-radius-base, 12px) 0 0; /* 顶部圆角 */
+  transition: var(--transition-base, all 0.3s ease);
 }
 
 .banner-image {
@@ -714,23 +717,23 @@ const updateVideoVolume = () => {
 }
 
 .user-nickname {
-  font-size: 24px;
+  font-size: calc(var(--font-size-base, 14px) * 1.7);
   font-weight: 600;
-  color: #303133;
-  margin: 0 0 8px 0;
+  color: var(--text-primary, #303133);
+  margin: 0 0 var(--spacing-sm, 8px) 0;
 }
 
 .user-email {
-  font-size: 14px;
-  color: #909399;
-  margin: 0 0 12px 0;
+  font-size: var(--font-size-base, 14px);
+  color: var(--text-tertiary, #909399);
+  margin: 0 0 calc(var(--spacing-md, 12px) * 1) 0;
 }
 
 .user-bio {
-  font-size: 14px;
-  color: #606266;
+  font-size: var(--font-size-base, 14px);
+  color: var(--text-secondary, #606266);
   line-height: 1.6;
-  margin: 0 0 16px 0;
+  margin: 0 0 var(--spacing-md, 16px) 0;
   word-wrap: break-word;
   word-break: break-all;
   overflow-wrap: break-word;

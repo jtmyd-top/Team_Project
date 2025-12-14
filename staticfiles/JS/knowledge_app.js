@@ -429,6 +429,14 @@ createApp({
 
     onMounted(() => {
       document.addEventListener('keydown', handleKeyDown);
+
+      // 初始化主题管理器
+      if (window.themeManager) {
+        window.themeManager.initialize().catch(error => {
+          console.error('主题初始化失败:', error);
+        });
+      }
+
       const pathParts = window.location.pathname.split('/').filter(p => p);
       const noteIdFromUrl = (pathParts.length >= 2 && pathParts[0] === 'knowledge' && !isNaN(parseInt(pathParts[1], 10))) ? parseInt(pathParts[1], 10) : null;
       if (noteIdFromUrl) {

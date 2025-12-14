@@ -2,7 +2,9 @@
     width: 100%;
     max-width: 1400px;
     margin: 0 auto;
-    /* 移除背景和最小高度，由 Vue 组件内部控制样式 */
+    background-color: var(--bg-primary, white);
+    color: var(--text-primary, #333);
+    transition: var(--transition-base, all 0.3s ease);
 }
 
 /* ==================== 横幅预览区域 ==================== */

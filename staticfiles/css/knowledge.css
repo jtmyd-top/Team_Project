@@ -1,7 +1,7 @@
 /* --- 通用布局样式 --- */
 
 .knowledge-root {
-  background: rgba(255, 255, 255, 0.70);
+  background: var(--bg-primary);
   box-sizing: border-box;
   display: flex;
   gap: 2.5rem;
@@ -17,9 +17,9 @@
 
 .sidebar {
   align-items: center;
-  background: rgba(255, 255, 255, 0.70);
+  background: var(--bg-primary);
   border-radius: 20px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-base);
   display: flex;
   flex-direction: column;
   max-width: 350px;
@@ -31,9 +31,9 @@
 }
 
 .main-content {
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--bg-primary);
   border-radius: 20px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-base);
   display: flex;
   flex: 1 1 0;
   min-width: 280px;
@@ -68,8 +68,8 @@
 .edit-header input[type="text"] {
   background-color: transparent;
   border: none;
-  border-bottom: 2px solid #e0e0e0;
-  color: #333;
+  border-bottom: 2px solid var(--border-color);
+  color: var(--text-primary);
   font-size: 2.2rem;
   font-weight: 700;
   margin: 0;
@@ -80,7 +80,7 @@
 }
 
 .edit-header input[type="text"]:focus {
-  border-color: #4099ff;
+  border-color: var(--primary-color);
 }
 
 .edit-actions {
@@ -101,21 +101,21 @@
 }
 
 .edit-actions .btn-cancel {
-  background-color: #f5f7fa;
-  border-color: #dcdfe6;
-  color: #606266;
+  background-color: var(--hover-bg);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 
 .edit-actions .btn-cancel:hover {
-  background-color: #fff;
-  border-color: #c6e2ff;
-  color: #409eff;
+  background-color: var(--bg-primary);
+  border-color: var(--primary-color-light);
+  color: var(--primary-color);
 }
 
 .edit-actions .btn-save {
-  background-color: #409eff;
-  border-color: #409eff;
-  color: #fff;
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+  color: var(--text-inverse);
 }
 
 .edit-actions .btn-save:hover {
@@ -159,8 +159,8 @@
 
 .action-btn {
   align-items: center;
-  background-color: #fff;
-  border: 1px solid #dcdfe6;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   color: #606266;
   cursor: pointer;
@@ -175,8 +175,8 @@
 
 .action-btn:hover {
   background-color: #f5f7fa;
-  border-color: #c6e2ff;
-  color: #409eff;
+  border-color: var(--primary-color-light);
+  color: var(--primary-color);
 }
 
 .action-btn i {
@@ -184,8 +184,8 @@
 }
 
 .share-toggle-label {
-  background-color: #ecf5ff;
-  border-color: #b3d8ff;
+  background-color: var(--active-bg);
+  border-color: var(--primary-color-light);
   border-radius: 8px;
   color: #409eff;
   cursor: pointer;
@@ -205,14 +205,14 @@
 }
 
 .note-meta {
-  color: #888;
+  color: var(--text-tertiary);
   font-size: 0.9rem;
   margin-bottom: 2rem;
   margin-top: 0.5rem;
 }
 
 .note-content p {
-  color: #333;
+  color: var(--text-primary);
   line-height: 1.7;
   margin-bottom: 1em;
 }
@@ -220,7 +220,7 @@
 /* --- 吐司提示框 (Toast Notification) --- */
 .toast-notification {
   align-items: center;
-  background-color: #67c23a;
+  background-color: #67c23a; /* 成功绿色，暂时保持 */
   border-radius: 8px;
   color: #fff;
   display: inline-flex;
@@ -233,11 +233,11 @@
   right: 25px;
   top: 25px;
   z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-dark);
 }
 
 .toast-error {
-  background-color: #f56c6c;
+  background-color: #f56c6c; /* 错误红色，暂时保持 */
 }
 
 .toast-fade-enter-active,
@@ -254,9 +254,9 @@
 /* --- 自定义确认框 (Confirm Dialog) --- */
 .confirm-dialog {
   align-items: center;
-  background-color: #fff;
+  background-color: var(--bg-primary);
   border-radius: 12px;
-  color: #333;
+  color: var(--text-primary);
   display: flex;
   flex-direction: column;
   font-size: 1.1rem;
@@ -270,7 +270,7 @@
   transform: translate(-50%, -50%);
   width: 360px;
   z-index: 10000;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .confirm-dialog-actions {
@@ -281,7 +281,7 @@
 
 .confirm-dialog-actions button {
   background-color: #f5f7fa;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   color: #606266;
   cursor: pointer;
@@ -295,11 +295,11 @@
 .confirm-dialog-actions .btn-cancel-confirm {
   background-color: #f5f7fa;
   color: #606266;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--border-color);
 }
 
 .confirm-dialog-actions .btn-confirm-action {
-  background-color: #f56c6c;
+  background-color: #f56c6c; /* 错误红色，暂时保持 */
   color: #fff;
 }
 
@@ -325,9 +325,9 @@
 
 .notes-nav-list li a {
   align-items: center;
-  #background: linear-gradient(90deg, #e0e9ff, #dbeafe 90%);
+  #background: linear-gradient(90deg, var(--primary-color-light), var(--active-bg) 90%);
   border-radius: 8px;
-  color: #06519a;
+  color: var(--primary-color-dark);
   display: flex;
   font-size: 0.97rem;
   font-weight: 600;
@@ -346,8 +346,8 @@
 }
 .notes-nav-list li a:hover,
 .notes-nav-list li.active a {
-  background: linear-gradient(90deg, #e0e9ff, #dbeafe 90%);
-  color: #06519a;
+  background: linear-gradient(90deg, var(--primary-color-light), var(--active-bg) 90%);
+  color: var(--primary-color-dark);
   font-weight: 600;
 }
 
@@ -360,7 +360,7 @@
 }
 
 .sidebar-search input {
-  background: #f0f4f9;
+  background: var(--bg-secondary);
   border: 1px solid transparent;
   border-radius: 999px;
   padding: 0.7rem 1rem 0.7rem 2.5rem;
@@ -369,12 +369,12 @@
 }
 
 .sidebar-search input:focus {
-  background-color: #fff;
-  border-color: #4099ff;
+  background-color: var(--bg-primary);
+  border-color: var(--primary-color);
 }
 
 .sidebar-search .fa-search {
-  color: #aaa;
+  color: var(--text-tertiary);
   left: 1rem;
   position: absolute;
   top: 50%;
@@ -391,10 +391,10 @@
 
 .sidebar .sidebar-toggle {
   align-items: center;
-  background: linear-gradient(135deg, #e0e9ff 40%, #bfd5fc 100%);
+  background: linear-gradient(135deg, var(--primary-color-light) 40%, var(--primary-color) 100%);
   border: none;
   border-radius: 50%;
-  box-shadow: 0 2px 8px rgba(191, 213, 252, 0.4);
+  box-shadow: var(--shadow-base);
   cursor: pointer;
   display: flex;
   height: 32px;
@@ -432,7 +432,7 @@
 
 .sidebar.collapsed .sidebar-search {
   align-items: center;
-  background: #f0f4f9;
+  background: var(--bg-secondary);
   border-radius: 50%;
   display: flex;
   height: 48px;
@@ -452,10 +452,10 @@
 /* --- 新增笔记按钮样式微调 --- */
 .new-note-btn {
   align-items: center;
-  background: linear-gradient(90deg, #4099ff 60%, #2255af);
+  background: linear-gradient(90deg, var(--primary-color) 60%, var(--primary-color-dark));
   border: none;
   border-radius: 999px;
-  box-shadow: 0 2px 8px rgba(64, 153, 255, 0.07);
+  box-shadow: var(--shadow-light);
   color: #fff;
   cursor: pointer;
   display: flex;
@@ -480,8 +480,8 @@
 
 /* --- 新增的样式：笔记内容容器和分页控件 --- */
 .note-content-container {
-  background-color: rgba(255, 255, 255, 0.8);
-  border: 1px solid #eee;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-light);
   border-radius: 10px;
   box-sizing: border-box;
   max-height: 70vh;
@@ -490,7 +490,7 @@
 }
 
 .note-content p {
-  color: #333;
+  color: var(--text-primary);
   line-height: 1.7;
   margin-bottom: 1em;
 }
@@ -505,8 +505,8 @@
 
 .pagination-controls button {
   align-items: center;
-  background-color: #fff;
-  border: 1px solid #dcdfe6;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   color: #606266;
   cursor: pointer;
@@ -521,8 +521,8 @@
 
 .pagination-controls button:hover {
   background-color: #f5f7fa;
-  border-color: #c6e2ff;
-  color: #409eff;
+  border-color: var(--primary-color-light);
+  color: var(--primary-color);
 }
 
 .pagination-controls button:disabled {
@@ -543,13 +543,13 @@
 }
 
 .page-selector {
-  color: #555;
+  color: var(--text-secondary);
   font-size: 14px;
   margin: 0 15px;
 }
 
 .page-display {
-  background-color: #f0f0f0;
+  background-color: var(--bg-tertiary);
   border-radius: 4px;
   cursor: pointer;
   padding: 5px 8px;
@@ -557,11 +557,11 @@
 }
 
 .page-display:hover {
-  background-color: #f0f0f0;
+  background-color: var(--bg-tertiary);
 }
 
 .page-input {
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   font-size: 14px;
   outline: none;
@@ -627,7 +627,7 @@
     align-items: center;
     gap: 8px; /* 标签之间的间距 */
     font-size: 0.9em;
-    color: #555;
+    color: var(--text-secondary);
     margin-top: 8px;
     margin-left: 5px; /* 稍微向右偏移，与标题保持距离 */
 }
@@ -639,7 +639,7 @@
     align-items: center;
     gap: 5px;
     margin-left: 10px; /* 与前面的 meta 信息保持距离 */
-    background-color: #f0f0f0; /* 标签区域背景色，使其更突出 */
+    background-color: var(--bg-tertiary); /* 标签区域背景色，使其更突出 */
     padding: 5px 10px;
     border-radius: 5px;
 }
@@ -648,8 +648,8 @@
     font-size: 1.1em;
 }
 .tag-item {
-    background-color: #e0e0e0; /* 标签背景色 */
-    color: #333;
+    background-color: var(--bg-tertiary); /* 标签背景色 */
+    color: var(--text-primary);
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 0.85em;
@@ -657,5 +657,5 @@
     transition: background-color 0.2s ease;
 }
 .tag-item:hover {
-    background-color: #c8e6c9; /* 鼠标悬停时的颜色 */
+    background-color: var(--active-bg); /* 鼠标悬停时的颜色 */
 }

@@ -38,9 +38,8 @@
                 <i class="fas fa-envelope"></i>
               </template>
               <template #append>
-                <el-button 
-                  type="primary" 
-                  :disabled="!emailChanged"
+                <el-button
+                  type="primary"
                   @click="openEmailChangeDialog">
                   修改
                 </el-button>
@@ -284,12 +283,16 @@ const emailChanged = computed(() => {
  * 打开邮箱修改对话框
  */
 const openEmailChangeDialog = async () => {
-  if (emailChanged.value) {
-    emailForm.new_email = tempEmail.value.trim();
-    showEmailDialog.value = true;
-    // 立即触发邮箱可用性检查（不使用防抖）
-    await checkEmailAvailabilityCore();
+  // 检查邮箱是否有效改变
+  if (!emailChanged.value) {
+    ElMessage.warning('请先输入新的邮箱地址');
+    return;
   }
+
+  emailForm.new_email = tempEmail.value.trim();
+  showEmailDialog.value = true;
+  // 立即触发邮箱可用性检查（不使用防抖）
+  await checkEmailAvailabilityCore();
 };
 
 /**
@@ -678,25 +681,21 @@ const toggleEmailBackupCode = () => {
 
 /* 强制覆盖 Element Plus 输入框组的 append 按钮样式 */
 .form-section :deep(.el-input-group__append) {
-  background-color: #409EFF !important;
-  border-color: #409EFF !important;
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0 !important;
 }
 
 .form-section :deep(.el-input-group__append .el-button) {
   background-color: #409EFF !important;
   color: #ffffff !important;
   border-color: #409EFF !important;
+  margin: 0 !important;
 }
 
 .form-section :deep(.el-input-group__append .el-button:hover) {
   background-color: #66b1ff !important;
   border-color: #66b1ff !important;
-}
-
-.form-section :deep(.el-input-group__append .el-button:disabled) {
-  background-color: #a0cfff !important;
-  border-color: #a0cfff !important;
-  opacity: 0.6;
 }
 
 /* 增加输入框高度 */

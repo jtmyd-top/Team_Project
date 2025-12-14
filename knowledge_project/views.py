@@ -1921,6 +1921,7 @@ def generate_backup_codes_list():
 # ==================== 两因素认证登录验证 API ====================
 
 @require_http_methods(["POST"])
+@csrf_exempt
 def verify_2fa_login(request):
     """
     验证2FA登录码
@@ -1932,7 +1933,7 @@ def verify_2fa_login(request):
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
-        return JsonResponse({'status': 'error', 'message': 'JSON格式错误'}, status=400)
+        return JsonResponse({'error': 'JSON格式错误'}, status=400)
 
     code = data.get('code', '').strip()
     use_backup = data.get('use_backup', False)  # 是否使用备用码
@@ -1940,7 +1941,7 @@ def verify_2fa_login(request):
     # 从session获取待验证的用户ID
     pending_user_id = request.session.get('pending_2fa_user_id')
     if not pending_user_id:
-        return JsonResponse({'status': 'error', 'message': '会话已过期，请重新登录'}, status=400)
+        return JsonResponse({'error': '会话已过期，请重新登录'}, status=400)
 
     try:
         user = User.objects.get(id=pending_user_id)
@@ -1961,16 +1962,16 @@ def verify_2fa_login(request):
             profile.backup_codes.remove(code_hash)
             profile.save(update_fields=['backup_codes'])
         else:
-            return JsonResponse({'status': 'error', 'message': '备用验证码错误'}, status=400)
+            return JsonResponse({'error': '备用验证码错误'}, status=400)
 
     elif profile.two_fa_method == 'totp':
         # TOTP验证器
         if not profile.totp_secret:
-            return JsonResponse({'status': 'error', 'message': '2FA配置错误'}, status=400)
+            return JsonResponse({'error': '2FA配置错误'}, status=400)
 
         totp = pyotp.TOTP(profile.totp_secret)
         if not totp.verify(code, valid_window=1):
-            return JsonResponse({'status': 'error', 'message': '验证码错误'}, status=400)
+            return JsonResponse({'error': '验证码错误'}, status=400)
 
     elif profile.two_fa_method == 'email':
         # 邮箱验证码
@@ -1978,14 +1979,14 @@ def verify_2fa_login(request):
         session_timestamp = request.session.get('2fa_email_timestamp')
 
         if not session_code or not session_timestamp:
-            return JsonResponse({'status': 'error', 'message': '验证码已过期'}, status=400)
+            return JsonResponse({'error': '验证码已过期'}, status=400)
 
         # 检查有效期（5分钟）
         if time.time() - float(session_timestamp) > 300:
-            return JsonResponse({'status': 'error', 'message': '验证码已过期'}, status=400)
+            return JsonResponse({'error': '验证码已过期'}, status=400)
 
         if session_code != code:
-            return JsonResponse({'status': 'error', 'message': '验证码错误'}, status=400)
+            return JsonResponse({'error': '验证码错误'}, status=400)
 
         # 清除已使用的邮箱验证码
         if '2fa_email_code' in request.session:
@@ -2014,13 +2015,14 @@ def verify_2fa_login(request):
         del request.session['pending_2fa_method']
 
     return JsonResponse({
-        'status': 'success',
+        'success': True,
         'message': '登录成功',
-        'redirect_url': reverse('home')
+        'require_2fa': False
     })
 
 
 @require_http_methods(["POST"])
+@csrf_exempt
 def resend_2fa_email(request):
     """
     重新发送2FA邮箱验证码（带频率限制）
@@ -2272,4 +2274,672 @@ def theme_test_view(request):
     from django.shortcuts import render
     # 不需要登录，方便测试
     return render(request, 'theme_test.html')
+
+# ==================== 忘记密码功能 ====================
+
+def forgot_password_view(request):
+    """
+    忘记密码页面
+    """
+    return render(request, 'registration/forgot_password.html')
+
+@require_http_methods(["POST"])
+def password_reset_api(request):
+    """
+    密码重置API（增强安全版本）
+    POST: 发送重置密码邮件（需要验证码和频率限制）
+    """
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            email = data.get('email', '').strip()
+            captcha_id = data.get('captcha_id', '')
+            captcha_code = data.get('captcha_code', '')
+
+            # 验证必要参数
+            if not email:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "请输入邮箱地址"
+                }, status=400)
+
+            if not captcha_id or not captcha_code:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "请输入验证码"
+                }, status=400)
+
+            # 验证邮箱格式
+            from django.core.validators import validate_email
+            from django.core.exceptions import ValidationError
+            try:
+                validate_email(email)
+            except ValidationError:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "请输入正确的邮箱格式"
+                }, status=400)
+
+            # 获取客户端信息用于频率限制
+            client_ip = get_client_ip(request)
+            fingerprint = get_client_fingerprint(request)
+
+            # 检查频率限制
+            is_allowed, rate_limit_message = check_rate_limit(email, client_ip, fingerprint)
+            if not is_allowed:
+                return JsonResponse({
+                    "status": "error",
+                    "message": rate_limit_message
+                }, status=429)
+
+            # 验证验证码
+            from .models import CaptchaSession
+            try:
+                captcha_session = CaptchaSession.objects.get(captcha_id=captcha_id)
+
+                # 验证IP地址是否一致
+                if captcha_session.ip_address != client_ip:
+                    return JsonResponse({
+                        "status": "error",
+                        "message": "验证码与客户端不匹配"
+                    }, status=400)
+
+                # 检查验证码是否已使用或过期
+                if captcha_session.is_used or captcha_session.is_expired:
+                    return JsonResponse({
+                        "status": "error",
+                        "message": "验证码已失效，请重新获取"
+                    }, status=400)
+
+                # 验证验证码（不区分大小写）
+                if captcha_session.captcha_text.lower() != captcha_code.lower():
+                    return JsonResponse({
+                        "status": "error",
+                        "message": "验证码错误"
+                    }, status=400)
+
+                # 标记验证码为已使用
+                captcha_session.is_used = True
+                captcha_session.save(update_fields=['is_used'])
+
+            except CaptchaSession.DoesNotExist:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "验证码无效"
+                }, status=400)
+
+            # 检查邮箱是否存在
+            try:
+                user = User.objects.get(email=email)
+                user_exists = True
+            except User.DoesNotExist:
+                # 邮箱不存在，但继续执行以确保响应时间一致
+                user_exists = False
+
+            # 为了防止时序攻击，无论邮箱是否存在都执行相同的操作
+            import time
+            import secrets
+            import string
+            from .models import PasswordResetToken
+
+            # 模拟token生成时间（无论邮箱是否存在）
+            time.sleep(0.1)  # 固定延时确保响应时间一致
+
+            # 生成随机token（即使邮箱不存在也生成，防止时序攻击）
+            alphabet = string.ascii_letters + string.digits
+            dummy_token = ''.join(secrets.choice(alphabet) for _ in range(64))
+
+            # 只有邮箱存在时才实际处理
+            if user_exists:
+                # 删除旧的令牌（如果存在）
+                PasswordResetToken.objects.filter(user=user).delete()
+
+                # 创建新的令牌
+                reset_token = PasswordResetToken.objects.create(
+                    user=user,
+                    token=dummy_token
+                )
+
+                # 构建重置URL
+                reset_url = f"{request.scheme}://{request.get_host()}/reset-password/{user.pk}/{dummy_token}/"
+
+                # 发送邮件
+                from django.core.mail import send_mail
+                from django.conf import settings
+
+                subject = '重置您的密码'
+                message = f'''
+                您好，{user.username}！
+
+                您请求重置密码。请点击以下链接重置密码：
+                {reset_url}
+
+                此链接将在24小时后失效。
+
+                如果您没有请求重置密码，请忽略此邮件。
+                '''
+
+                try:
+                    send_mail(
+                        subject=subject,
+                        message=message,
+                        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+                        recipient_list=[email],
+                        fail_silently=False
+                    )
+
+                    # 标记尝试为成功
+                    PasswordResetAttempt.objects.filter(
+                        email=email,
+                        ip_address=client_ip,
+                        fingerprint=fingerprint
+                    ).update(is_successful=True)
+
+                except Exception as e:
+                    logger.error(f"发送密码重置邮件失败: {str(e)}")
+                    # 更新尝试记录为失败
+                    PasswordResetAttempt.objects.filter(
+                        email=email,
+                        ip_address=client_ip,
+                        fingerprint=fingerprint
+                    ).update(is_successful=False)
+
+            # 统一返回消息，不暴露邮箱是否存在
+            return JsonResponse({
+                "status": "success",
+                "message": "如果该邮箱地址已注册，重置密码链接已发送到该邮箱"
+            })
+
+        except json.JSONDecodeError:
+            import secrets
+            import string
+            from .models import PasswordResetToken
+
+            # 生成随机token
+            alphabet = string.ascii_letters + string.digits
+            token = ''.join(secrets.choice(alphabet) for _ in range(64))
+
+            # 删除旧的令牌（如果存在）
+            PasswordResetToken.objects.filter(user=user).delete()
+
+            # 创建新的令牌
+            reset_token = PasswordResetToken.objects.create(
+                user=user,
+                token=token
+            )
+
+            # 构建重置URL
+            reset_url = f"{request.scheme}://{request.get_host()}/reset-password/{user.pk}/{token}/"
+
+            # 发送邮件
+            from django.core.mail import send_mail
+            from django.conf import settings
+
+            subject = '重置您的密码'
+            message = f'''
+            您好，{user.username}！
+
+            您请求重置密码。请点击以下链接重置密码：
+            {reset_url}
+
+            此链接将在24小时后失效。
+
+            如果您没有请求重置密码，请忽略此邮件。
+            '''
+
+            try:
+                send_mail(
+                    subject=subject,
+                    message=message,
+                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+                    recipient_list=[email],
+                    fail_silently=False
+                )
+
+                return JsonResponse({
+                    "status": "success",
+                    "message": "重置密码链接已发送到您的邮箱，请查收"
+                })
+            except Exception as e:
+                logger.error(f"发送密码重置邮件失败: {str(e)}")
+                return JsonResponse({
+                    "status": "error",
+                    "message": "邮件发送失败，请稍后重试"
+                }, status=500)
+
+        except json.JSONDecodeError:
+            return JsonResponse({
+                "status": "error",
+                "message": "请求格式错误"
+            }, status=400)
+        except Exception as e:
+            logger.error(f"密码重置请求失败: {str(e)}")
+            return JsonResponse({
+                "status": "error",
+                "message": "服务器错误，请稍后重试"
+            }, status=500)
+
+    return JsonResponse({
+        "status": "error",
+        "message": "不支持的请求方法"
+    }, status=405)
+
+def reset_password_view(request, user_id, token):
+    """
+    重置密码页面
+    GET: 显示重置密码表单
+    POST: 处理密码重置
+    """
+    from django.contrib.auth.models import User
+    from django.contrib.auth import login, update_session_auth_hash
+    from .models import PasswordResetToken
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return render(request, 'registration/reset_password.html', {
+            'error': '无效的重置链接'
+        })
+
+    # 使用新的Token模型验证
+    try:
+        reset_token = PasswordResetToken.objects.get(user=user, token=token)
+
+        # 检查令牌是否已使用或过期
+        if reset_token.is_used or reset_token.is_expired:
+            return render(request, 'registration/reset_password.html', {
+                'error': '重置链接已过期或无效'
+            })
+
+    except PasswordResetToken.DoesNotExist:
+        return render(request, 'registration/reset_password.html', {
+            'error': '无效的重置链接'
+        })
+
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body) if request.content_type == 'application/json' else request.POST.dict()
+            password = data.get('password', '')
+            confirm_password = data.get('confirm_password', '')
+
+            if not password or not confirm_password:
+                if request.content_type == 'application/json':
+                    return JsonResponse({
+                        "status": "error",
+                        "message": "请填写所有字段"
+                    }, status=400)
+                else:
+                    return render(request, 'registration/reset_password.html', {
+                        'error': '请填写所有字段',
+                        'user_id': user_id,
+                        'token': token
+                    })
+
+            if password != confirm_password:
+                if request.content_type == 'application/json':
+                    return JsonResponse({
+                        "status": "error",
+                        "message": "两次输入的密码不一致"
+                    }, status=400)
+                else:
+                    return render(request, 'registration/reset_password.html', {
+                        'error': '两次输入的密码不一致',
+                        'user_id': user_id,
+                        'token': token
+                    })
+
+            # 验证密码强度
+            if len(password) < 8:
+                if request.content_type == 'application/json':
+                    return JsonResponse({
+                        "status": "error",
+                        "message": "密码长度至少为8位"
+                    }, status=400)
+                else:
+                    return render(request, 'registration/reset_password.html', {
+                        'error': '密码长度至少为8位',
+                        'user_id': user_id,
+                        'token': token
+                    })
+
+            # 更新密码
+            user.set_password(password)
+            user.save()
+
+            # 标记令牌为已使用
+            reset_token.is_used = True
+            reset_token.save(update_fields=['is_used'])
+
+            # 自动登录用户
+            login(request, user)
+
+            if request.content_type == 'application/json':
+                return JsonResponse({
+                    "status": "success",
+                    "message": "密码重置成功，正在跳转到首页...",
+                    "redirect_url": "/"
+                })
+            else:
+                # 传统表单提交，重定向到首页
+                from django.shortcuts import redirect
+                return redirect('home')
+
+        except Exception as e:
+            logger.error(f"重置密码失败: {str(e)}")
+            if request.content_type == 'application/json':
+                return JsonResponse({
+                    "status": "error",
+                    "message": "重置密码失败，请稍后重试"
+                }, status=500)
+            else:
+                return render(request, 'registration/reset_password.html', {
+                    'error': '重置密码失败，请稍后重试',
+                    'user_id': user_id,
+                    'token': token
+                })
+
+    # GET请求：显示重置密码表单
+    return render(request, 'registration/reset_password.html', {
+        'user_id': user_id,
+        'token': token,
+        'username': user.username
+    })
+
+
+# ==================== 验证码 API ====================
+def get_client_fingerprint(request):
+    """获取客户端指纹"""
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    accept_language = request.META.get('HTTP_ACCEPT_LANGUAGE', '')
+    accept_encoding = request.META.get('HTTP_ACCEPT_ENCODING', '')
+
+    # 组合多个请求头信息生成指纹
+    fingerprint_data = f"{user_agent}|{accept_language}|{accept_encoding}"
+    fingerprint = hashlib.sha256(fingerprint_data.encode()).hexdigest()[:32]
+
+    return fingerprint
+
+
+@csrf_exempt
+def captcha_api(request):
+    """
+    生成增强验证码图片并返回验证码ID
+    """
+    if request.method != 'GET':
+        return JsonResponse({'status': 'error', 'message': '仅支持GET请求'}, status=405)
+
+    try:
+        from .models import CaptchaSession
+
+        # 调用工具函数生成验证码图片和随机码
+        img, code = check_code()
+
+        # 生成验证码ID
+        captcha_id = str(uuid.uuid4())
+
+        # 获取客户端信息
+        client_ip = get_client_ip(request)
+        fingerprint = get_client_fingerprint(request)
+
+        # 保存验证码到数据库
+        captcha_session = CaptchaSession.objects.create(
+            captcha_id=captcha_id,
+            captcha_text=code,
+            ip_address=client_ip
+        )
+
+        # 使用 BytesIO 将图像写入内存字节流
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        image_data = buffer.getvalue()
+
+        # 将图片转换为base64
+        image_base64 = base64.b64encode(image_data).decode()
+
+        # 返回验证码ID和图片数据
+        return JsonResponse({
+            'status': 'success',
+            'captcha_id': captcha_id,
+            'captcha_image': f"data:image/png;base64,{image_base64}"
+        })
+
+    except Exception as e:
+        logger.error(f"生成验证码失败: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': '验证码生成失败'}, status=500)
+
+
+@csrf_exempt
+def validate_captcha_api(request):
+    """
+    验证图形验证码
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': '仅支持POST请求'}, status=405)
+
+    try:
+        from .models import CaptchaSession
+
+        data = json.loads(request.body)
+        captcha_id = data.get('captcha_id', '')
+        captcha_code = data.get('captcha_code', '')
+
+        if not captcha_id or not captcha_code:
+            return JsonResponse({'status': 'error', 'message': '参数不完整'}, status=400)
+
+        # 获取客户端信息
+        client_ip = get_client_ip(request)
+        fingerprint = get_client_fingerprint(request)
+
+        # 查找验证码会话
+        try:
+            captcha_session = CaptchaSession.objects.get(captcha_id=captcha_id)
+        except CaptchaSession.DoesNotExist:
+            return JsonResponse({'status': 'error', 'message': '验证码无效或已过期'}, status=400)
+
+        # 验证IP地址是否一致
+        if captcha_session.ip_address != client_ip:
+            return JsonResponse({'status': 'error', 'message': '客户端信息不匹配'}, status=400)
+
+        # 检查是否已使用
+        if captcha_session.is_used:
+            return JsonResponse({'status': 'error', 'message': '验证码已被使用'}, status=400)
+
+        # 检查是否过期
+        if captcha_session.is_expired:
+            return JsonResponse({'status': 'error', 'message': '验证码已过期'}, status=400)
+
+        # 验证验证码（不区分大小写）
+        if captcha_session.captcha_text.lower() != captcha_code.lower():
+            return JsonResponse({'status': 'error', 'message': '验证码错误'}, status=400)
+
+        # 标记为已使用
+        captcha_session.is_used = True
+        captcha_session.save(update_fields=['is_used'])
+
+        # 在session中标记验证通过
+        request.session[f'captcha_verified_{captcha_id}'] = True
+        request.session.modified = True
+
+        return JsonResponse({'status': 'success', 'message': '验证码正确'})
+
+    except json.JSONDecodeError:
+        return JsonResponse({'status': 'error', 'message': '请求格式错误'}, status=400)
+    except Exception as e:
+        logger.error(f"验证验证码失败: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': '验证失败'}, status=500)
+
+
+def get_client_ip(request):
+    """获取客户端真实IP地址"""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
+
+def check_rate_limit(email, ip_address, fingerprint, limit=3):
+    """
+    检查频率限制（增强版）
+    - 每个邮箱每天最多3封重置邮件
+    - 每个IP每天最多10次请求
+    - 每个客户端指纹每天最多5次请求
+    - 检测对不存在邮箱的暴力枚举攻击
+    """
+    from .models import PasswordResetAttempt
+    from django.utils import timezone
+    from datetime import timedelta
+
+    now = timezone.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 检查邮箱频率限制
+    email_count = PasswordResetAttempt.objects.filter(
+        email=email,
+        attempted_at__gte=today_start
+    ).count()
+    if email_count >= limit:
+        return False, f'该邮箱今天发送重置密码链接次数已达上限（{limit}次）'
+
+    # 检查IP频率限制
+    ip_count = PasswordResetAttempt.objects.filter(
+        ip_address=ip_address,
+        attempted_at__gte=today_start
+    ).count()
+    if ip_count >= 10:  # IP限制更宽松
+        return False, '该IP今天请求次数过多，请明天再试'
+
+    # 检查客户端指纹限制
+    fingerprint_count = PasswordResetAttempt.objects.filter(
+        fingerprint=fingerprint,
+        attempted_at__gte=today_start
+    ).count()
+    if fingerprint_count >= 5:  # 客户端限制适中
+        return False, '该设备今天请求次数过多，请明天再试'
+
+    # 检测暴力枚举攻击：如果该IP最近有大量失败的邮箱尝试
+    recent_time = now - timedelta(hours=1)  # 最近1小时
+    failed_attempts = PasswordResetAttempt.objects.filter(
+        ip_address=ip_address,
+        is_successful=False,
+        attempted_at__gte=recent_time
+    ).count()
+
+    # 如果1小时内有超过5次失败尝试，可能是枚举攻击
+    if failed_attempts >= 5:
+        unique_emails = PasswordResetAttempt.objects.filter(
+            ip_address=ip_address,
+            is_successful=False,
+            attempted_at__gte=recent_time
+        ).values('email').distinct().count()
+
+        # 如果尝试了多个不同的邮箱，更可能是枚举攻击
+        if unique_emails >= 3:
+            logger.warning(f"检测到可能的邮箱枚举攻击: IP={ip_address}, 1小时内{failed_attempts}次失败尝试, {unique_emails}个不同邮箱")
+            return False, '请求过于频繁，请稍后再试'
+
+    return True, None
+
+
+@csrf_exempt
+def login_api(request):
+    """
+    API端点：处理JSON格式的登录请求
+    支持两因素认证
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': '只支持POST请求'}, status=405)
+
+    try:
+        # 解析JSON数据
+        data = json.loads(request.body)
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+
+        if not username or not password:
+            return JsonResponse({'error': '用户名和密码不能为空'}, status=400)
+
+        # 验证用户名和密码
+        user = authenticate(request, username=username, password=password)
+
+        if user is None:
+            return JsonResponse({'error': '用户名或密码错误'}, status=400)
+
+        # 检查用户是否激活
+        if not user.is_active:
+            return JsonResponse({'error': '账户已被禁用'}, status=400)
+
+        # 检查是否启用了2FA
+        profile = getattr(user, 'profile', None)
+        if profile and profile.two_fa_enabled:
+            # 将用户ID临时存入session，等待2FA验证
+            request.session['pending_2fa_user_id'] = user.id
+            request.session['pending_2fa_method'] = profile.two_fa_method
+
+            # 生成临时token
+            import secrets
+            temporary_token = secrets.token_urlsafe(32)
+            request.session['temporary_2fa_token'] = temporary_token
+
+            # 如果是邮箱验证方式，立即发送验证码
+            if profile.two_fa_method == 'email':
+                # 检查登录2FA邮件的每日发送次数限制
+                ip_address = request.META.get('REMOTE_ADDR')
+                user_identifier = f"user_{user.id}"
+                purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
+                purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+
+                if purpose_daily_attempts >= 3:
+                    return JsonResponse({
+                        'error': '您今天已达到登录验证码发送上限（3次），请明天再试。'
+                    }, status=429)
+
+                email_code = ''.join(random.choices(string.digits, k=6))
+                request.session['2fa_email_code'] = email_code
+                request.session['2fa_email_timestamp'] = time.time()
+
+                try:
+                    send_mail(
+                        '登录验证码',
+                        f'您的登录验证码是：{email_code}。5分钟内有效。',
+                        settings.DEFAULT_FROM_EMAIL,
+                        [user.email],
+                        fail_silently=False,
+                    )
+
+                    # 更新计数
+                    if purpose_daily_attempts == 0:
+                        import datetime
+                        now = timezone.now()
+                        tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+                        seconds_until_tomorrow = int((tomorrow - now).total_seconds())
+                        cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
+                    else:
+                        cache.set(purpose_daily_key, purpose_daily_attempts + 1, timeout=86400)
+
+                except Exception as e:
+                    logger.error(f"发送2FA邮件失败: {e}")
+                    return JsonResponse({'error': '验证码发送失败，请稍后重试'}, status=500)
+
+            return JsonResponse({
+                'require_2fa': True,
+                'two_fa_method': profile.two_fa_method,
+                'temporary_token': temporary_token
+            })
+
+        # 没有2FA，直接登录
+        login(request, user)
+
+        return JsonResponse({
+            'success': True,
+            'message': '登录成功',
+            'require_2fa': False
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Exception as e:
+        logger.error(f"登录API错误: {e}")
+        return JsonResponse({'error': '服务器内部错误'}, status=500)
 

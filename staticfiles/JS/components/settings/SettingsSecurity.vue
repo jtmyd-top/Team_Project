@@ -5,8 +5,8 @@
       <h3 class="form-section-title">
         <i class="fas fa-key"></i> 修改密码
       </h3>
-      <el-button type="primary" @click="showPasswordDialog = true">
-        修改密码
+      <el-button type="primary" @click="showPasswordDialog = true" size="large">
+        <i class="fas fa-key"></i> 修改密码
       </el-button>
     </div>
 
@@ -66,7 +66,11 @@
             v-model="passwordForm.current"
             type="password"
             placeholder="请输入当前密码"
-            show-password>
+            show-password
+            maxlength="50">
+            <template #prefix>
+              <i class="fas fa-lock"></i>
+            </template>
           </el-input>
         </el-form-item>
 
@@ -75,8 +79,15 @@
             v-model="passwordForm.new"
             type="password"
             placeholder="至少8位字符"
-            show-password>
+            show-password
+            maxlength="50">
+            <template #prefix>
+              <i class="fas fa-key"></i>
+            </template>
           </el-input>
+          <div class="form-hint" style="color: #909399;">
+            密码至少8位，建议包含字母、数字和特殊字符
+          </div>
         </el-form-item>
 
         <el-form-item label="确认新密码">
@@ -84,7 +95,11 @@
             v-model="passwordForm.confirm"
             type="password"
             placeholder="再次输入新密码"
-            show-password>
+            show-password
+            maxlength="50">
+            <template #prefix>
+              <i class="fas fa-key"></i>
+            </template>
           </el-input>
         </el-form-item>
 
@@ -102,21 +117,26 @@
           </el-alert>
 
           <el-form-item :label="passwordForm.useBackup ? '备用验证码' : '验证码'">
-            <el-input
-              v-model="passwordForm.twoFaCode"
-              :placeholder="passwordForm.useBackup ? '请输入8位备用码' : '请输入6位验证码'"
-              maxlength="8">
-            </el-input>
+            <div style="display: flex; gap: 12px;">
+              <el-input
+                v-model="passwordForm.twoFaCode"
+                :placeholder="passwordForm.useBackup ? '请输入8位备用码' : '请输入6位验证码'"
+                :maxlength="passwordForm.useBackup ? 8 : 6">
+              </el-input>
+              <el-button
+                v-if="passwordForm.twoFaMethod === 'email' && !passwordForm.useBackup"
+                :disabled="passwordCountdown.counting"
+                :loading="passwordForm.twoFaCodeSending"
+                @click="sendPassword2faCode"
+                :type="passwordCountdown.counting ? 'info' : 'primary'">
+                {{ passwordCountdown.counting ? `${passwordCountdown.seconds}秒` : '重发' }}
+              </el-button>
+            </div>
+            <div v-if="passwordCountdown.counting && passwordForm.twoFaMethod === 'email'" 
+                 class="form-hint" style="color: #E6A23C; margin-top: 4px;">
+              <i class="fas fa-clock"></i> 请等待 {{ passwordCountdown.seconds }} 秒后重新发送
+            </div>
           </el-form-item>
-
-          <el-button
-            v-if="passwordForm.twoFaMethod === 'email'"
-            type="text"
-            size="small"
-            :loading="passwordForm.twoFaCodeSending"
-            @click="sendPassword2faCode">
-            重新发送验证码
-          </el-button>
 
           <el-button
             type="text"
@@ -129,7 +149,10 @@
 
       <template #footer>
         <el-button @click="showPasswordDialog = false">取消</el-button>
-        <el-button type="primary" @click="changePassword">
+        <el-button 
+          type="primary" 
+          @click="changePassword"
+          :loading="passwordForm.submitting">
           确认修改
         </el-button>
       </template>
@@ -222,7 +245,6 @@
         </div>
       </div>
 
-      <!-- Footer必须是el-dialog的直接子元素 -->
       <template #footer>
         <div v-if="!twoFaSetup.step">
           <el-button @click="cancel2faSetup">取消</el-button>
@@ -327,9 +349,13 @@
 import { ref, reactive, onMounted } from 'vue';
 import { useUserStore } from '../../stores/user.js';
 import { apiService } from '../../services/apiService.js';
+import { useCountdown } from '../../utils/request.js';
 import { ElMessage } from 'element-plus';
 
 const userStore = useUserStore();
+
+// 添加密码修改验证码倒计时
+const passwordCountdown = useCountdown();
 
 // 添加调试日志
 onMounted(() => {
@@ -356,6 +382,7 @@ const passwordForm = reactive({
   twoFaCode: '',
   useBackup: false,
   twoFaCodeSending: false,
+  submitting: false,
 });
 
 // 2FA设置
@@ -383,6 +410,9 @@ const backupCodes = reactive({
  * 修改密码
  */
 const changePassword = async () => {
+  // 防止重复提交
+  if (passwordForm.submitting) return;
+  
   if (!passwordForm.current) return ElMessage.warning("请输入当前密码");
   if (!passwordForm.new) return ElMessage.warning("请输入新密码");
   if (!passwordForm.confirm) return ElMessage.warning("请确认新密码");
@@ -398,6 +428,7 @@ const changePassword = async () => {
     return ElMessage.warning("请输入两因素验证码");
   }
 
+  passwordForm.submitting = true;
   try {
     const requestBody = {
       current_password: passwordForm.current,
@@ -406,7 +437,7 @@ const changePassword = async () => {
     };
 
     if (passwordForm.show2FA) {
-      requestBody.two_fa_code = passwordForm.twoFaCode;
+      requestBody.two_fa_code = passwordForm.twoFaCode.trim();
       requestBody.use_backup = passwordForm.useBackup;
     }
 
@@ -416,8 +447,11 @@ const changePassword = async () => {
       passwordForm.show2FA = true;
       passwordForm.twoFaMethod = data.method;
 
+      // 对于邮箱验证方式，后端已经发送了验证码，无需再次发送
+      // 只需要启动倒计时即可
       if (data.method === 'email') {
-        await sendPassword2faCode();
+        ElMessage.info("验证码已发送到您的邮箱，请查收");
+        passwordCountdown.start(90);
       } else {
         ElMessage.info("请输入验证器应用中的验证码");
       }
@@ -429,7 +463,10 @@ const changePassword = async () => {
       ElMessage.error(data.message || "密码修改失败");
     }
   } catch (error) {
+    console.error('修改密码错误:', error);
     ElMessage.error(error.message || "网络错误");
+  } finally {
+    passwordForm.submitting = false;
   }
 };
 
@@ -444,17 +481,23 @@ const resetPasswordForm = () => {
   passwordForm.twoFaCode = '';
   passwordForm.twoFaMethod = '';
   passwordForm.useBackup = false;
+  passwordForm.submitting = false;
 };
 
 /**
  * 发送密码修改2FA验证码
  */
 const sendPassword2faCode = async () => {
+  if (passwordCountdown.counting) {
+    return ElMessage.warning(`请等待 ${passwordCountdown.seconds} 秒后重试`);
+  }
+  
   passwordForm.twoFaCodeSending = true;
   try {
     const data = await apiService.sendOperation2FA();
     if (data.status === "success" && data.requires_2fa) {
       ElMessage.success("验证码已发送至您的邮箱");
+      passwordCountdown.start(90);
     }
   } catch (error) {
     ElMessage.error(error.message || "发送验证码失败");
@@ -469,9 +512,10 @@ const sendPassword2faCode = async () => {
 const togglePasswordBackupCode = () => {
   passwordForm.useBackup = !passwordForm.useBackup;
   passwordForm.twoFaCode = '';
-  ElMessage.info(passwordForm.useBackup 
-    ? "已切换到备用验证码模式，请输入8位备用码" 
-    : "已切换回验证器模式，请输入6位验证码");
+  const message = passwordForm.useBackup
+    ? "已切换到备用验证码模式"
+    : `已切换回${passwordForm.twoFaMethod === 'totp' ? '验证器' : '邮箱'}验证模式`;
+  ElMessage.info(message);
 };
 
 /**
@@ -488,13 +532,9 @@ const start2faSetup = async (method) => {
         twoFaSetup.qrCode = data.qr_code;
         twoFaSetup.secret = data.secret;
       } else {
-        if (data.two_fa_enabled === true) {
-          userStore.update2FAStatus(true, 'email');
-          show2faSetupDialog.value = false;
-          ElMessage.success("邮箱两因素认证已启用");
-        } else {
-          ElMessage.error("启用邮箱两因素认证失败，请重试");
-        }
+        twoFaSetup.step = 'backup-codes';
+        twoFaSetup.backupCodes = data.backup_codes || [];
+        ElMessage.success("邮箱两因素认证已启用，请务必保存您的备用验证码！");
       }
     } else {
       ElMessage.error(data.message || "启用失败");
@@ -656,6 +696,7 @@ const fallbackCopyText = (text) => {
 .form-section {
   padding: 24px;
   border-radius: 8px;
+  transition: all 0.3s;
 }
 
 .form-section:nth-of-type(odd) {
@@ -673,6 +714,11 @@ const fallbackCopyText = (text) => {
   margin-bottom: 16px;
 }
 
+.form-section-title i {
+  margin-right: 8px;
+  color: #409eff;
+}
+
 .security-status {
   max-width: 600px;
 }
@@ -681,6 +727,11 @@ const fallbackCopyText = (text) => {
   display: flex;
   gap: 12px;
   margin-top: 16px;
+}
+
+.form-hint {
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .twofa-method-grid {
@@ -701,6 +752,7 @@ const fallbackCopyText = (text) => {
 .twofa-method-card:hover {
   border-color: #409eff;
   box-shadow: 0 2px 12px rgba(64, 158, 255, 0.2);
+  transform: translateY(-2px);
 }
 
 .twofa-method-card i {
@@ -760,5 +812,72 @@ const fallbackCopyText = (text) => {
   font-size: 14px;
   font-weight: 600;
   color: #303133;
+}
+
+/* 美化输入框样式 */
+:deep(.el-input__inner) {
+  border-radius: 6px;
+}
+
+:deep(.el-input__wrapper) {
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+  transition: all 0.3s;
+}
+
+:deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #c0c4cc inset;
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px #409eff inset;
+}
+
+/* 美化按钮样式 */
+:deep(.el-button) {
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+:deep(.el-button:hover:not(.is-disabled)) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 美化对话框样式 */
+:deep(.el-dialog) {
+  border-radius: 12px;
+}
+
+:deep(.el-dialog__header) {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 20px;
+}
+
+:deep(.el-dialog__title) {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+:deep(.el-dialog__body) {
+  padding: 20px;
+}
+
+/* 美化表单样式 */
+:deep(.el-form-item__label) {
+  font-weight: 500;
+  color: #606266;
+}
+
+/* 图标样式 */
+:deep(.el-input__prefix) {
+  display: flex;
+  align-items: center;
+}
+
+:deep(.el-input__prefix i) {
+  color: #909399;
 }
 </style>

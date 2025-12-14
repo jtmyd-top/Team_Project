@@ -212,7 +212,7 @@ createApp({
         },
 
         startCountdown() {
-            this.countdown = 60;
+            this.countdown = 120;
             const timer = setInterval(() => {
                 if (this.countdown > 0) this.countdown--;
                 else clearInterval(timer);

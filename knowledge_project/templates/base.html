@@ -11,7 +11,10 @@
     <!-- FontAwesome Web Fonts模式 - 只加载CSS,不加载JS -->
     <link href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}" rel="stylesheet">
 
-    <link href="{% static 'css/base.css' %}" rel="stylesheet">
+    <link href="{% static 'css/modern-base.css' %}" rel="stylesheet">
+  <link href="{% static 'css/modern-animations.css' %}" rel="stylesheet">
+  <link href="{% static 'css/layout-fix.css' %}" rel="stylesheet">
+    <link href="{% static 'css/modern-inputs.css' %}" rel="stylesheet">
 <!--    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>-->
     <script src="{%static 'JS/vue/vue.global.js'%}"></script>
     <!-- Vue 3 -->
@@ -26,16 +29,34 @@
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
 
     <!-- API服务 - 为主题管理器提供API调用 -->
-    <script src="{% static 'JS/utils/request.js' %}"></script>
-    <script src="{% static 'JS/services/apiService.js' %}"></script>
+    <script type="module" src="{% static 'JS/utils/request.js' %}"></script>
+    <script type="module" src="{% static 'JS/services/apiService.js' %}"></script>
 
     <!-- 主题管理器 - 尽早加载以避免闪烁 -->
-    <script src="{% static 'JS/theme-manager.js' %}"></script>
+    <script type="module" src="{% static 'JS/dist/theme-manager.js' %}"></script>
+
+    <!-- 动画和交互效果 -->
+    <script src="{% static 'js/particles.js' %}"></script>
+    <script src="{% static 'js/scroll-animations.js' %}"></script>
 
     {% block head_extra %}{% endblock %}
 
 </head>
-<body>
+<body class="animate-fade-in">
+    <!-- 页面加载器 -->
+    <div class="page-loader" id="page-loader">
+        <div class="loader-content">
+            <div class="loader-spinner animate-spin"></div>
+            <div class="loader-text animate-pulse">正在加载...</div>
+        </div>
+    </div>
+
+    <!-- 滚动进度条 -->
+    <div class="scroll-progress-bar"></div>
+
+    <!-- 粒子背景 -->
+    <div class="particles"></div>
+
     <header>
           <nav>
               <div class="nav-left">
@@ -94,19 +115,55 @@ document.addEventListener("DOMContentLoaded", function() {
   const dropdown  = document.getElementById("userDropdown");   // 下拉卡片
   let hideTimer   = null;
 
+  // 调试函数
+  function debugLog(message) {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      console.log('User Menu Debug:', message);
+    }
+  }
+
   function openMenu() {
     clearTimeout(hideTimer);
+    debugLog('Opening menu');
+
+    // 强制添加显示类
     dropdown.classList.add("show");
+    dropdown.style.opacity = '1';
+    dropdown.style.visibility = 'visible';
+    dropdown.style.transform = 'translateY(0)';
+
     trigger.setAttribute("aria-expanded", "true");
+
+    // 强制重新计算样式
+    dropdown.offsetHeight;
   }
+
   function closeMenu(immediate=false) {
+    debugLog('Closing menu, immediate:', immediate);
+
     const doClose = () => {
       dropdown.classList.remove("show");
+      dropdown.style.opacity = '0';
+      dropdown.style.visibility = 'hidden';
+      dropdown.style.transform = 'translateY(-10px)';
       trigger.setAttribute("aria-expanded", "false");
     };
-    if (immediate) { clearTimeout(hideTimer); doClose(); }
-    else { hideTimer = setTimeout(doClose, 180); } // 缓关 180ms
+
+    if (immediate) {
+      clearTimeout(hideTimer);
+      doClose();
+    } else {
+      hideTimer = setTimeout(doClose, 180);
+    }
   }
+
+  // 确保元素存在
+  if (!userMenu || !trigger || !dropdown) {
+    debugLog('User menu elements not found!');
+    return;
+  }
+
+  debugLog('User menu elements found, setting up events');
 
   // 悬浮整块容器即可保持展开（从触发器移到卡片不会关）
   userMenu.addEventListener("mouseenter", openMenu);
@@ -115,17 +172,53 @@ document.addEventListener("DOMContentLoaded", function() {
   // 点击触发开关（支持触控）
   trigger.addEventListener("click", function(e) {
     e.stopPropagation();
-    if (dropdown.classList.contains("show")) closeMenu(true);
-    else openMenu();
+    debugLog('Trigger clicked, current state:', dropdown.classList.contains("show"));
+
+    if (dropdown.classList.contains("show") ||
+        dropdown.style.visibility === 'visible') {
+      closeMenu(true);
+    } else {
+      openMenu();
+    }
   });
 
   // 点击页面其他区域立即关闭
   document.addEventListener("click", function(e) {
-    if (!userMenu.contains(e.target)) closeMenu(true);
+    if (!userMenu.contains(e.target)) {
+      closeMenu(true);
+    }
   });
 
   // 防止在卡片内点按钮/表单造成冒泡误关
-  dropdown.addEventListener("click", function(e) { e.stopPropagation(); });
+  dropdown.addEventListener("click", function(e) {
+    e.stopPropagation();
+  });
+
+  // 防止鼠标事件冲突
+  userMenu.addEventListener("click", function(e) {
+    if (e.target === trigger) {
+      e.stopPropagation();
+    }
+  });
+
+  debugLog('User menu setup complete');
+
+  // 备用方案：5秒后检查菜单是否正常工作
+  setTimeout(function() {
+    if (!dropdown) return;
+
+    // 检查下拉菜单是否可见
+    const isVisible = dropdown.classList.contains("show") ||
+                     dropdown.style.visibility === 'visible';
+
+    debugLog('Menu visibility check after 5s:', isVisible);
+
+    // 如果菜单被其他样式覆盖，强制重置
+    if (window.getComputedStyle(dropdown).zIndex < 10000) {
+      dropdown.style.zIndex = '99999';
+      debugLog('Force reset z-index');
+    }
+  }, 5000);
 });
 </script>
 
@@ -141,6 +234,45 @@ document.addEventListener("DOMContentLoaded", function() {
 
     <!-- 4. 为子模板预留一个可以插入自己脚本的位置 -->
     {% block scripts %} {% endblock %}
+
+    <!-- 确保页面加载器隐藏的脚本 -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 立即隐藏加载器
+            const pageLoader = document.getElementById('page-loader');
+            if (pageLoader) {
+                pageLoader.style.display = 'none';
+                // 或者使用动画隐藏
+                // pageLoader.classList.add('hide');
+                // setTimeout(() => {
+                //     if (pageLoader.parentNode) {
+                //         pageLoader.parentNode.removeChild(pageLoader);
+                //     }
+                // }, 500);
+            }
+
+            // 备用方案：确保在5秒后移除加载器
+            setTimeout(function() {
+                const loader = document.getElementById('page-loader');
+                if (loader) {
+                    loader.remove();
+                }
+            }, 5000);
+        });
+
+        // 确保在window加载事件中也处理
+        window.addEventListener('load', function() {
+            const pageLoader = document.getElementById('page-loader');
+            if (pageLoader) {
+                pageLoader.classList.add('hide');
+                setTimeout(() => {
+                    if (pageLoader.parentNode) {
+                        pageLoader.parentNode.removeChild(pageLoader);
+                    }
+                }, 500);
+            }
+        });
+    </script>
 
     </main>
 

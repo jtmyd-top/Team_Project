@@ -1,154 +1,443 @@
-    <!-- knowledge_project/templates/signup.html -->
-    {% extends 'base.html' %}
-    {% load static %}
-    {% block title %}注册新用户{% endblock %}
-    {% block content %}
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="{%static 'css/singup.css'%}">
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}注册新用户{% endblock %}
+{% block head_extra %}
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
+<link rel="stylesheet" href="{% static 'css/glassmorphism.css' %}">
+<link rel="stylesheet" href="{% static 'css/modern-inputs.css' %}">
+<!-- 强制刷新 api-service.js -->
+<script type="module" src="{% static 'JS/services/apiService.js' %}?v={{ timestamp|default:'20241214' }}"></script>
+{% endblock %}
 
-    <div id="signup-app">
-        <h2>[[ pageTitle ]]</h2>
-
-        <!-- 【任务三】后端错误将显示在这里 -->
-        <div v-if="serverErrors.length > 0" class="server-errors">
-            <ul>
-                <li v-for="error in serverErrors">[[ error ]]</li>
-            </ul>
-        </div>
-        <div v-if="isPromptVisible" class="modal-overlay" @click.self="closePrompt">
-            <div class="modal-content" :style="{ borderLeft: `5px solid ${promptType === 'success' ? '#28a745' : '#d9534f'}` }">
-                <h3>
-                    <i :class="promptType === 'success' ? 'fas fa-check-circle' : 'fas fa-times-circle'"
-                       :style="{ color: promptType === 'success' ? '#28a745' : '#d9534f' }">
-                    </i>
-                    [[ promptTitle ]]
-                </h3>
-                <p class="modal-description">[[ promptMessage ]]</p>
-                <div class="modal-actions">
-                    <button type="button" class="btn-confirm" @click="closePrompt">确定</button>
-                </div>
-            </div>
-        </div>
-        <!-- 关键改动：@submit.prevent 将提交事件交给Vue处理 -->
-        <form id="signup-form" method="post" @submit.prevent="submitForm">
-            {% csrf_token %}
-
-            <!-- 用户名 -->
-            <div class="form-group">
-                 <!-- 关键改动：@blur现在调用 checkUsernameOnServer -->
-                <input type="text" name="username" id="id_username" class="form-input" placeholder=" "
-                       v-model.trim="username" @blur="checkUsernameOnServer" required value="{{ form.username.value|default_if_none:'' }}">
-                <label for="id_username" class="floating-label">用户名</label>
-                <i class="fa-regular fa-user input-icon"></i>
-                <ul class="validation-rules">
-                    <li v-for="rule in usernameRules" :class="{ valid: rule.valid, invalid: !rule.valid }">[[ rule.text ]]</li>
-                </ul>
-                <p v-if="usernameError" class="field-error">[[ usernameError ]]</p>
-            </div>
-
-            <!-- 密码 -->
-            <div class="form-group">
-    <input type="password" name="password1" class="form-input" placeholder=" "
-           v-model="password" @blur="checkFinalPassword" required>
-    <label class="floating-label">密码</label>
-    <i class="fa-solid fa-lock input-icon"></i>
-    <i class="fas fa-eye input-passwd" id="toggle-password" ></i>
-    <ul class="validation-rules">
-        <li v-for="rule in passwordRules" :class="{ valid: rule.valid, invalid: !rule.valid }">[[ rule.text ]]</li>
-    </ul>
-    <p v-if="passwordError" class="field-error">[[ passwordError ]]</p>
+{% block content %}
+<div class="glassmorphism-container">
+  <!-- 主要内容区域 - 移除重复的导航栏 -->
+  <div class="login-content">
+    <div id="signup-app" class="glass-card glass-card-medium rotate-in">
+      <!-- Vue应用将在这里渲染 -->
+    </div>
+  </div>
 </div>
 
-<!-- 确认密码 -->
-<div class="form-group">
-    <input type="password" name="password2" class="form-input" placeholder=" "
-           v-model="password2" @blur="checkFinalPasswordMatch" required>
-    <label class="floating-label">确认密码</label>
-    <i class="fa-solid fa-check-double input-icon"></i>
-    <i class="fas fa-eye input-passwd" id="toggle-password" ></i>
-    <p v-if="password2Error" class="field-error">[[ password2Error ]]</p> <!-- 修复了变量名 -->
-    <p v-if="formErrors.password2" class="field-error">[[ formErrors.password2[0] ]]</p>
-</div>
+<style>
+.login-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  min-height: 100vh;
+  /* 隔离背景动画影响 */
+  position: relative;
+  z-index: 1;
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
 
-            <!-- 新增: 邮箱输入框 -->
-        <div class="form-group">
-            <input type="email" name="email" id="id_email" class="form-input" placeholder=" " v-model.trim="email" required>
-            <label for="id_email" class="floating-label">邮箱</label>
-            <i class="fa-regular fa-envelope input-icon"></i>
-            <p v-if="formErrors.email" class="field-error">[[ formErrors.email[0].message ]]</p>
-        </div>
+/* 调整Vue应用内部样式以适配毛玻璃效果 */
+#signup-app {
+  width: 100%;
+  max-width: 450px;
+  padding: 50px 40px;
+  text-align: center;
+}
 
-        <!-- 新增: 邮箱验证码输入框 -->
-        <div class="captcha-group">
-            <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
-                <input type="text" name="emailCode" id="id_email_code" class="form-input" placeholder=" " v-model.trim="emailCode" required>
-                <label for="id_email_code" class="floating-label">邮箱验证码</label>
-                <i class="fa-solid fa-shield-halved input-icon"></i>
-            </div>
-            <!-- 修改：此按钮现在会打开模态框 -->
-            <button type="button" @click="openCaptchaModal" :disabled="isCountdownActive" class="submit-btn" style="width: auto; margin-top:0; white-space: nowrap;">
-                [[ getCodeButtonText ]]
-            </button>
-        </div>
-        <!-- 错误信息显示的位置调整到了整个组的下方，并且居中显示 -->
-        <p v-if="formErrors.emailCode" class="field-error" style="text-align:center; width: 100%;">
-            [[ formErrors.emailCode[0].message ]]
-        </p>
-<!--            &lt;!&ndash; 验证码 &ndash;&gt;-->
-<!--            <div class="captcha-group">-->
-<!--                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">-->
-<!--                    <input type="text" name="captcha" id="id_captcha" class="form-input" placeholder=" " required>-->
-<!--                    <label for="id_captcha" class="floating-label">验证码</label>-->
-<!--                    <i class="fa-solid fa-shield-halved input-icon"></i>-->
-<!--                </div>-->
-<!--                 &lt;!&ndash; 关键改动：@click 将刷新事件交给Vue处理 &ndash;&gt;-->
-<!--                <img id="captcha-image"-->
-<!--                     :src="captchaUrl"-->
-<!--                     @click="refreshCaptcha"-->
-<!--                     alt="点击刷新验证码" title="点击刷新验证码" style="cursor: pointer; border-radius: 5px; height: 40px;">-->
-<!--            </div>-->
+/* 毛玻璃标题样式 */
+#signup-app .glass-title {
+  margin-bottom: 20px;
+}
 
-            <button type="submit" class="submit-btn">立即注册</button>
-        </form>
-        <div class="login-link">
-            <p><a href="{% url 'login' %}">已有账户？点此登录</a></p>
-        </div>
-          <!-- 新增：图片验证码模态框 -->
-    <!-- 新增：图片验证码模态框 (美化版) -->
-        <div v-if="isModalVisible" class="modal-overlay" @click.self="isModalVisible = false">
-            <div class="modal-content">
-                <h3><i class="fas fa-shield-alt"></i> 安全验证</h3>
-                <p class="modal-description">为了您的账户安全，请输入下图中的字符。</p>
+#signup-app .glass-subtitle {
+  margin-bottom: 40px;
+}
 
-                <div class="captcha-group">
-                    <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
-                        <input type="text" class="form-input" placeholder=" " v-model.trim="imageCaptchaInput" @keyup.enter="verifyImageAndSendEmail">
-                        <label class="floating-label">图片验证码</label>
-                        <i class="fas fa-image input-icon"></i>
-                    </div>
-                    <img :src="captchaUrl" @click="refreshCaptcha" alt="点击刷新" title="点击刷新" class="captcha-image">
-                </div>
+/* 表单元素现代化样式 */
+#signup-app .el-form-item {
+  margin-bottom: 28px;
+}
 
-                <p v-if="modalError" class="modal-error">[[ modalError ]]</p>
+/* ==================== 邮箱验证码布局优化 ==================== */
+#signup-app .email-code-container {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100% !important;
+}
 
-                <div class="modal-actions">
-                    <button type="button" class="btn-cancel" @click="isModalVisible = false">取消</button>
-                    <!-- ↓↓↓ 修改这个按钮 ↓↓↓ -->
-                    <button type="button" class="btn-confirm" @click="verifyImageAndSendEmail" :disabled="isSending">
-                        <!-- 根据 isSending 状态显示不同的文本 -->
-                        <span v-if="isSending">发送中...</span>
-                        <span v-else>验证并发送</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-</div>
-    <script>
-        var captcha_image="{% url 'captcha_image' %}"
-        var check_username='{% url 'check_username' %}'
-        var signup="{% url 'signup' %}"
-        var send_email_code="{% url 'send_email_code' %}"
-    </script>
-    <script  src="{% static 'JS/singup.js' %}"></script>
+#signup-app .email-code-input {
+  width: 78% !important;
+  flex: none !important;
+}
 
-    {% endblock %}
+#signup-app .email-code-input .el-input__wrapper {
+  width: 100% !important;
+}
+
+#signup-app .email-code-button {
+  width: 22% !important;
+  flex: none !important;
+  min-width: 0 !important;
+  height: 52px !important;
+  font-size: 14px !important;
+  padding: 0 12px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* 邮箱验证码响应式布局 */
+@media (max-width: 768px) {
+  #signup-app .email-code-input {
+    width: 65% !important;
+  }
+
+  #signup-app .email-code-button {
+    width: 35% !important;
+    font-size: 13px !important;
+    padding: 0 8px !important;
+    height: 48px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #signup-app .email-code-container {
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+  }
+
+  #signup-app .email-code-input {
+    width: 100% !important;
+  }
+
+  #signup-app .email-code-button {
+    width: 100% !important;
+    height: 48px !important;
+    font-size: 14px !important;
+    padding: 0 16px !important;
+  }
+}
+
+/* 使用现代化输入框样式，覆盖毛玻璃效果的默认样式 */
+#signup-app .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.18) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 16px !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  padding: 0 !important;
+}
+
+#signup-app .el-input__wrapper:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  transform: translateY(-2px) !important;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+}
+
+#signup-app .el-input__wrapper.is-focus {
+  background: rgba(255, 255, 255, 0.28) !important;
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  transform: translateY(-3px) !important;
+  box-shadow:
+    0 0 0 4px rgba(59, 130, 246, 0.15),
+    0 16px 48px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+#signup-app .el-input__inner {
+  color: #1f2937 !important;
+  font-weight: 500 !important;
+  font-size: 15px !important;
+  padding: 16px 22px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: #1f2937 !important;
+  caret-color: #3b82f6 !important;
+  height: auto !important;
+  line-height: 1.5 !important;
+}
+
+#signup-app .el-input__inner::placeholder {
+  color: rgba(31, 41, 55, 0.65) !important;
+  font-weight: 400 !important;
+  opacity: 0.9 !important;
+}
+
+/* 前缀图标样式 */
+#signup-app .el-input__prefix {
+  color: rgba(31, 41, 55, 0.6) !important;
+  margin-left: 2px !important;
+}
+
+#signup-app .el-input__prefix i {
+  font-size: 16px !important;
+}
+
+/* 后缀图标样式（密码可见性按钮） */
+#signup-app .el-input__suffix {
+  color: rgba(31, 41, 55, 0.6) !important;
+  margin-right: 2px !important;
+}
+
+#signup-app .el-input__suffix i {
+  font-size: 16px !important;
+  cursor: pointer !important;
+  transition: color 0.2s ease !important;
+}
+
+#signup-app .el-input__suffix i:hover {
+  color: rgba(31, 41, 55, 0.8) !important;
+}
+
+/* 默认隐藏验证规则提示 - 不占据空间 */
+#signup-app .validation-rules {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  pointer-events: none;
+  margin: 0;
+  font-size: 12px;
+  text-align: left;
+}
+
+/* 聚焦时显示验证规则提示 - 展开空间 */
+#signup-app .validation-rules.show {
+  max-height: 200px;
+  opacity: 1;
+  pointer-events: auto;
+  margin-top: 8px;
+}
+
+/* 验证规则项样式 */
+#signup-app .validation-rule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+}
+
+#signup-app .validation-rule i {
+  font-size: 10px;
+}
+
+#signup-app .validation-rule.rule-valid {
+  color: #10b981;
+}
+
+#signup-app .validation-rule.rule-invalid {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 密码强度指示器 - 默认不占据空间 */
+#signup-app .password-strength {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  margin: 0;
+  font-size: 12px;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0 8px;
+  border-radius: 6px;
+  backdrop-filter: blur(5px);
+}
+
+/* 密码强度条 */
+#signup-app .strength-bars {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease 0.1s;
+}
+
+/* 显示时才显示强度条 */
+#signup-app .password-strength:not([style*="max-height: 0"]) .strength-bars {
+  opacity: 1;
+}
+
+#signup-app .strength-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  transition: all 0.3s ease;
+}
+
+#signup-app .strength-bar.strength-weak {
+  background: #ef4444;
+}
+
+#signup-app .strength-bar.strength-medium {
+  background: #f59e0b;
+}
+
+#signup-app .strength-bar.strength-strong {
+  background: #10b981;
+}
+
+#signup-app .strength-bar.strength-very-strong {
+  background: #059669;
+}
+
+/* 密码强度文字 */
+#signup-app .strength-text {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+#signup-app .strength-text.strength-0 {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#signup-app .strength-text.strength-1 {
+  color: #ef4444;
+}
+
+#signup-app .strength-text.strength-2 {
+  color: #f59e0b;
+}
+
+#signup-app .strength-text.strength-3 {
+  color: #10b981;
+}
+
+#signup-app .strength-text.strength-4 {
+  color: #059669;
+}
+
+/* 输入框聚焦时显示密码强度 - 展开空间 */
+#signup-app .el-form-item:focus-within .password-strength {
+  max-height: 100px;
+  opacity: 1;
+  margin-top: 8px;
+  padding: 8px;
+}
+
+#signup-app .el-button {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 12px !important;
+  color: white !important;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+#signup-app .el-button--primary {
+  background: linear-gradient(135deg, rgba(120, 119, 198, 0.8), rgba(255, 119, 198, 0.8)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+#signup-app .el-button:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3) !important;
+}
+
+#signup-app .el-button--primary:hover {
+  background: linear-gradient(135deg, rgba(120, 119, 198, 1), rgba(255, 119, 198, 1)) !important;
+}
+
+/* 链接样式 */
+#signup-app a {
+  color: rgba(255, 255, 255, 0.8) !important;
+  text-decoration: none;
+  transition: all 0.3s ease;
+}
+
+#signup-app a:hover {
+  color: white !important;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+/* 错误信息样式 */
+#signup-app .el-form-item__error {
+  color: #ff6b6b !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* 优雅的入场旋转动画 */
+.rotate-in {
+  animation: rotateInScale 1.2s var(--ease-out-back) forwards;
+  transform-origin: center center;
+  /* 强制隔离父容器动画 */
+  isolation: isolate;
+  will-change: transform, opacity;
+  /* 确保不被父容器动画影响 */
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+@keyframes rotateInScale {
+  0% {
+    opacity: 0;
+    transform: rotate(-15deg) scale(0.8);
+  }
+  50% {
+    transform: rotate(8deg) scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+/* 确保动画结束后保持正确方向 */
+.rotate-in.animation-complete {
+  transform: rotate(0deg) scale(1) !important;
+  animation: none !important;
+  /* 完全锁定，防止任何后续动画干扰 */
+  will-change: auto;
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+  #signup-app {
+    padding: 30px 25px;
+    margin: 20px;
+  }
+}
+</style>
+
+<!-- 加载构建后的Vue应用 -->
+<script type="module" src="{% static 'JS/dist/signup.js' %}?v={{ timestamp|default:'20241214' }}"></script>
+
+<script>
+// 确保动画结束后保持正确的方向
+document.addEventListener('DOMContentLoaded', function() {
+  const signupApp = document.getElementById('signupApp');
+  if (signupApp) {
+    // 监听动画结束事件
+    signupApp.addEventListener('animationend', function() {
+      signupApp.classList.add('animation-complete');
+    });
+
+    // 备用：如果动画事件没有触发，1.5秒后也锁定状态
+    setTimeout(function() {
+      signupApp.classList.add('animation-complete');
+    }, 1500);
+  }
+
+  // Vue应用已经通过CSS和Vue组件逻辑处理了所有交互
+  // 这里不需要额外的JavaScript代码
+});
+</script>
+{% endblock %}

@@ -9,8 +9,7 @@ import SettingsApp from '@components/settings/SettingsApp.vue';
 // 导入用户状态管理
 import { useUserStore } from '@stores/user.js';
 
-// 导入 API 服务用于获取主题设置
-import { apiService } from '@services/apiService.js';
+// API 服务已经挂载到 window 对象上
 
 // 全局主题应用函数
 const applyGlobalTheme = (themeSettings) => {

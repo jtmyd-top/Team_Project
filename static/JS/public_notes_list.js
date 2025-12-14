@@ -116,6 +116,13 @@ createApp({
         };
         // --- 5. 生命周期钩子 ---
         onMounted(() => {
+            // 初始化主题管理器
+            if (window.themeManager) {
+                window.themeManager.initialize().catch(error => {
+                    console.error('主题初始化失败:', error);
+                });
+            }
+
             fetchData();
             window.addEventListener('resize', calculateNotesPerPage); // 监听窗口大小变化
         });

@@ -144,21 +144,26 @@ const saveTheme = async () => {
 };
 
 const applyTheme = () => {
-  // 应用主题到页面
-  document.documentElement.setAttribute('data-theme', theme.mode);
-  document.documentElement.style.setProperty('--primary-color', theme.primary_color);
-  document.documentElement.style.setProperty('--font-size-base', theme.font_size + 'px');
-  
-  if (theme.compact_mode) {
-    document.body.classList.add('compact-mode');
+  // 使用全局主题管理器应用主题
+  if (window.themeManager) {
+    window.themeManager.applyTheme(theme);
   } else {
-    document.body.classList.remove('compact-mode');
-  }
-  
-  if (!theme.animations) {
-    document.body.classList.add('no-animations');
-  } else {
-    document.body.classList.remove('no-animations');
+    // 回退到直接DOM操作
+    document.documentElement.setAttribute('data-theme', theme.mode);
+    document.documentElement.style.setProperty('--primary-color', theme.primary_color);
+    document.documentElement.style.setProperty('--font-size-base', theme.font_size + 'px');
+
+    if (theme.compact_mode) {
+      document.body.classList.add('compact-mode');
+    } else {
+      document.body.classList.remove('compact-mode');
+    }
+
+    if (!theme.animations) {
+      document.body.classList.add('no-animations');
+    } else {
+      document.body.classList.remove('no-animations');
+    }
   }
 };
 

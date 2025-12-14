@@ -1,0 +1,321 @@
+/* ==================== 现代化输入框设计系统 ==================== */
+
+/* CSS 变量定义 - 输入框专用 */
+:root {
+  /* 输入框颜色主题 */
+  --input-bg-primary: rgba(255, 255, 255, 0.95);
+  --input-bg-secondary: rgba(255, 255, 255, 0.85);
+  --input-bg-focus: rgba(255, 255, 255, 1);
+  --input-bg-hover: rgba(255, 255, 255, 1);
+
+  /* 边框颜色 */
+  --input-border-color: rgba(203, 213, 225, 0.6);
+  --input-border-focus: rgba(59, 130, 246, 0.6);
+  --input-border-hover: rgba(148, 163, 184, 0.8);
+  --input-border-error: rgba(239, 68, 68, 0.6);
+
+  /* 阴影系统 */
+  --input-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.1);
+  --input-shadow-hover: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --input-shadow-focus: 0 0 0 4px rgba(59, 130, 246, 0.1), 0 4px 12px rgba(0, 0, 0, 0.15);
+  --input-shadow-error: 0 0 0 4px rgba(239, 68, 68, 0.1), 0 4px 12px rgba(239, 68, 68, 0.15);
+
+  /* 圆角 */
+  --input-radius: 12px;
+  --input-radius-large: 16px;
+  --input-radius-small: 8px;
+
+  /* 内边距 */
+  --input-padding: 12px 16px;
+  --input-padding-large: 16px 20px;
+  --input-padding-small: 8px 12px;
+
+  /* 动画时间 */
+  --input-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==================== 基础输入框样式 ==================== */
+
+/* Element Plus 输入框全局样式覆盖 */
+.el-input__wrapper {
+  background-color: var(--input-bg-primary) !important;
+  border: 1px solid var(--input-border-color) !important;
+  border-radius: var(--input-radius) !important;
+  box-shadow: var(--input-shadow) !important;
+  padding: 0 !important;
+  transition: var(--input-transition) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.el-input__wrapper:hover {
+  background-color: var(--input-bg-hover) !important;
+  border-color: var(--input-border-hover) !important;
+  box-shadow: var(--input-shadow-hover) !important;
+  transform: translateY(-1px) !important;
+}
+
+.el-input__wrapper.is-focus {
+  background-color: var(--input-bg-focus) !important;
+  border-color: var(--input-border-focus) !important;
+  box-shadow: var(--input-shadow-focus) !important;
+  transform: translateY(-2px) !important;
+}
+
+.el-input__inner {
+  color: #1f2937 !important;
+  font-size: 14px !important;
+  padding: var(--input-padding) !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  height: auto !important;
+  line-height: 1.5 !important;
+  font-weight: 400 !important;
+}
+
+.el-input__inner::placeholder {
+  color: #9ca3af !important;
+  opacity: 0.8 !important;
+  font-weight: 400 !important;
+}
+
+/* ==================== 输入框尺寸变体 ==================== */
+
+/* 大尺寸 */
+.el-input--large .el-input__wrapper {
+  border-radius: var(--input-radius-large) !important;
+}
+
+.el-input--large .el-input__inner {
+  padding: var(--input-padding-large) !important;
+  font-size: 16px !important;
+}
+
+/* 小尺寸 */
+.el-input--small .el-input__wrapper {
+  border-radius: var(--input-radius-small) !important;
+}
+
+.el-input--small .el-input__inner {
+  padding: var(--input-padding-small) !important;
+  font-size: 13px !important;
+}
+
+/* ==================== 输入框状态样式 ==================== */
+
+/* 错误状态 */
+.el-input__wrapper.is-error {
+  background-color: rgba(254, 242, 242, 0.95) !important;
+  border-color: var(--input-border-error) !important;
+  box-shadow: var(--input-shadow-error) !important;
+}
+
+.el-input__wrapper.is-error .el-input__inner {
+  color: #991b1b !important;
+}
+
+/* 禁用状态 */
+.el-input__wrapper.is-disabled {
+  background-color: rgba(249, 250, 251, 0.8) !important;
+  border-color: rgba(229, 231, 235, 0.6) !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  opacity: 0.6 !important;
+}
+
+.el-input__wrapper.is-disabled .el-input__inner {
+  color: #9ca3af !important;
+  cursor: not-allowed !important;
+}
+
+/* ==================== 特殊类型输入框 ==================== */
+
+/* 密码输入框 */
+.el-input--password .el-input__inner {
+  letter-spacing: 0.05em !important;
+}
+
+/* 搜索框 */
+.el-input--search .el-input__wrapper {
+  border-radius: 24px !important;
+  padding-left: 12px !important;
+}
+
+.el-input--search .el-input__prefix {
+  margin-left: 8px !important;
+}
+
+/* ==================== 输入框组合效果 ==================== */
+
+/* 输入框标签样式 */
+.el-form-item__label {
+  color: #374151 !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  margin-bottom: 8px !important;
+  line-height: 1.5 !important;
+}
+
+/* 表单项间距 */
+.el-form-item {
+  margin-bottom: 24px !important;
+}
+
+/* 输入框悬浮提示 */
+.el-input .el-input__count {
+  color: #9ca3af !important;
+  font-size: 12px !important;
+  background: transparent !important;
+}
+
+/* ==================== 毛玻璃效果变体 ==================== */
+
+/* 深色主题毛玻璃效果 */
+[data-theme="dark"] .el-input__wrapper {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+
+[data-theme="dark"] .el-input__wrapper:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+[data-theme="dark"] .el-input__wrapper.is-focus {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2) !important;
+}
+
+[data-theme="dark"] .el-input__inner {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .el-input__inner::placeholder {
+  color: rgba(249, 250, 251, 0.6) !important;
+}
+
+[data-theme="dark"] .el-form-item__label {
+  color: #f9fafb !important;
+}
+
+/* ==================== 登录页面专用样式 ==================== */
+
+/* 登录页面输入框特殊效果 */
+.login-form .el-input__wrapper,
+#login-app .el-input__wrapper,
+.glassmorphism-container .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(15px) !important;
+  -webkit-backdrop-filter: blur(15px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 16px !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+}
+
+.login-form .el-input__wrapper:hover,
+#login-app .el-input__wrapper:hover,
+.glassmorphism-container .el-input__wrapper:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  transform: translateY(-2px) !important;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+}
+
+.login-form .el-input__wrapper.is-focus,
+#login-app .el-input__wrapper.is-focus,
+.glassmorphism-container .el-input__wrapper.is-focus {
+  background: rgba(255, 255, 255, 0.25) !important;
+  border-color: rgba(59, 130, 246, 0.5) !important;
+  transform: translateY(-3px) !important;
+  box-shadow:
+    0 0 0 4px rgba(59, 130, 246, 0.15),
+    0 16px 48px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+.login-form .el-input__inner,
+#login-app .el-input__inner,
+.glassmorphism-container .el-input__inner {
+  color: #1f2937 !important;
+  font-weight: 500 !important;
+  font-size: 15px !important;
+  padding: 14px 20px !important;
+  -webkit-text-fill-color: #1f2937 !important;
+}
+
+.login-form .el-input__inner::placeholder,
+#login-app .el-input__inner::placeholder,
+.glassmorphism-container .el-input__inner::placeholder {
+  color: rgba(31, 41, 55, 0.6) !important;
+  font-weight: 400 !important;
+}
+
+/* ==================== 动画效果 ==================== */
+
+/* 输入框获得焦点时的光晕效果 */
+@keyframes inputGlow {
+  0% {
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  }
+}
+
+.el-input__wrapper.is-focus {
+  animation: inputGlow 2s ease-in-out infinite !important;
+}
+
+/* ==================== 响应式设计 ==================== */
+
+@media (max-width: 768px) {
+  .el-input__inner {
+    font-size: 16px !important; /* 防止iOS缩放 */
+  }
+
+  .el-input--large .el-input__inner {
+    font-size: 16px !important;
+  }
+
+  .el-input--small .el-input__inner {
+    font-size: 14px !important;
+  }
+}
+
+/* ==================== 无障碍支持 ==================== */
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+  .el-input__wrapper {
+    border-width: 2px !important;
+  }
+
+  .el-input__wrapper.is-focus {
+    border-width: 2px !important;
+  }
+}
+
+/* 减少动画模式 */
+@media (prefers-reduced-motion: reduce) {
+  .el-input__wrapper,
+  .el-input__inner {
+    transition: none !important;
+  }
+
+  .el-input__wrapper.is-focus {
+    animation: none !important;
+  }
+}

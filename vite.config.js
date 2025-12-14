@@ -22,10 +22,19 @@ export default defineConfig({
 
     rollupOptions: {
       input: {
-        settings: path.resolve(__dirname, 'static/JS/settings_entry.js')
+        settings: path.resolve(__dirname, 'static/JS/settings_entry.js'),
+        // 认证相关入口文件
+        login: path.resolve(__dirname, 'static/JS/login_entry.js'),
+        signup: path.resolve(__dirname, 'static/JS/signup_entry.js'),
+        // 添加其他需要构建的JavaScript文件
+        'theme-manager': path.resolve(__dirname, 'static/JS/theme-manager.js'),
+        'api-service': path.resolve(__dirname, 'static/JS/services/apiService.js'),
+        'public-note-page': path.resolve(__dirname, 'static/JS/public_note_page.js'),
+        'public-notes-list': path.resolve(__dirname, 'static/JS/public_notes_list.js'),
+        'forgot-password': path.resolve(__dirname, 'static/JS/forgot_password_entry.js'),
       },
       output: {
-        format: 'es',  // 改为 ES 模块格式，支持代码分割和浏览器原生模块
+        format: 'es',  // 主格式为 ES 模块
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',

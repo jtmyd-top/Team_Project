@@ -8,24 +8,36 @@ body
 	/* Font */
 	/* Emoji fonts are added to visualise them nicely in Internet Explorer. */
 	font-family: sans-serif, Arial, Verdana, "Trebuchet MS", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-	font-size: 12px;
+	font-size: var(--font-size-base, 14px);
 
-	/* Text color */
-	color: #333;
+	/* Text color - 支持主题 */
+	color: var(--text-primary, #333);
 
 	/* Remove the background color to make it transparent. */
-	background-color: #fff;
+	background-color: var(--bg-primary, #fff);
 
 	margin: 20px;
+	transition: var(--transition-base, all 0.3s ease);
 }
 
 .cke_editable
 {
-	font-size: 13px;
+	font-size: var(--font-size-base, 14px);
 	line-height: 1.6;
 
 	/* Fix for missing scrollbars with RTL texts. (#10488) */
 	word-wrap: break-word;
+	color: var(--text-primary, #333);
+	background-color: var(--bg-primary, #fff);
+}
+
+/* 紧凑模式适配 */
+body.compact-mode {
+	margin: 12px;
+}
+
+body.compact-mode .cke_editable {
+	line-height: 1.4;
 }
 
 blockquote

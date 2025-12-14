@@ -1,5 +1,5 @@
 // services/apiService.js - 统一的API请求服务
-import { request } from '/static/JS/utils/request.js';
+// 改为直接使用fetch，避免ES6模块问题
 
 const csrfToken = window.SETTINGS_INITIAL?.csrfToken || "";
 const csrfHeader = { "X-CSRFToken": csrfToken };
@@ -50,54 +50,94 @@ async function getRequest(url, params = {}) {
 /**
  * API 服务对象
  */
-export const apiService = {
+const apiService = {
+  // ==================== 认证相关 ====================
+
+  auth: {
+    /**
+     * 登录
+     */
+    login(credentials) {
+      return postRequest('/api/login/', credentials);
+    },
+
+    /**
+     * 注册
+     */
+    register(userData) {
+      return postRequest('/signup/', userData);
+    },
+
+    /**
+     * 检查用户名是否可用
+     */
+    checkUsername(username) {
+      return getRequest('/check-username/', { username });
+    },
+
+    /**
+     * 检查邮箱是否可用
+     */
+    checkEmail(email, excludeSelf = false) {
+      return postRequest('/api/check-email/', {
+        email,
+        exclude_self: excludeSelf ? '1' : '0'
+      });
+    },
+
+    /**
+     * 发送邮箱验证码
+     */
+    sendEmailCode(email, purpose = 'register') {
+      return postRequest('/api/send-email-code/', { email, purpose });
+    },
+
+    /**
+     * 验证2FA
+     */
+    verify2FA(data) {
+      return postRequest('/api/2fa/verify/', data);
+    },
+
+    /**
+     * 重新发送2FA验证码
+     */
+    resend2FACode(data) {
+      return postRequest('/api/2fa/resend-email/', data);
+    },
+
+    /**
+     * 登出
+     */
+    logout() {
+      return postRequest('/api/logout/', {});
+    }
+  },
+
   // ==================== 个人资料相关 ====================
   
   /**
    * 更新个人资料（昵称或个性签名）
    */
   updateProfile(payload) {
-    return postRequest(window.API_ENDPOINTS.updateProfile, payload);
+    return postRequest('/api/update-profile/', payload);
   },
-  
-  /**
-   * 检查用户名是否可用
-   */
-  checkUsername(username) {
-    return getRequest('/check-username/', { username });
-  },
-  
+
+
   /**
    * 切换点赞状态
    */
   toggleLike() {
-    return postRequest(window.API_ENDPOINTS.toggleLike || '/api/toggle-like/', {});
+    return postRequest('/api/toggle-like/', {});
   },
-  
+
   // ==================== 邮箱相关 ====================
-  
-  /**
-   * 检查邮箱是否可用
-   */
-  checkEmail(email, excludeSelf = false) {
-    return getRequest(window.API_ENDPOINTS.checkEmail, { 
-      email, 
-      exclude_self: excludeSelf ? '1' : '0' 
-    });
-  },
-  
-  /**
-   * 发送邮箱验证码
-   */
-  sendEmailCode(payload) {
-    return postRequest(window.API_ENDPOINTS.sendEmailCode, payload);
-  },
-  
+
   /**
    * 修改邮箱
    */
   updateEmail(payload) {
-    return postRequest(window.API_ENDPOINTS.updateEmail, payload);
+    return postRequest('/api/update-email/', payload);
   },
   
   // ==================== 账户安全相关 ====================
@@ -177,4 +217,11 @@ export const apiService = {
   },
 };
 
+// 将apiService挂载到window对象上，使其全局可用
+window.apiService = apiService;
+
+// ES6 导出
+export { apiService };
+
+// 默认导出
 export default apiService;
