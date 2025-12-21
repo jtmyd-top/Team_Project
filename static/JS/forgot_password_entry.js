@@ -1,6 +1,7 @@
 // forgot_password_entry.js - 忘记密码功能入口文件
-import { createApp } from 'vue';
+import { createApp, ref, reactive } from 'vue';
 import ElementPlus from 'element-plus';
+import { ElMessage } from 'element-plus';
 import 'element-plus/dist/index.css';
 
 // 忘记密码组件定义
@@ -71,9 +72,6 @@ const ForgotPassword = {
     </div>
   `,
   setup() {
-    const { ref, reactive } = Vue;
-    const { ElMessage } = ElementPlus;
-
     const forgotFormRef = ref(null);
     const isLoading = ref(false);
     const isCountingDown = ref(false);

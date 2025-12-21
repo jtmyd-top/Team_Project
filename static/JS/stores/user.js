@@ -92,8 +92,11 @@ export const useUserStore = defineStore('user', {
     
     // 更新昵称
     updateNickname(newNickname) {
+      console.log('updateNickname called with:', newNickname);
+      console.log('Previous nickname:', this.nickname);
       this.nickname = newNickname;
-      
+      console.log('Current nickname:', this.nickname);
+
       // 同步更新导航栏用户名
       const navUsername = document.getElementById("id_username");
       const navUsername2 = document.getElementsByClassName("username");

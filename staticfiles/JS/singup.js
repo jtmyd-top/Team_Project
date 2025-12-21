@@ -49,7 +49,7 @@ createApp({
             usernameRules: [
                 { text: '至少包含 6 个字符', valid: false, test: (u) => u.length >= 6 },
                 { text: '必须以小写字母开头', valid: false, test: (u) => /^[a-z]/.test(u) },
-                { text: '只能包含小写字母、数字和下划线', valid: false, test: (u) => /^[a-z][a-z0-9_]*$/.test(u) },
+                { text: '只能包含小写字母、数字、下划线', valid: false, test: (u) => /^[a-z][a-z0-9_]*$/.test(u) },
             ],
             passwordRules: [
                 { text: '至少包含 8 个字符', valid: false, test: (p) => p.length >= 8 },
@@ -129,14 +129,24 @@ createApp({
         async submitForm() {
             this.serverErrors = [];
             this.formErrors = {};
-            const formData = new FormData(document.getElementById('signup-form'));
-            ['username', 'password', 'password2', 'email', 'emailCode'].forEach(key => formData.set(key, this[key]));
+            
+            // 使用 JSON 格式而不是 FormData
+            const payload = {
+                username: this.username,
+                password1: this.password,
+                password2: this.password2,
+                email: this.email,
+                emailCode: this.emailCode
+            };
 
             try {
                 const response = await fetch(signup, {
                     method: 'POST',
-                    body: formData,
-                    headers: { 'X-CSRFToken': getCookie('csrftoken') }
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
 
@@ -144,13 +154,112 @@ createApp({
                     this.showPrompt('success', '注册成功', '您的账号已创建成功，即将跳转到登录页。');
                     setTimeout(() => { window.location.href = data.redirect_url; }, 2000);
                 } else {
-                    if (data.errors) this.formErrors = data.errors;
-                    else this.showPrompt('error', '注册失败', data.message || '发生未知错误，请稍后再试。');
+                    if (data.errors) {
+                        this.formErrors = data.errors;
+                        // 提取并显示所有字段错误
+                        const errorMessages = this.getErrorMessages(data.errors);
+                        if (errorMessages.length > 0) {
+                            this.showPrompt('error', '注册失败', errorMessages.join('\n'));
+                        } else {
+                            this.showPrompt('error', '注册失败', data.message || '发生未知错误，请稍后再试。');
+                        }
+                    } else {
+                        this.showPrompt('error', '注册失败', data.message || '发生未知错误，请稍后再试。');
+                    }
                 }
             } catch (error) {
-                console.error('Error:', error);
+                console.error('注册失败:', error);
                 this.showPrompt('error', '网络错误', '无法连接到服务器，请稍后再试。');
             }
+        },
+
+        /**
+         * 从Django表单错误对象中提取可读的错误消息
+         * @param {Object} errors - Django返回的错误对象
+         * @returns {Array} 错误消息数组
+         */
+        getErrorMessages(errors) {
+            const messages = [];
+            const fieldNames = {
+                'username': '用户名',
+                'email': '邮箱',
+                'emailCode': '邮箱验证码',
+                'password1': '密码',
+                'password2': '确认密码'
+            };
+
+            // 错误消息的友好化映射
+            const friendlyMessages = {
+                // 用户名相关
+                '用户名至少6位': '用户名必须至少包含6个字符',
+                '必须以小写字母开头': '用户名必须以小写字母开头',
+                '只能包含小写字母、数字和下划线': '用户名只能包含小写字母、数字和下划线',
+                '只能包含字母、数字、下划线': '用户名只能包含小写字母、数字和下划线',
+                '用户名包含大写': '用户名不能包含大写字母，请使用小写字母',
+                '用户名必须以小写字母开头，只能包含小写字母、数字和下划线': '用户名必须以小写字母开头，只能包含小写字母、数字和下划线',
+                '该用户名已被占用': '该用户名已被占用',
+                'A user with that username already exists.': '该用户名已被占用',
+                
+                // 验证码相关 - 统一显示为"错误"
+                '验证码为6位': '验证码错误',
+                '验证码错误': '验证码错误',
+                '验证码已过期': '已过期，请重新获取',
+                '验证码错误或已过期': '错误或已过期',
+                
+                // 邮箱相关
+                '该邮箱已被注册': '该邮箱已被注册，请使用其他邮箱',
+                '邮箱格式不正确': '格式不正确',
+                '请输入正确的邮箱格式': '格式不正确',
+                'Enter a valid email address.': '格式不正确',
+                '邮箱地址已被注册': '该邮箱已被注册，请使用其他邮箱',
+                
+                // 密码相关
+                '两次输入的密码不一致': '两次输入的密码不一致',
+                "The two password fields didn't match.": '两次输入的密码不一致',
+                '密码太短': '密码长度至少为8位',
+                'This password is too short. It must contain at least 8 characters.': '密码长度至少为8位',
+                '密码太常见': '密码过于简单，请使用更复杂的密码',
+                'This password is too common.': '密码过于简单，请使用更复杂的密码',
+                '密码完全是数字': '密码不能全为数字',
+                'This password is entirely numeric.': '密码不能全为数字',
+                '密码与个人信息太相似': '密码不能与个人信息太相似',
+                
+                // 通用错误
+                'This field is required.': '此字段为必填项',
+                '此字段为必填项': '此字段为必填项'
+            };
+
+            for (const [field, errorList] of Object.entries(errors)) {
+                const fieldName = fieldNames[field] || field;
+                
+                if (Array.isArray(errorList)) {
+                    errorList.forEach(error => {
+                        let errorMsg = '';
+                        
+                        if (typeof error === 'object' && error.message) {
+                            errorMsg = error.message;
+                        } else if (typeof error === 'string') {
+                            errorMsg = error;
+                        }
+                        
+                        // 应用友好化映射
+                        const friendlyMsg = friendlyMessages[errorMsg] || errorMsg;
+                        
+                        // 特殊处理：如果是用户名字段且包含大写相关的错误
+                        if (field === 'username' && (
+                            errorMsg.includes('小写') || 
+                            errorMsg.includes('lowercase') ||
+                            friendlyMsg.includes('小写')
+                        )) {
+                            messages.push(`${fieldName}：用户名只能使用小写字母、数字和下划线，且必须以小写字母开头`);
+                        } else {
+                            messages.push(`${fieldName}：${friendlyMsg}`);
+                        }
+                    });
+                }
+            }
+            
+            return messages;
         },
 
         refreshCaptcha() { this.captchaUrl = `${captcha_image}?t=${new Date().getTime()}`; },

@@ -9,7 +9,11 @@
       "Bash(dir:*)",
       "Bash(timeout:*)",
       "Bash(npm run build:auth:*)",
-      "Bash(npm run)"
+      "Bash(npm run)",
+      "Bash(findstr:*)",
+      "Bash(set:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []

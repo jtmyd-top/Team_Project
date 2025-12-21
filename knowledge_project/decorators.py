@@ -273,9 +273,9 @@ def send_operation_2fa_email(user, operation_type='general'):
     purpose_daily_key = f"email_code_daily_{operation_type}_2fa_{user_identifier}"
     purpose_daily_attempts = cache.get(purpose_daily_key, 0)
     
-    if purpose_daily_attempts >= 3:
+    if purpose_daily_attempts >= 10:
         logger.warning(f"用户 {user.id} 的{operation_type}验证码今日发送次数已达上限")
-        return False, '您今天已达到该操作的验证码发送上限（3次），请明天再试。'
+        return False, '您今天已达到该操作的验证码发送上限（10次），请明天再试。'
     
     # 生成6位验证码
     code = ''.join(random.choices('0123456789', k=6))

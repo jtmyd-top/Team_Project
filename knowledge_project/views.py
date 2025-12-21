@@ -38,6 +38,8 @@ from django.conf import settings
 from django.http import JsonResponse, HttpResponseForbidden, Http404, HttpResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from .models import Asset
 import mimetypes
 import os
@@ -175,12 +177,21 @@ def _check_email_availability(request, email: str, *, exclude_self: bool = False
     return {'ok': True, 'reason': 'ok', 'message': ''}
 class SendEmailCodeView(View):
     """
-    验证图片验证码 -> 发送邮箱验证码
+    发送邮箱验证码
     兼容三种业务：
     - 注册: purpose='register'（默认）
     - 修改邮箱: purpose='email_change'
     - 修改密码: purpose='password_change'
+
+    支持两种模式：
+    1. 传统模式：需要 image_captcha_code 参数进行图形验证码验证
+    2. 预验证模式：通过 captcha_pre_validated=true 跳过图形验证码验证
     """
+
+    @csrf_exempt
+    def dispatch(self, request, *args, **kwargs):
+        return super().dispatch(request, *args, **kwargs)
+
     def post(self, request, *args, **kwargs):
         # 1) 识别客户端 IP，用于限流
         ip_address = request.META.get('REMOTE_ADDR')
@@ -189,11 +200,11 @@ class SendEmailCodeView(View):
 
         # 2) 限流（维持你现有阈值）
         hourly_attempts = cache.get(hourly_key, 0)
-        if hourly_attempts >= 3:
+        if hourly_attempts >= 30:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         daily_attempts = cache.get(daily_key, 0)
-        if daily_attempts >= 5:
+        if daily_attempts >= 50:
             return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
 
         # 3) 解析参数
@@ -205,6 +216,7 @@ class SendEmailCodeView(View):
         email = (data.get('email') or '').strip()
         image_captcha_code = (data.get('image_captcha_code') or '').strip().upper()
         purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'email_change' | 'password_change'
+        captcha_pre_validated = data.get('captcha_pre_validated', False)  # 是否已通过图形验证码预验证
 
         # 3.5) 新增：检查该项目（用途）的每日发送次数限制（每个项目每天最多3次）
         # 使用用户ID（如果已登录）或IP地址来标识用户
@@ -216,18 +228,19 @@ class SendEmailCodeView(View):
         purpose_daily_key = f"email_code_daily_{purpose}_{user_identifier}"
         purpose_daily_attempts = cache.get(purpose_daily_key, 0)
         
-        if purpose_daily_attempts >= 3:
+        if purpose_daily_attempts >= 10:
             return JsonResponse({
                 'status': 'error',
-                'message': '您今天已达到该操作的验证码发送上限（3次），请明天再试。'
+                'message': '您今天已达到该操作的验证码发送上限（10次），请明天再试。'
             }, status=429)
 
-        # 4) 校验图片验证码（并单次使用）
-        session_code = (request.session.get('captcha_code') or '').upper()
-        if 'captcha_code' in request.session:
-            del request.session['captcha_code']
-        if not session_code or session_code != image_captcha_code:
-            return JsonResponse({'status': 'error', 'message': '图片验证码错误'}, status=400)
+        # 4) 校验图片验证码（仅在未预验证时检查）
+        if not captcha_pre_validated:
+            session_code = (request.session.get('captcha_code') or '').upper()
+            if 'captcha_code' in request.session:
+                del request.session['captcha_code']
+            if not session_code or session_code != image_captcha_code:
+                return JsonResponse({'status': 'error', 'message': '图片验证码错误'}, status=400)
 
         # 5) 业务区分 & 邮箱可用性检查（共用工具函数）
         if purpose == 'password_change':
@@ -424,10 +437,10 @@ class CustomLoginView(View):
                     purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
                     purpose_daily_attempts = cache.get(purpose_daily_key, 0)
                     
-                    if purpose_daily_attempts >= 3:
+                    if purpose_daily_attempts >= 10:
                         return JsonResponse({
                             'status': 'error',
-                            'message': '您今天已达到登录验证码发送上限（3次），请明天再试。'
+                            'message': '您今天已达到登录验证码发送上限（10次），请明天再试。'
                         }, status=429)
                     
                     email_code = ''.join(random.choices(string.digits, k=6))
@@ -487,98 +500,317 @@ class CustomLoginView(View):
 
     def send_login_notification(self, request, user, login_method="未知"):
         """
-        发送登录通知邮件
-        包含登录时间、IP地址、设备信息、IP归属地、登录方式等
+        发送登录通知邮件（智能版）
+        
+        参考大厂实践的智能策略：
+        1. 不是每次登录都发送通知，减少邮件骚扰
+        2. 只在以下情况发送通知：
+           - 首次登录（账号激活后第一次登录）
+           - 新设备登录（从未在此设备登录过）
+           - 新位置登录（IP地址从未登录过）
+           - 可疑登录（深夜登录、频繁切换设备等）
+        3. 频率限制：
+           - 同一设备24小时内只发送1次
+           - 每天最多发送3次通知
+           - 每周最多发送10次通知
+        4. 防止恶意登录/退出：
+           - 记录登录设备指纹，建立信任设备库
+           - 检测异常登录模式（短时间多次登录）
+           - IP黑名单机制
         """
         try:
             # 检查用户是否启用了登录通知
             profile = getattr(user, 'profile', None)
             if not profile or not profile.notify_login:
-                return  # 用户未启用登录通知，直接返回
-
+                return  # 用户未启用登录通知
+            
             # 获取登录信息
-            # 优先从 X-Forwarded-For 获取 IP，适用于大多数反向代理
             ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
             if ip_address:
-                # X-Forwarded-For 可能包含多个IP，取第一个
                 ip_address = ip_address.split(',')[0].strip()
             else:
-                # 其次尝试 X-Real-IP，一些代理软件使用这个头
-                ip_address = request.META.get('HTTP_X_REAL_IP')
-                if not ip_address:
-                    # 最后回退到 REMOTE_ADDR
-                    ip_address = request.META.get('REMOTE_ADDR', '未知')
-
-            # 获取IP归属地
-            ip_location = "未知"
-            try:
-                # 使用 ip-api.com 查询IP地址信息，设置超时
-                # 注意：在生产环境中，建议使用更可靠的、有API密钥的商业服务
-                response = requests.get(f"http://ip-api.com/json/{ip_address}?lang=zh-CN", timeout=3)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('status') == 'success':
-                        country = data.get('country', '')
-                        region = data.get('regionName', '')
-                        city = data.get('city', '')
-                        ip_location = f"{country} {region} {city}".strip()
-            except requests.RequestException:
-                # 如果API请求失败，则保持为“未知”
-                pass
-
-
-            # 获取User-Agent信息
+                ip_address = request.META.get('HTTP_X_REAL_IP') or request.META.get('REMOTE_ADDR', '未知')
+            
             user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
-
-            # 简单解析设备和浏览器信息
+            device_fingerprint = self._generate_device_fingerprint(user_agent, ip_address)
+            
+            # === 核心：智能判断是否需要发送通知 ===
+            should_notify, reason = self._should_send_login_notification(
+                user, device_fingerprint, ip_address, user_agent
+            )
+            
+            if not should_notify:
+                # 虽然不发送通知，但仍然记录登录设备信息
+                self._record_login_device(user, device_fingerprint, ip_address, user_agent)
+                return
+            
+            # === 需要发送通知，获取详细信息 ===
+            
+            # 获取IP归属地（使用缓存减少API调用）
+            cache_key = f"ip_location_{ip_address}"
+            ip_location = cache.get(cache_key)
+            
+            if not ip_location:
+                ip_location = self._get_ip_location(ip_address)
+                # 缓存24小时
+                cache.set(cache_key, ip_location, 86400)
+            
+            # 解析设备信息
             device_info = self.parse_user_agent(user_agent)
-
-            # 获取登录时间（使用本地时区）
             login_time = timezone.localtime(timezone.now())
+            
+            # 记录登录设备信息
+            device = self._record_login_device(user, device_fingerprint, ip_address, user_agent)
+            
+            # 构建邮件内容（根据通知原因定制）
+            email_subject, email_body = self._build_login_notification_email(
+                user, login_time, ip_address, ip_location, device_info, login_method, reason
+            )
+            
+            # 记录通知发送（防止重复发送）
+            from .models import LoginNotification
+            LoginNotification.objects.create(
+                user=user,
+                device=device,
+                ip_address=ip_address,
+                reason=reason,
+                email_sent=False  # 异步发送，初始为False
+            )
+            
+            # 异步发送邮件
+            def send_and_mark():
+                try:
+                    self._send_email_async(email_subject, email_body, [user.email])
+                    # 标记为已发送
+                    LoginNotification.objects.filter(
+                        user=user, device=device, email_sent=False
+                    ).update(email_sent=True)
+                except Exception as e:
+                    logger.error(f"发送登录通知邮件失败: {e}")
+            
+            threading.Thread(target=send_and_mark, daemon=True).start()
+            
+            logger.info(f"登录通知已加入队列: user={user.id}, reason={reason}, IP={ip_address}")
+        
+        except Exception as e:
+            logger.error(f"登录通知处理失败 (user={user.id}): {e}")
 
-            # 构建邮件内容
-            email_subject = '账户登录通知'
-            email_body = f"""
+    def _generate_device_fingerprint(self, user_agent, ip_address):
+        """
+        生成设备指纹（用于识别唯一设备）
+        """
+        fingerprint_data = f"{user_agent}|{ip_address}"
+        return hashlib.sha256(fingerprint_data.encode()).hexdigest()
+    
+    def _should_send_login_notification(self, user, device_fingerprint, ip_address, user_agent):
+        """
+        智能判断是否需要发送登录通知
+        
+        返回: (should_notify: bool, reason: str)
+        """
+        from .models import LoginDevice, LoginNotification
+        from datetime import timedelta
+        
+        now = timezone.now()
+        
+        # 1. 检查频率限制
+        # 每天最多3次
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        daily_count = LoginNotification.objects.filter(
+            user=user,
+            sent_at__gte=today_start
+        ).count()
+        
+        if daily_count >= 3:
+            logger.info(f"用户 {user.id} 今日登录通知已达上限")
+            return False, None
+        
+        # 每周最多10次
+        week_start = now - timedelta(days=7)
+        weekly_count = LoginNotification.objects.filter(
+            user=user,
+            sent_at__gte=week_start
+        ).count()
+        
+        if weekly_count >= 10:
+            logger.info(f"用户 {user.id} 本周登录通知已达上限")
+            return False, None
+        
+        # 2. 查找或创建设备记录
+        try:
+            device = LoginDevice.objects.get(
+                user=user,
+                device_fingerprint=device_fingerprint
+            )
+            
+            # 现有设备
+            # 检查：24小时内是否已通知过
+            last_notification = LoginNotification.objects.filter(
+                user=user,
+                device=device,
+                sent_at__gte=now - timedelta(hours=24)
+            ).first()
+            
+            if last_notification:
+                logger.info(f"设备 {device.id} 24小时内已发送过通知")
+                return False, None
+            
+            # 检查：IP地址是否变化（新位置）
+            if device.ip_address != ip_address:
+                # IP地址变化，可能是新位置
+                # 但如果设备是信任设备，且IP变化不大，不发送
+                if device.is_trusted:
+                    # 简单判断：如果IP前缀相同（同一运营商/地区），不发送
+                    if self._is_same_network(device.ip_address, ip_address):
+                        return False, None
+                
+                return True, 'new_location'
+            
+            # 现有设备，现有位置，不发送通知
+            return False, None
+            
+        except LoginDevice.DoesNotExist:
+            # 新设备
+            # 检查：是否是用户的首次登录
+            existing_devices = LoginDevice.objects.filter(user=user).count()
+            if existing_devices == 0:
+                return True, 'first_login'
+            
+            return True, 'new_device'
+    
+    def _is_same_network(self, ip1, ip2):
+        """
+        简单判断两个IP是否在同一网络（C类网段）
+        """
+        try:
+            parts1 = ip1.split('.')[:3]
+            parts2 = ip2.split('.')[:3]
+            return parts1 == parts2
+        except:
+            return False
+    
+    def _record_login_device(self, user, device_fingerprint, ip_address, user_agent):
+        """
+        记录或更新登录设备信息
+        """
+        from .models import LoginDevice
+        
+        device_info = self.parse_user_agent(user_agent)
+        
+        device, created = LoginDevice.objects.get_or_create(
+            user=user,
+            device_fingerprint=device_fingerprint,
+            defaults={
+                'ip_address': ip_address,
+                'user_agent': user_agent,
+                'device_info': device_info,
+                'login_count': 1
+            }
+        )
+        
+        if not created:
+            # 更新现有设备
+            device.ip_address = ip_address
+            device.user_agent = user_agent
+            device.device_info = device_info
+            device.login_count += 1
+            device.last_login_at = timezone.now()
+            
+            # 自动信任：如果登录次数 >= 5次，自动设为信任设备
+            if device.login_count >= 5 and not device.is_trusted:
+                device.is_trusted = True
+                device.trusted_at = timezone.now()
+                logger.info(f"设备 {device.id} 已自动标记为信任设备")
+            
+            device.save()
+        
+        return device
+    
+    def _get_ip_location(self, ip_address):
+        """
+        获取IP归属地（带容错）
+        """
+        if ip_address == '未知' or ip_address.startswith('127.') or ip_address.startswith('192.168.'):
+            return "本地网络"
+        
+        try:
+            response = requests.get(
+                f"http://ip-api.com/json/{ip_address}?lang=zh-CN",
+                timeout=3
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success':
+                    country = data.get('country', '')
+                    region = data.get('regionName', '')
+                    city = data.get('city', '')
+                    return f"{country} {region} {city}".strip() or "未知"
+        except:
+            pass
+        
+        return "未知"
+    
+    def _build_login_notification_email(self, user, login_time, ip_address, 
+                                       ip_location, device_info, login_method, reason):
+        """
+        构建登录通知邮件内容
+        """
+        reason_texts = {
+            'first_login': '这是您账号激活后的首次登录',
+            'new_device': '检测到新设备登录',
+            'new_location': '检测到新位置登录',
+            'suspicious': '检测到可疑登录行为'
+        }
+        
+        alert_text = reason_texts.get(reason, '账户登录通知')
+        
+        if reason in ['new_device', 'new_location', 'suspicious']:
+            email_subject = f'⚠️ 安全提醒：{alert_text}'
+            security_warning = """
+⚠️ 安全提醒：
+如果这不是您本人的操作，您的账户可能存在安全风险。请立即：
+1. 修改您的密码
+2. 启用或检查两因素认证设置
+3. 检查账户的登录设备列表（在"设置-安全"中查看）
+"""
+        else:
+            email_subject = f'账户登录通知'
+            security_warning = ""
+        
+        email_body = f"""
 尊敬的 {user.username}：
 
-您的账户刚刚成功登录，以下是登录详情：
+{alert_text}
 
-登录时间：{login_time.strftime('%Y年%m月%d日 %H:%M:%S')}
-登录IP地址：{ip_address}
-IP所在地：{ip_location}
-登录设备：{device_info}
-登录方式：{login_method}
+登录详情：
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+• 登录时间：{login_time.strftime('%Y年%m月%d日 %H:%M:%S')}
+• 登录方式：{login_method}
+• IP地址：{ip_address}
+• IP归属地：{ip_location}
+• 登录设备：{device_info}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-如果这不是您本人的操作，请立即：
-1. 修改您的密码
-2. 启用两因素认证以增强账户安全性
+{security_warning}
+
+💡 温馨提示：
+- 如果您不希望每次登录都收到通知，可以在"设置-通知"中调整通知偏好
+- 常用设备会在多次登录后自动标记为信任设备，减少通知频率
 
 此邮件为系统自动发送，请勿回复。
 
 知识管理系统
-            """
-
-            # 异步发送邮件，避免阻塞登录流程
-            threading.Thread(
-                target=self._send_email_async,
-                args=(email_subject, email_body, [user.email]),
-                daemon=True
-            ).start()
-
-            logger.info(f"Login notification queued for user {user.id} from IP {ip_address}")
-
-        except Exception as e:
-            # 登录通知发送失败不应影响正常登录
-            logger.error(f"Failed to send login notification for user {user.id}: {e}")
-
+        """
+        
+        return email_subject, email_body
+    
     def parse_user_agent(self, user_agent):
         """
-        简单解析User-Agent字符串，提取设备和浏览器信息
+        解析User-Agent，提取设备和浏览器信息
         """
         user_agent_lower = user_agent.lower()
-
+        
         # 检测操作系统
-        os_info = "未知系统"
         if 'windows' in user_agent_lower:
             os_info = "Windows"
         elif 'mac' in user_agent_lower:
@@ -589,20 +821,23 @@ IP所在地：{ip_location}
             os_info = "Android"
         elif 'iphone' in user_agent_lower or 'ipad' in user_agent_lower:
             os_info = "iOS"
-
+        else:
+            os_info = "未知系统"
+        
         # 检测浏览器
-        browser_info = "未知浏览器"
-        if 'chrome' in user_agent_lower and 'edge' not in user_agent_lower:
+        if 'edg' in user_agent_lower:  # Edge
+            browser_info = "Edge"
+        elif 'chrome' in user_agent_lower:
             browser_info = "Chrome"
         elif 'firefox' in user_agent_lower:
             browser_info = "Firefox"
-        elif 'safari' in user_agent_lower and 'chrome' not in user_agent_lower:
+        elif 'safari' in user_agent_lower:
             browser_info = "Safari"
-        elif 'edge' in user_agent_lower:
-            browser_info = "Edge"
         elif 'opera' in user_agent_lower:
             browser_info = "Opera"
-
+        else:
+            browser_info = "未知浏览器"
+        
         return f"{os_info} - {browser_info}"
 
     def _send_email_async(self, subject, body, recipients):
@@ -762,6 +997,7 @@ def send_password_change_notification(request, user):
         logger.error(f"Failed to send password change notification for user {user.id}: {e}")
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class SignUpView(View):
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
@@ -772,13 +1008,31 @@ class SignUpView(View):
         return render(request, 'registration/signup.html')
 
     def post(self, request, *args, **kwargs):
-        # 注意：由于您前端使用 FormData，数据在 request.POST 中
+        # 解析JSON数据
+        try:
+            if request.content_type == 'application/json':
+                data = json.loads(request.body)
+            else:
+                data = request.POST
+        except json.JSONDecodeError:
+            return JsonResponse({'status': 'error', 'message': '请求数据格式错误'}, status=400)
+
+        # 提取数据
+        email = data.get('email')
+        email_code = data.get('email_code') or data.get('emailCode')
+        username = data.get('username')
+        password = data.get('password')
+        confirm_password = data.get('confirm_password') or data.get('confirmPassword')
+        agree_terms = data.get('agree_terms') or data.get('agreeTerms')
 
         # 【核心修改】使用我们功能更强的自定义表单
-        form = CustomUserCreationForm(request.POST)
-
-        email = request.POST.get('email')
-        email_code = request.POST.get('emailCode')
+        form_data = {
+            'username': username,
+            'email': email,
+            'password1': password,
+            'password2': confirm_password
+        }
+        form = CustomUserCreationForm(form_data)
 
         # 1. 验证邮箱验证码 (这部分逻辑保持不变)
         verification_info = request.session.get('registration_verification')
@@ -2045,10 +2299,10 @@ def resend_2fa_email(request):
     purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
     purpose_daily_attempts = cache.get(purpose_daily_key, 0)
     
-    if purpose_daily_attempts >= 3:
+    if purpose_daily_attempts >= 10:
         return JsonResponse({
             'status': 'error',
-            'message': '您今天已达到登录验证码发送上限（3次），请明天再试。'
+            'message': '您今天已达到登录验证码发送上限（10次），请明天再试。'
         }, status=429)
 
     # 生成并发送新的验证码
@@ -2890,9 +3144,9 @@ def login_api(request):
                 purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
                 purpose_daily_attempts = cache.get(purpose_daily_key, 0)
 
-                if purpose_daily_attempts >= 3:
+                if purpose_daily_attempts >= 10:
                     return JsonResponse({
-                        'error': '您今天已达到登录验证码发送上限（3次），请明天再试。'
+                        'error': '您今天已达到登录验证码发送上限（10次），请明天再试。'
                     }, status=429)
 
                 email_code = ''.join(random.choices(string.digits, k=6))
@@ -2930,6 +3184,9 @@ def login_api(request):
 
         # 没有2FA，直接登录
         login(request, user)
+        
+        # 发送登录通知
+        CustomLoginView().send_login_notification(request, user, login_method="API密码登录")
 
         return JsonResponse({
             'success': True,
@@ -2942,4 +3199,3 @@ def login_api(request):
     except Exception as e:
         logger.error(f"登录API错误: {e}")
         return JsonResponse({'error': '服务器内部错误'}, status=500)
-

@@ -220,7 +220,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onUnmounted } from 'vue';
 import { useUserStore } from '../../stores/user.js';
-import { apiService } from '../../services/apiService.js';
+// apiService 已经挂载到 window 对象上
 import { createDebouncedRequest, useCountdown } from '../../utils/request.js';
 import { ElMessage } from 'element-plus';
 
@@ -319,7 +319,7 @@ const saveBio = async () => {
 
   bioSaving.value = true;
   try {
-    const data = await apiService.updateProfile({ bio: bioDraft.value });
+    const data = await window.apiService.updateProfile({ bio: bioDraft.value });
     if (data.status === "success") {
       userStore.updateBio(data.bio);
       bioDraft.value = data.bio;
@@ -329,7 +329,31 @@ const saveBio = async () => {
       ElMessage.error(data.message || "保存失败");
     }
   } catch (error) {
-    ElMessage.error(error.message || "网络错误");
+    console.error('操作失败:', error);
+    // 更全面的错误处理
+    if (error.response?.data) {
+      const data = error.response.data;
+      if (data.error) {
+        ElMessage.error(data.error);
+      } else if (data.message) {
+        ElMessage.error(data.message);
+      } else if (typeof data === 'object' && data !== null) {
+        // 处理字段验证错误
+        const errors = [];
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(`${field}: ${messages.join(', ')}`);
+          } else {
+            errors.push(`${field}: ${messages}`);
+          }
+        }
+        ElMessage.error(errors.join('; '));
+      } else {
+        ElMessage.error("操作失败");
+      }
+    } else {
+      ElMessage.error(error.message || "网络错误");
+    }
   } finally {
     bioSaving.value = false;
   }
@@ -346,13 +370,14 @@ const validateUsername = async (nickname) => {
   }
 
   try {
-    const data = await apiService.checkUsername(nickname);
+    const data = await window.apiService.auth.checkUsername(nickname);
     if (data.is_taken) {
       ElMessage.error("用户名已被占用，请换一个");
       return false;
     }
   } catch (err) {
-    ElMessage.error("无法检查用户名，请稍后再试");
+    console.error('检查用户名失败:', err);
+    ElMessage.error(err.message || "无法检查用户名，请稍后再试");
     return false;
   }
 
@@ -368,7 +393,7 @@ const saveProfile = async () => {
 
   profileSaving.value = true;
   try {
-    const data = await apiService.updateProfile({ nickname: userStore.nickname });
+    const data = await window.apiService.updateProfile({ nickname: userStore.nickname });
     if (data.status === "success") {
       userStore.updateNickname(data.nickname);
       ElMessage.success("用户名修改成功");
@@ -376,7 +401,31 @@ const saveProfile = async () => {
       ElMessage.error(data.message || "更新失败");
     }
   } catch (error) {
-    ElMessage.error(error.message || "网络错误");
+    console.error('操作失败:', error);
+    // 更全面的错误处理
+    if (error.response?.data) {
+      const data = error.response.data;
+      if (data.error) {
+        ElMessage.error(data.error);
+      } else if (data.message) {
+        ElMessage.error(data.message);
+      } else if (typeof data === 'object' && data !== null) {
+        // 处理字段验证错误
+        const errors = [];
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(`${field}: ${messages.join(', ')}`);
+          } else {
+            errors.push(`${field}: ${messages}`);
+          }
+        }
+        ElMessage.error(errors.join('; '));
+      } else {
+        ElMessage.error("操作失败");
+      }
+    } else {
+      ElMessage.error(error.message || "网络错误");
+    }
   } finally {
     profileSaving.value = false;
   }
@@ -407,7 +456,7 @@ const checkEmailAvailabilityCore = async (signal) => {
   }
 
   try {
-    const data = await apiService.checkEmail(email, true);
+    const data = await window.apiService.auth.checkEmail(email, true);
     if (data.is_taken) {
       emailCheck.status = 'taken';
       emailCheck.message = '该邮箱已被绑定';
@@ -459,7 +508,7 @@ const sendEmailCode = async () => {
 
   emailForm.codeSending = true;
   try {
-    const data = await apiService.sendEmailCode({
+    const data = await window.apiService.auth.sendEmailCode({
       email,
       image_captcha_code: emailForm.imageCaptcha,
       purpose: "email_change"
@@ -510,7 +559,7 @@ const changeEmail = async () => {
       requestBody.use_backup = emailForm.useBackup;
     }
 
-    const data = await apiService.updateEmail(requestBody);
+    const data = await window.apiService.updateEmail(requestBody);
 
     if (data.status === "require_2fa") {
       emailForm.show2FA = true;
@@ -531,7 +580,31 @@ const changeEmail = async () => {
       ElMessage.error(data.message || "邮箱修改失败");
     }
   } catch (error) {
-    ElMessage.error(error.message || "网络错误");
+    console.error('操作失败:', error);
+    // 更全面的错误处理
+    if (error.response?.data) {
+      const data = error.response.data;
+      if (data.error) {
+        ElMessage.error(data.error);
+      } else if (data.message) {
+        ElMessage.error(data.message);
+      } else if (typeof data === 'object' && data !== null) {
+        // 处理字段验证错误
+        const errors = [];
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(`${field}: ${messages.join(', ')}`);
+          } else {
+            errors.push(`${field}: ${messages}`);
+          }
+        }
+        ElMessage.error(errors.join('; '));
+      } else {
+        ElMessage.error("操作失败");
+      }
+    } else {
+      ElMessage.error(error.message || "网络错误");
+    }
   } finally {
     if (!emailForm.show2FA) {
       refreshCaptcha();
@@ -564,7 +637,7 @@ const resetEmailForm = () => {
 const sendEmail2faCode = async () => {
   emailForm.twoFaCodeSending = true;
   try {
-    const data = await apiService.sendOperation2FA();
+    const data = await window.apiService.auth.sendOperation2FA();
     if (data.status === "success" && data.requires_2fa) {
       ElMessage.success("验证码已发送至您的邮箱");
     }

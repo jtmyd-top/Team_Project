@@ -79,6 +79,7 @@
             </div>
           </el-form-item>
 
+  
           <!-- 密码 -->
           <el-form-item prop="password">
             <el-input
@@ -148,14 +149,14 @@
                 class="email-code-input"
               />
               <el-button
-                :disabled="countdown > 0 || !isEmailValid || emailCodeLoading"
-                :loading="emailCodeLoading"
-                @click="sendEmailCode"
+                :disabled="countdown > 0 || !isEmailValid || emailCodeLoading || emailCheckLoading"
+                :loading="emailCodeLoading || emailCheckLoading"
+                @click="handleSendVerificationCode"
                 class="email-code-button"
                 size="large"
               >
-                {{ emailCodeButtonText }}
-              </el-button>
+                {{ emailCheckLoading ? '检查中...' : emailCodeButtonText }}
+            </el-button>
             </div>
           </el-form-item>
 
@@ -213,6 +214,86 @@
         <el-button @click="closePrompt" type="primary">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 图形验证码弹窗 -->
+    <el-dialog
+      v-model="showCaptchaDialog"
+      title="安全验证"
+      width="380px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      center
+      class="captcha-dialog"
+    >
+      <div class="captcha-dialog-content">
+        <div class="captcha-header">
+          <div class="captcha-icon">
+            <i class="fas fa-shield-alt"></i>
+          </div>
+          <h3>请完成人机验证</h3>
+          <p>为确保账户安全，请输入下方验证码</p>
+        </div>
+
+        <div class="captcha-body">
+          <div class="captcha-input-group">
+            <el-input
+              v-model.trim="captchaDialogForm.captcha"
+              placeholder="请输入验证码"
+              size="large"
+              maxlength="5"
+              class="captcha-input"
+              :prefix-icon="Key"
+              @keyup.enter="submitCaptcha"
+              @input="handleCaptchaInput"
+              ref="captchaInputRef"
+            />
+          </div>
+
+          <div class="captcha-image-container">
+            <img
+              :src="captchaUrl"
+              alt="验证码"
+              class="captcha-display"
+              @click="() => refreshCaptcha(true)"
+            />
+            <div class="captcha-refresh-hint" @click="() => refreshCaptcha(true)">
+              <i class="fas fa-sync-alt"></i>
+              <span>点击刷新验证码</span>
+            </div>
+          </div>
+
+          <div v-if="captchaDialogError" class="captcha-error">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span class="error-text">{{ captchaDialogError }}</span>
+            <button class="error-clear-btn" @click="captchaDialogError = ''" title="清空错误">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="captcha-dialog-footer">
+          <el-button
+            @click="cancelCaptcha"
+            size="large"
+            class="captcha-cancel-btn"
+          >
+            取消
+          </el-button>
+          <el-button
+            type="primary"
+            @click="submitCaptcha"
+            size="large"
+            :loading="captchaSubmitting"
+            class="captcha-submit-btn"
+          >
+            <i class="fas fa-check"></i>
+            验证并发送
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -248,6 +329,20 @@ const emailError = ref('')
 
 // 验证码倒计时
 const countdown = ref(0)
+
+// 验证码弹窗状态
+const showCaptchaDialog = ref(false)
+const captchaSubmitting = ref(false)
+const captchaDialogError = ref('')
+const captchaDialogForm = reactive({
+  captcha: ''
+})
+const captchaInputRef = ref(null)
+
+// 验证码相关
+const captchaUrl = ref('')
+const currentCaptchaId = ref('')
+const emailCodeSent = ref(false)
 
 // 提示框状态
 const showPrompt = ref(false)
@@ -415,8 +510,8 @@ const checkUsernameOnServer = async () => {
 
   try {
     const response = await window.apiService.auth.checkUsername(signupForm.username)
-    if (response.data.is_taken) {
-      usernameError.value = response.data.message || '用户名已被使用'
+    if (response.is_taken) {
+      usernameError.value = response.message || '用户名已被使用'
     }
   } catch (error) {
     console.error('检查用户名失败:', error)
@@ -425,7 +520,7 @@ const checkUsernameOnServer = async () => {
   }
 }
 
-// 检查邮箱
+// 检查邮箱可用性
 const checkEmailOnServer = async () => {
   if (!isEmailValid.value) return
 
@@ -434,7 +529,7 @@ const checkEmailOnServer = async () => {
 
   try {
     const response = await window.apiService.auth.checkEmail(signupForm.email)
-    if (response.data.is_taken) {
+    if (response.is_taken) {
       emailError.value = '该邮箱已被绑定'
     }
   } catch (error) {
@@ -444,28 +539,137 @@ const checkEmailOnServer = async () => {
   }
 }
 
-// 发送邮箱验证码
-const sendEmailCode = async () => {
-  if (!isEmailValid.value) {
-    ElMessage.error('请输入正确的邮箱地址')
+// 发送验证码前的验证和弹窗显示
+const handleSendVerificationCode = async () => {
+  if (!isEmailValid.value) return
+
+  // 先检查邮箱是否可用
+  emailCheckLoading.value = true
+  emailError.value = ''
+
+  try {
+    const response = await window.apiService.auth.checkEmail(signupForm.email)
+    if (response.is_taken) {
+      emailError.value = '该邮箱已被绑定'
+      return
+    }
+
+    // 邮箱可用，显示验证码弹窗
+    showCaptchaDialog.value = true
+    // 清空之前的错误信息
+    captchaDialogForm.captcha = ''
+    captchaDialogError.value = ''
+    refreshCaptcha()
+    // 聚焦到验证码输入框
+    setTimeout(() => {
+      captchaInputRef.value?.focus()
+    }, 100)
+  } catch (error) {
+    console.error('检查邮箱失败:', error)
+  } finally {
+    emailCheckLoading.value = false
+  }
+}
+
+
+// 弹窗验证码相关方法
+const refreshCaptcha = async (clearError = false) => {
+  try {
+    const response = await fetch('/api/captcha/', {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': window.SETTINGS_INITIAL?.csrfToken || ''
+      }
+    })
+
+    const data = await response.json()
+
+    if (data.status === 'success') {
+      captchaUrl.value = data.captcha_image
+      currentCaptchaId.value = data.captcha_id
+      captchaDialogForm.captcha = ''
+      // 根据参数决定是否清空错误信息
+      if (clearError) {
+        captchaDialogError.value = ''
+      }
+    } else {
+      captchaDialogError.value = data.message || '验证码生成失败'
+    }
+  } catch (error) {
+    console.error('获取验证码失败:', error)
+    captchaDialogError.value = '网络错误，请稍后重试'
+  }
+}
+
+const cancelCaptcha = () => {
+  showCaptchaDialog.value = false
+  captchaDialogForm.captcha = ''
+  captchaDialogError.value = ''
+}
+
+const submitCaptcha = async () => {
+  if (!captchaDialogForm.captcha || captchaDialogForm.captcha.trim().length !== 5) {
+    captchaDialogError.value = '请输入5位验证码'
+    // 不刷新验证码，让用户看到错误提示
     return
   }
 
-  emailCodeLoading.value = true
+  captchaSubmitting.value = true
 
   try {
-    await window.apiService.auth.sendEmailCode(signupForm.email, 'register')
-    ElMessage.success('验证码已发送到您的邮箱，请查收')
-    startCountdown()
+    // 验证图形验证码
+    const response = await fetch('/api/validate-captcha/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        captcha_id: currentCaptchaId.value,
+        captcha_code: captchaDialogForm.captcha
+      })
+    })
+
+    const data = await response.json()
+
+    if (data.status === 'success') {
+      // 验证码正确，发送邮箱验证码
+      try {
+        await window.apiService.auth.sendEmailCode(signupForm.email, 'register', true)
+        ElMessage.success('验证码已发送到您的邮箱，请查收')
+        emailCodeSent.value = true
+        startCountdown()
+        // 关闭弹窗
+        showCaptchaDialog.value = false
+        captchaDialogForm.captcha = ''
+        captchaDialogError.value = ''
+      } catch (emailError) {
+        console.error('发送邮箱验证码失败:', emailError)
+        // 发送邮箱验证码失败，显示错误信息
+        if (emailError.message) {
+          captchaDialogError.value = emailError.message
+        } else {
+          captchaDialogError.value = '发送验证码失败，请稍后重试'
+        }
+      }
+    } else {
+      captchaDialogError.value = data.message || '验证码错误'
+      // 不刷新验证码，让错误信息持续显示
+    }
   } catch (error) {
     console.error('发送验证码失败:', error)
-    if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
+    // 优先使用错误对象的message属性
+    if (error.message) {
+      captchaDialogError.value = error.message
+    } else if (error.response?.data?.error) {
+      captchaDialogError.value = error.response.data.error
+    } else if (error.response?.data?.message) {
+      captchaDialogError.value = error.response.data.message
     } else {
-      ElMessage.error('发送失败，请稍后重试')
+      captchaDialogError.value = '发送失败，请稍后重试'
     }
+    // 不刷新验证码，让错误信息持续显示
   } finally {
-    emailCodeLoading.value = false
+    captchaSubmitting.value = false
   }
 }
 
@@ -478,6 +682,14 @@ const startCountdown = () => {
       clearInterval(timer)
     }
   }, 1000)
+}
+
+// 处理验证码输入
+const handleCaptchaInput = (value) => {
+  // 当用户开始输入时，清空错误信息
+  if (captchaDialogError.value && value && value.length > 0) {
+    captchaDialogError.value = ''
+  }
 }
 
 // 显示提示
@@ -529,9 +741,22 @@ const submitForm = async () => {
         serverErrors.value = Object.values(data.errors).flat()
       } else if (data.error) {
         serverErrors.value = [data.error]
+      } else if (typeof data === 'object' && data !== null) {
+        // 处理 {password: ["此字段不能为空"]} 格式
+        const errors = []
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(...messages)
+          } else {
+            errors.push(messages)
+          }
+        }
+        serverErrors.value = errors
       } else {
         serverErrors.value = ['注册失败，请检查信息后重试']
       }
+    } else if (error.message) {
+      serverErrors.value = [error.message]
     } else {
       serverErrors.value = ['网络错误，请稍后重试']
     }
@@ -805,6 +1030,242 @@ const getPasswordFirstInvalidRule = () => {
 .email-code-button {
   min-width: 120px;
   white-space: nowrap;
+}
+
+/* 弹窗式验证码样式 */
+.captcha-dialog .el-dialog {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.captcha-dialog .el-dialog__header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 0;
+  margin: 0;
+  border-radius: 16px 16px 0 0;
+}
+
+.captcha-dialog .el-dialog__header .el-dialog__title {
+  color: white;
+  font-weight: 600;
+  font-size: 18px;
+  padding: 20px 24px;
+}
+
+.captcha-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: white;
+  font-size: 20px;
+}
+
+.captcha-dialog-content {
+  padding: 0;
+}
+
+.captcha-header {
+  background: linear-gradient(135deg, #f8f9ff 0%, #e8f4ff 100%);
+  padding: 32px 24px;
+  text-align: center;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.captcha-icon {
+  width: 60px;
+  height: 60px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+}
+
+.captcha-icon i {
+  color: white;
+  font-size: 24px;
+}
+
+.captcha-header h3 {
+  margin: 0 0 8px 0;
+  color: #2c3e50;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.captcha-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.captcha-body {
+  padding: 32px 24px;
+}
+
+.captcha-input-group {
+  margin-bottom: 24px;
+}
+
+.captcha-input {
+  width: 100%;
+}
+
+.captcha-input .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+}
+
+.captcha-input .el-input__wrapper:hover {
+  border-color: #cbd5e0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.captcha-input .el-input__wrapper.is-focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+}
+
+.captcha-image-container {
+  position: relative;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.captcha-display {
+  width: 100%;
+  max-width: 200px;
+  height: 70px;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.captcha-display:hover {
+  border-color: #667eea;
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
+  transform: scale(1.02);
+}
+
+.captcha-refresh-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.captcha-refresh-hint:hover {
+  color: #667eea;
+}
+
+.captcha-refresh-hint i {
+  font-size: 14px;
+}
+
+.captcha-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 14px;
+  margin-top: 12px;
+  animation: slideInUp 0.3s ease;
+  position: relative;
+}
+
+.captcha-error i {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.captcha-error .error-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.captcha-error .error-clear-btn {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+
+.captcha-error .error-clear-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.captcha-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 24px 32px 24px;
+  background: #f8fafc;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.captcha-cancel-btn {
+  background: white;
+  border: 2px solid #e2e8f0;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.captcha-cancel-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e0;
+  color: #475569;
+}
+
+.captcha-submit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.captcha-submit-btn:hover {
+  background: linear-gradient(135deg, #5a67d8 0%, #6b4b8d 100%);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.captcha-submit-btn i {
+  font-size: 14px;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 服务条款样式 */

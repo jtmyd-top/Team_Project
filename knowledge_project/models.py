@@ -448,6 +448,74 @@ class CaptchaSession(models.Model):
         return f'Captcha {self.captcha_id[:8]}...'
 
 
+class LoginDevice(models.Model):
+    """
+    登录设备记录模型 - 用于智能登录通知
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='login_devices', verbose_name='用户')
+    device_fingerprint = models.CharField('设备指纹', max_length=64, db_index=True)
+    ip_address = models.GenericIPAddressField('IP地址', db_index=True)
+    ip_location = models.CharField('IP归属地', max_length=200, blank=True)
+    user_agent = models.TextField('用户代理')
+    device_info = models.CharField('设备信息', max_length=200)
+    
+    # 首次和最后登录时间
+    first_login_at = models.DateTimeField('首次登录时间', auto_now_add=True)
+    last_login_at = models.DateTimeField('最后登录时间', auto_now=True)
+    login_count = models.IntegerField('登录次数', default=1)
+    
+    # 信任状态
+    is_trusted = models.BooleanField('是否信任', default=False)
+    trusted_at = models.DateTimeField('信任时间', null=True, blank=True)
+    
+    class Meta:
+        verbose_name = '登录设备'
+        verbose_name_plural = '登录设备'
+        unique_together = ('user', 'device_fingerprint')
+        indexes = [
+            models.Index(fields=['user', 'device_fingerprint']),
+            models.Index(fields=['user', 'last_login_at']),
+        ]
+    
+    def __str__(self):
+        return f'{self.user.username} - {self.device_info} - {self.ip_location}'
+
+
+class LoginNotification(models.Model):
+    """
+    登录通知记录 - 防止通知滥发
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='login_notifications', verbose_name='用户')
+    device = models.ForeignKey(LoginDevice, on_delete=models.CASCADE, related_name='notifications', verbose_name='设备')
+    ip_address = models.GenericIPAddressField('IP地址')
+    
+    # 通知原因
+    REASON_CHOICES = [
+        ('new_device', '新设备'),
+        ('new_location', '新位置'),
+        ('suspicious', '可疑登录'),
+        ('first_login', '首次登录'),
+    ]
+    reason = models.CharField('通知原因', max_length=20, choices=REASON_CHOICES)
+    
+    # 通知时间
+    sent_at = models.DateTimeField('发送时间', auto_now_add=True)
+    
+    # 邮件发送状态
+    email_sent = models.BooleanField('邮件已发送', default=False)
+    
+    class Meta:
+        verbose_name = '登录通知记录'
+        verbose_name_plural = '登录通知记录'
+        indexes = [
+            models.Index(fields=['user', 'sent_at']),
+            models.Index(fields=['device', 'sent_at']),
+        ]
+    
+    def __str__(self):
+        return f'{self.user.username} - {self.get_reason_display()} - {self.sent_at.strftime("%Y-%m-%d %H:%M")}'
+
+
 # ---------------- 头像抓取逻辑 ----------------
 def _http_get(url):
     try:

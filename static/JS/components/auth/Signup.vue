@@ -151,7 +151,7 @@
               <el-button
                 :disabled="countdown > 0 || !isEmailValid || emailCodeLoading || emailCheckLoading"
                 :loading="emailCodeLoading || emailCheckLoading"
-                @click="checkEmailOnServer"
+                @click="handleSendVerificationCode"
                 class="email-code-button"
                 size="large"
               >
@@ -219,7 +219,7 @@
     <el-dialog
       v-model="showCaptchaDialog"
       title="安全验证"
-      width="480px"
+      width="380px"
       :close-on-click-modal="false"
       :close-on-press-escape="false"
       center
@@ -240,10 +240,11 @@
               v-model.trim="captchaDialogForm.captcha"
               placeholder="请输入验证码"
               size="large"
-              maxlength="4"
+              maxlength="5"
               class="captcha-input"
               :prefix-icon="Key"
               @keyup.enter="submitCaptcha"
+              @input="handleCaptchaInput"
               ref="captchaInputRef"
             />
           </div>
@@ -253,9 +254,9 @@
               :src="captchaUrl"
               alt="验证码"
               class="captcha-display"
-              @click="refreshCaptcha"
+              @click="() => refreshCaptcha(true)"
             />
-            <div class="captcha-refresh-hint">
+            <div class="captcha-refresh-hint" @click="() => refreshCaptcha(true)">
               <i class="fas fa-sync-alt"></i>
               <span>点击刷新验证码</span>
             </div>
@@ -263,7 +264,10 @@
 
           <div v-if="captchaDialogError" class="captcha-error">
             <i class="fas fa-exclamation-triangle"></i>
-            {{ captchaDialogError }}
+            <span class="error-text">{{ captchaDialogError }}</span>
+            <button class="error-clear-btn" @click="captchaDialogError = ''" title="清空错误">
+              <i class="fas fa-times"></i>
+            </button>
           </div>
         </div>
       </div>
@@ -336,7 +340,8 @@ const captchaDialogForm = reactive({
 const captchaInputRef = ref(null)
 
 // 验证码相关
-const captchaUrl = ref('/captcha/')
+const captchaUrl = ref('')
+const currentCaptchaId = ref('')
 const emailCodeSent = ref(false)
 
 // 提示框状态
@@ -373,7 +378,7 @@ const validateConfirmPassword = (rule, value, callback) => {
 const usernameRules = ref([
   { text: '至少6个字符', valid: false },
   { text: '以小写字母开头', valid: false },
-  { text: '只能包含字母、数字、下划线', valid: false }
+  { text: '只能包含小写字母、数字、下划线', valid: false }
 ])
 
 // 密码验证规则
@@ -395,7 +400,7 @@ const signupRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
     { min: 6, message: '用户名至少6位', trigger: 'blur' },
-    { pattern: /^[a-z][a-z0-9_]*$/, message: '用户名必须以小写字母开头，只能包含字母数字下划线', trigger: 'blur' }
+    { pattern: /^[a-z][a-z0-9_]*$/, message: '用户名必须以小写字母开头，只能包含小写字母数字下划线', trigger: 'blur' }
   ],
   email: [
     { required: true, message: '请输入邮箱地址', trigger: 'blur' },
@@ -412,7 +417,7 @@ const signupRules = {
   ],
   emailCode: [
     { required: true, message: '请输入邮箱验证码', trigger: 'blur' },
-    { len: 6, message: '验证码为6位', trigger: 'blur' }
+    
   ],
   agreeTerms: [
     { required: true, message: '请同意服务条款和隐私政策', trigger: 'change' }
@@ -505,17 +510,17 @@ const checkUsernameOnServer = async () => {
 
   try {
     const response = await window.apiService.auth.checkUsername(signupForm.username)
-    if (response.data.is_taken) {
-      usernameError.value = response.data.message || '用户名已被使用'
+    if (response.is_taken) {
+      usernameError.value = response.message || '用户名已被使用'
     }
   } catch (error) {
-    console.error('检查用户名失败:', error)
+    // 静默处理错误
   } finally {
     usernameCheckLoading.value = false
   }
 }
 
-// 检查邮箱
+// 检查邮箱可用性
 const checkEmailOnServer = async () => {
   if (!isEmailValid.value) return
 
@@ -524,19 +529,43 @@ const checkEmailOnServer = async () => {
 
   try {
     const response = await window.apiService.auth.checkEmail(signupForm.email)
-    if (response.data.is_taken) {
+    if (response.is_taken) {
       emailError.value = '该邮箱已被绑定'
-    } else {
-      // 邮箱可用，显示验证码弹窗
-      showCaptchaDialog.value = true
-      refreshCaptcha()
-      // 聚焦到验证码输入框
-      setTimeout(() => {
-        captchaInputRef.value?.focus()
-      }, 100)
     }
   } catch (error) {
-    console.error('检查邮箱失败:', error)
+    // 静默处理错误
+  } finally {
+    emailCheckLoading.value = false
+  }
+}
+
+// 发送验证码前的验证和弹窗显示
+const handleSendVerificationCode = async () => {
+  if (!isEmailValid.value) return
+
+  // 先检查邮箱是否可用
+  emailCheckLoading.value = true
+  emailError.value = ''
+
+  try {
+    const response = await window.apiService.auth.checkEmail(signupForm.email)
+    if (response.is_taken) {
+      emailError.value = '该邮箱已被绑定'
+      return
+    }
+
+    // 邮箱可用，显示验证码弹窗
+    showCaptchaDialog.value = true
+    // 清空之前的错误信息
+    captchaDialogForm.captcha = ''
+    captchaDialogError.value = ''
+    refreshCaptcha()
+    // 聚焦到验证码输入框
+    setTimeout(() => {
+      captchaInputRef.value?.focus()
+    }, 100)
+  } catch (error) {
+    // 静默处理错误
   } finally {
     emailCheckLoading.value = false
   }
@@ -544,10 +573,32 @@ const checkEmailOnServer = async () => {
 
 
 // 弹窗验证码相关方法
-const refreshCaptcha = () => {
-  // 添加时间戳防止缓存
-  captchaUrl.value = `/captcha/?t=${new Date().getTime()}`
-  captchaDialogError.value = ''
+const refreshCaptcha = async (clearError = false) => {
+  try {
+    const response = await fetch('/api/captcha/', {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': window.SETTINGS_INITIAL?.csrfToken || ''
+      }
+    })
+
+    const data = await response.json()
+
+    if (data.status === 'success') {
+      captchaUrl.value = data.captcha_image
+      currentCaptchaId.value = data.captcha_id
+      captchaDialogForm.captcha = ''
+      // 根据参数决定是否清空错误信息
+      if (clearError) {
+        captchaDialogError.value = ''
+      }
+    } else {
+      captchaDialogError.value = data.message || '验证码生成失败'
+    }
+  } catch (error) {
+    // 静默处理错误
+    captchaDialogError.value = '网络错误，请稍后重试'
+  }
 }
 
 const cancelCaptcha = () => {
@@ -557,52 +608,64 @@ const cancelCaptcha = () => {
 }
 
 const submitCaptcha = async () => {
-  if (!captchaDialogForm.captcha || captchaDialogForm.captcha.trim().length !== 4) {
-    captchaDialogError.value = '请输入4位验证码'
+  if (!captchaDialogForm.captcha || captchaDialogForm.captcha.trim().length !== 5) {
+    captchaDialogError.value = '请输入5位验证码'
+    // 不刷新验证码，让用户看到错误提示
     return
   }
 
   captchaSubmitting.value = true
-  captchaDialogError.value = ''
 
   try {
     // 验证图形验证码
-    const response = await fetch('/captcha/', {
+    const response = await fetch('/api/validate-captcha/', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': window.SETTINGS_INITIAL?.csrfToken || ''
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        captcha: captchaDialogForm.captcha,
-        email: signupForm.email
+        captcha_id: currentCaptchaId.value,
+        captcha_code: captchaDialogForm.captcha
       })
     })
 
     const data = await response.json()
 
-    if (data.success) {
+    if (data.status === 'success') {
       // 验证码正确，发送邮箱验证码
-      await window.apiService.auth.sendEmailCode(signupForm.email, 'register')
-      ElMessage.success('验证码已发送到您的邮箱，请查收')
-      emailCodeSent.value = true
-      startCountdown()
-      // 关闭弹窗
-      showCaptchaDialog.value = false
-      captchaDialogForm.captcha = ''
-      captchaDialogError.value = ''
+      try {
+        await window.apiService.auth.sendEmailCode(signupForm.email, 'register', true)
+        ElMessage.success('验证码已发送到您的邮箱，请查收')
+        emailCodeSent.value = true
+        startCountdown()
+        // 关闭弹窗
+        showCaptchaDialog.value = false
+        captchaDialogForm.captcha = ''
+        captchaDialogError.value = ''
+      } catch (emailError) {
+        // 发送邮箱验证码失败，显示错误信息
+        if (emailError.message) {
+          captchaDialogError.value = emailError.message
+        } else {
+          captchaDialogError.value = '发送验证码失败，请稍后重试'
+        }
+      }
     } else {
-      captchaDialogError.value = data.error || '验证码错误'
-      refreshCaptcha() // 刷新验证码
+      captchaDialogError.value = data.message || '验证码错误'
+      // 不刷新验证码，让错误信息持续显示
     }
   } catch (error) {
-    console.error('发送验证码失败:', error)
-    if (error.response?.data?.error) {
+    // 优先使用错误对象的message属性
+    if (error.message) {
+      captchaDialogError.value = error.message
+    } else if (error.response?.data?.error) {
       captchaDialogError.value = error.response.data.error
+    } else if (error.response?.data?.message) {
+      captchaDialogError.value = error.response.data.message
     } else {
       captchaDialogError.value = '发送失败，请稍后重试'
     }
-    refreshCaptcha() // 出错时刷新验证码
+    // 不刷新验证码，让错误信息持续显示
   } finally {
     captchaSubmitting.value = false
   }
@@ -617,6 +680,14 @@ const startCountdown = () => {
       clearInterval(timer)
     }
   }, 1000)
+}
+
+// 处理验证码输入
+const handleCaptchaInput = (value) => {
+  // 当用户开始输入时，清空错误信息
+  if (captchaDialogError.value && value && value.length > 0) {
+    captchaDialogError.value = ''
+  }
 }
 
 // 显示提示
@@ -639,13 +710,44 @@ const closePrompt = () => {
 const submitForm = async () => {
   if (!signupFormRef.value) return
 
+  // 验证表单 - 使用 .catch() 捕获验证错误并提取具体信息
+  let validationErrors = []
+  const valid = await signupFormRef.value.validate().catch((errors) => {
+    // 提取验证失败的字段信息
+    if (errors && typeof errors === 'object') {
+      for (const field in errors) {
+        const fieldErrors = errors[field]
+        if (Array.isArray(fieldErrors)) {
+          fieldErrors.forEach(err => {
+            if (err && err.message) {
+              validationErrors.push(err.message)
+            }
+          })
+        }
+      }
+    }
+    return false
+  })
+  
+  if (!valid) {
+    // 表单验证失败，显示具体的验证错误
+    if (validationErrors.length > 0) {
+      // 显示所有验证错误
+      validationErrors.forEach(error => {
+        ElMessage.error(error)
+      })
+    } else {
+      // 如果无法提取错误信息，显示通用提示
+      ElMessage.warning('请检查并填写完整信息')
+    }
+    return
+  }
+
+  // 表单验证通过，开始注册
+  submitLoading.value = true
+  serverErrors.value = []
+
   try {
-    const valid = await signupFormRef.value.validate()
-    if (!valid) return
-
-    submitLoading.value = true
-    serverErrors.value = []
-
     const formData = {
       username: signupForm.username,
       email: signupForm.email,
@@ -659,18 +761,59 @@ const submitForm = async () => {
 
     showPromptMessage('success', '注册成功！', '您的账户已创建成功，请登录')
   } catch (error) {
-    console.error('注册失败:', error)
+    // 解析后端返回的错误信息
     if (error.response?.data) {
       const data = error.response.data
+      const errors = []
+      
+      // 处理各种可能的错误格式
       if (typeof data === 'string') {
-        serverErrors.value = [data]
-      } else if (data.errors) {
-        serverErrors.value = Object.values(data.errors).flat()
+        // 简单字符串错误
+        errors.push(data)
+      } else if (data.status === 'error' && data.message) {
+        // {status: 'error', message: '...'}
+        errors.push(data.message)
       } else if (data.error) {
-        serverErrors.value = [data.error]
-      } else {
-        serverErrors.value = ['注册失败，请检查信息后重试']
+        // {error: '...'}
+        errors.push(data.error)
+      } else if (data.errors) {
+        // {errors: {...}}
+        for (const [field, messages] of Object.entries(data.errors)) {
+          if (Array.isArray(messages)) {
+            // Django表单验证格式: {field: [{message: '...'}, ...]}
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          }
+        }
+      } else if (typeof data === 'object' && data !== null) {
+        // Django表单验证格式: {username: ['错误1'], email: ['错误2']}
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          } else if (typeof messages === 'object' && messages.message) {
+            errors.push(messages.message)
+          }
+        }
       }
+      
+      serverErrors.value = errors.length > 0 ? errors : ['注册失败，请检查信息后重试']
+    } else if (error.message && error.message !== '请求失败') {
+      serverErrors.value = [error.message]
     } else {
       serverErrors.value = ['网络错误，请稍后重试']
     }
@@ -1100,10 +1243,32 @@ const getPasswordFirstInvalidRule = () => {
   font-size: 14px;
   margin-top: 12px;
   animation: slideInUp 0.3s ease;
+  position: relative;
 }
 
 .captcha-error i {
   font-size: 16px;
+  flex-shrink: 0;
+}
+
+.captcha-error .error-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.captcha-error .error-clear-btn {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+
+.captcha-error .error-clear-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
 }
 
 .captcha-dialog-footer {

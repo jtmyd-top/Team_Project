@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/glassmorphism.css' %}">
 <link rel="stylesheet" href="{% static 'css/modern-inputs.css' %}">
 <!-- 强制刷新 api-service.js -->
-<script type="module" src="{% static 'JS/services/apiService.js' %}?v={{ timestamp|default:'20241214' }}"></script>
+<script type="module" src="{% static 'JS/services/apiService.js' %}?v={{ timestamp|default:'20241214-007' }}"></script>
 {% endblock %}
 
 {% block content %}
@@ -119,6 +119,288 @@
     font-size: 14px !important;
     padding: 0 16px !important;
   }
+}
+
+/* ==================== 美化验证码弹窗样式 ==================== */
+
+#signup-app .captcha-dialog .el-dialog {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(30px) !important;
+  -webkit-backdrop-filter: blur(30px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 16px !important;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.12),
+    0 4px 20px rgba(0, 0, 0, 0.08) !important;
+  overflow: hidden !important;
+  max-width: 90vw !important;
+}
+
+#signup-app .captcha-dialog .el-dialog__header {
+  background: linear-gradient(135deg, rgba(120, 119, 198, 0.1), rgba(255, 119, 198, 0.05)) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 16px 20px 12px !important;
+  margin: 0 !important;
+}
+
+#signup-app .captcha-dialog .el-dialog__title {
+  color: #1f2937 !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+}
+
+#signup-app .captcha-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: #6b7280 !important;
+  font-size: 20px !important;
+  transition: color 0.2s ease !important;
+}
+
+#signup-app .captcha-dialog .el-dialog__headerbtn .el-dialog__close:hover {
+  color: #ef4444 !important;
+}
+
+/* 验证码弹窗内容样式 */
+#signup-app .captcha-dialog-content {
+  padding: 0 !important;
+}
+
+#signup-app .captcha-header {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.05)) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 18px !important;
+  text-align: center !important;
+  border-radius: 0 !important;
+}
+
+#signup-app .captcha-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 48px !important;
+  height: 48px !important;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(147, 51, 234, 0.1)) !important;
+  border-radius: 50% !important;
+  margin-bottom: 12px !important;
+  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+#signup-app .captcha-icon i {
+  font-size: 20px !important;
+  color: #3b82f6 !important;
+}
+
+#signup-app .captcha-header h3 {
+  color: #1f2937 !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  margin: 0 0 6px 0 !important;
+}
+
+#signup-app .captcha-header p {
+  color: #6b7280 !important;
+  font-size: 13px !important;
+  margin: 0 !important;
+  font-weight: 400 !important;
+}
+
+/* 验证码主体区域 */
+#signup-app .captcha-body {
+  padding: 24px 20px !important;
+  background: transparent !important;
+}
+
+#signup-app .captcha-input-group {
+  margin-bottom: 20px !important;
+}
+
+#signup-app .captcha-input {
+  width: 100% !important;
+}
+
+#signup-app .captcha-input .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 2px solid rgba(59, 130, 246, 0.2) !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  padding: 0 16px !important;
+  height: 44px !important;
+}
+
+#signup-app .captcha-input .el-input__wrapper:hover {
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  transform: translateY(-2px) !important;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+}
+
+#signup-app .captcha-input .el-input__wrapper.is-focus {
+  border-color: #3b82f6 !important;
+  box-shadow:
+    0 0 0 4px rgba(59, 130, 246, 0.15),
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+  transform: translateY(-3px) !important;
+}
+
+#signup-app .captcha-input .el-input__inner {
+  color: #1f2937 !important;
+  font-weight: 600 !important;
+  font-size: 16px !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+#signup-app .captcha-input .el-input__inner::placeholder {
+  color: rgba(31, 41, 55, 0.5) !important;
+  font-weight: 400 !important;
+}
+
+#signup-app .captcha-input .el-input__prefix {
+  color: rgba(31, 41, 55, 0.6) !important;
+}
+
+#signup-app .captcha-input .el-input__prefix i {
+  font-size: 18px !important;
+}
+
+/* 验证码图片容器 */
+#signup-app .captcha-image-container {
+  position: relative !important;
+  display: flex !important;
+  justify-content: center !important;
+  margin-bottom: 16px !important;
+}
+
+#signup-app .captcha-display {
+  width: 160px !important;
+  height: 48px !important;
+  border-radius: 8px !important;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  border: 2px solid rgba(255, 255, 255, 0.6) !important;
+  transition: all 0.3s ease !important;
+  cursor: pointer !important;
+}
+
+#signup-app .captcha-display:hover {
+  transform: scale(1.03) !important;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+}
+
+#signup-app .captcha-refresh-hint {
+  position: absolute !important;
+  bottom: -20px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  color: #6b7280 !important;
+  font-size: 11px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  padding: 3px 8px !important;
+  border-radius: 8px !important;
+  white-space: nowrap !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+#signup-app .captcha-refresh-hint i {
+  font-size: 11px !important;
+  color: #3b82f6 !important;
+}
+
+/* 验证码错误信息 */
+#signup-app .captcha-error {
+  background: rgba(239, 68, 68, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(239, 68, 68, 0.2) !important;
+  border-radius: 8px !important;
+  padding: 10px 12px !important;
+  color: #dc2626 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin-top: 12px !important;
+}
+
+#signup-app .captcha-error i {
+  font-size: 12px !important;
+  color: #dc2626 !important;
+}
+
+/* 验证码弹窗底部按钮 */
+#signup-app .captcha-dialog-footer {
+  display: flex !important;
+  gap: 10px !important;
+  padding: 0 20px 20px !important;
+  justify-content: center !important;
+}
+
+#signup-app .captcha-cancel-btn {
+  width: 100px !important;
+  height: 38px !important;
+  background: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border: 2px solid rgba(107, 114, 128, 0.3) !important;
+  border-radius: 8px !important;
+  color: #6b7280 !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  transition: all 0.3s ease !important;
+}
+
+#signup-app .captcha-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(107, 114, 128, 0.5) !important;
+  color: #374151 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+}
+
+#signup-app .captcha-submit-btn {
+  width: 130px !important;
+  height: 38px !important;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.9), rgba(147, 51, 234, 0.8)) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 8px !important;
+  color: white !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  transition: all 0.3s ease !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+#signup-app .captcha-submit-btn:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 1), rgba(147, 51, 234, 0.9)) !important;
+  transform: translateY(-1px) !important;
+  box-shadow:
+    0 4px 16px rgba(59, 130, 246, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+#signup-app .captcha-submit-btn i {
+  font-size: 12px !important;
+  color: white !important;
 }
 
 /* 使用现代化输入框样式，覆盖毛玻璃效果的默认样式 */
@@ -418,9 +700,13 @@
 </style>
 
 <!-- 加载构建后的Vue应用 -->
-<script type="module" src="{% static 'JS/dist/signup.js' %}?v={{ timestamp|default:'20241214' }}"></script>
+<script type="module" src="{% static 'JS/dist/signup.js' %}?v=20241215-001"></script>
 
 <script>
+// 设置CSRF令牌供JavaScript使用
+window.SETTINGS_INITIAL = window.SETTINGS_INITIAL || {};
+window.SETTINGS_INITIAL.csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+
 // 确保动画结束后保持正确的方向
 document.addEventListener('DOMContentLoaded', function() {
   const signupApp = document.getElementById('signupApp');

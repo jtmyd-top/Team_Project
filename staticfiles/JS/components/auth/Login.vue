@@ -263,10 +263,48 @@ const handleLogin = async () => {
     }
   } catch (error) {
     console.error('登录失败:', error)
-    if (error.error) {
-      ElMessage.error(error.error)
-    } else if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
+    // 优先显示具体的错误信息
+    let errorMessage = ''
+
+    if (error.message) {
+      errorMessage = error.message
+    } else if (error.response?.data) {
+      const data = error.response.data
+      // 处理表单验证错误
+      if (data.errors) {
+        // 如果是errors对象格式
+        const errors = []
+        for (const [field, messages] of Object.entries(data.errors)) {
+          if (Array.isArray(messages)) {
+            errors.push(...messages)
+          } else {
+            errors.push(messages)
+          }
+        }
+        errorMessage = errors.join('; ')
+      } else if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      } else if (typeof data === 'object' && data !== null) {
+        // 处理 {password: ["此字段不能为空"]} 格式
+        const errors = []
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(`${field}: ${messages.join(', ')}`)
+          } else {
+            errors.push(`${field}: ${messages}`)
+          }
+        }
+        errorMessage = errors.join('; ')
+      }
+    } else if (error.error) {
+      errorMessage = error.error
+    }
+
+    // 显示错误信息
+    if (errorMessage) {
+      ElMessage.error(errorMessage)
     } else {
       ElMessage.error('登录失败，请检查网络连接')
     }
@@ -297,8 +335,22 @@ const verifyTwoFA = async () => {
     }, 1000)
   } catch (error) {
     console.error('2FA验证失败:', error)
-    if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
+    // 使用相同的错误处理逻辑
+    let errorMessage = ''
+
+    if (error.message) {
+      errorMessage = error.message
+    } else if (error.response?.data) {
+      const data = error.response.data
+      if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      }
+    }
+
+    if (errorMessage) {
+      ElMessage.error(errorMessage)
     } else {
       ElMessage.error('验证失败，请检查网络连接')
     }
@@ -320,11 +372,21 @@ const resendTwoFACode = async () => {
     ElMessage.success('验证码已重新发送到您的邮箱')
   } catch (error) {
     console.error('重新发送验证码失败:', error)
-    if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
-    } else {
-      ElMessage.error('发送失败，请稍后重试')
+    // 使用统一的错误处理函数
+    let errorMessage = ''
+
+    if (error.message) {
+      errorMessage = error.message
+    } else if (error.response?.data) {
+      const data = error.response.data
+      if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      }
     }
+
+    ElMessage.error(errorMessage || '发送失败，请稍后重试')
   } finally {
     resendLoading.value = false
   }

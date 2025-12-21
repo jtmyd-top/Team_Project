@@ -10,19 +10,40 @@ const csrfHeader = { "X-CSRFToken": csrfToken };
 async function postRequest(url, body) {
   const response = await fetch(url, {
     method: "POST",
-    headers: { 
-      "Content-Type": "application/json", 
-      ...csrfHeader 
+    headers: {
+      "Content-Type": "application/json",
+      ...csrfHeader
     },
     body: JSON.stringify(body),
   });
-  
-  const data = await response.json();
-  
-  if (!response.ok) {
-    throw new Error(data.message || '请求失败');
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    // 如果不是JSON格式，可能是HTML错误页面
+    const text = await response.text();
+    if (response.status === 404) {
+      throw new Error('API端点不存在 (404)');
+    } else if (response.status === 403) {
+      throw new Error('访问被拒绝 (403)');
+    } else if (response.status === 500) {
+      throw new Error('服务器内部错误 (500)');
+    } else {
+      throw new Error(`请求失败 (${response.status})`);
+    }
   }
-  
+
+  if (!response.ok) {
+    // 创建一个包含更多信息的错误对象
+    const error = new Error('请求失败');
+    error.response = {
+      status: response.status,
+      data: data
+    };
+    throw error;
+  }
+
   return data;
 }
 
@@ -32,18 +53,41 @@ async function postRequest(url, body) {
 async function getRequest(url, params = {}) {
   const queryString = new URLSearchParams(params).toString();
   const fullUrl = queryString ? `${url}?${queryString}` : url;
-  
+
   const response = await fetch(fullUrl, {
     method: "GET",
     headers: csrfHeader,
   });
-  
-  const data = await response.json();
-  
-  if (!response.ok) {
-    throw new Error(data.message || '请求失败');
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    // 如果不是JSON格式，可能是HTML错误页面
+    const text = await response.text();
+    if (response.status === 404) {
+      throw new Error('API端点不存在 (404)');
+    } else if (response.status === 403) {
+      throw new Error('访问被拒绝 (403)');
+    } else if (response.status === 500) {
+      throw new Error('服务器内部错误 (500)');
+    } else {
+      throw new Error(`请求失败 (${response.status})`);
+    }
   }
-  
+
+  if (!response.ok) {
+    // 创建一个包含更多信息的错误对象
+    // 优先使用 error 字段，如果没有则使用 message
+    const errorMessage = data.error || data.message || '请求失败';
+    const error = new Error(errorMessage);
+    error.response = {
+      status: response.status,
+      data: data
+    };
+    throw error;
+  }
+
   return data;
 }
 
@@ -79,7 +123,7 @@ const apiService = {
      * 检查邮箱是否可用
      */
     checkEmail(email, excludeSelf = false) {
-      return postRequest('/check-email/', {
+      return getRequest('/check-email/', {
         email,
         exclude_self: excludeSelf ? '1' : '0'
       });
@@ -88,8 +132,12 @@ const apiService = {
     /**
      * 发送邮箱验证码
      */
-    sendEmailCode(email, purpose = 'register') {
-      return postRequest('/send-email-code/', { email, purpose });
+    sendEmailCode(email, purpose = 'register', captchaPreValidated = false) {
+      return postRequest('/send-email-code/', {
+        email,
+        purpose,
+        captcha_pre_validated: captchaPreValidated
+      });
     },
 
     /**
@@ -120,7 +168,7 @@ const apiService = {
    * 更新个人资料（昵称或个性签名）
    */
   updateProfile(payload) {
-    return postRequest('/api/update-profile/', payload);
+    return postRequest('/update-profile/', payload);
   },
 
 
@@ -137,7 +185,7 @@ const apiService = {
    * 修改邮箱
    */
   updateEmail(payload) {
-    return postRequest('/api/update-email/', payload);
+    return postRequest('/update-email/', payload);
   },
   
   // ==================== 账户安全相关 ====================

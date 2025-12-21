@@ -231,12 +231,26 @@ const twoFaRules = computed(() => {
 const handleLogin = async () => {
   if (!loginFormRef.value) return
 
+  // 验证表单 - 使用 .catch() 确保 Element Plus 正常显示字段错误
+  const valid = await loginFormRef.value.validate().catch(() => false)
+  if (!valid) {
+    // 表单验证失败
+    // 检查是否有字段已填写但不符合规则
+    const hasContent = loginForm.username || loginForm.password
+    if (hasContent) {
+      // 用户已输入内容但不符合规则，提示用户名或密码错误
+      ElMessage.error('用户名或密码格式不正确')
+    } else {
+      // 用户未输入内容，提示填写信息
+      ElMessage.warning('请填写用户名和密码')
+    }
+    return
+  }
+
+  // 表单验证通过，开始登录
+  loading.value = true
+  
   try {
-    const valid = await loginFormRef.value.validate()
-    if (!valid) return
-
-    loading.value = true
-
     const response = await window.apiService.auth.login({
       username: loginForm.username,
       password: loginForm.password
@@ -262,14 +276,64 @@ const handleLogin = async () => {
       }, 1000)
     }
   } catch (error) {
-    console.error('登录失败:', error)
-    if (error.error) {
-      ElMessage.error(error.error)
-    } else if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
-    } else {
-      ElMessage.error('登录失败，请检查网络连接')
+    // 这里只处理API请求错误
+    let errorMessage = ''
+
+    if (error.response?.data) {
+      const data = error.response.data
+      
+      // 处理各种可能的错误格式
+      if (typeof data === 'string') {
+        errorMessage = data
+      } else if (data.status === 'error' && data.message) {
+        errorMessage = data.message
+      } else if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      } else if (data.errors) {
+        // {errors: {...}}
+        const errors = []
+        for (const [field, messages] of Object.entries(data.errors)) {
+          if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          }
+        }
+        errorMessage = errors.join('; ')
+      } else if (typeof data === 'object' && data !== null) {
+        // Django表单验证格式: {username: ['错误1'], password: ['错误2']}
+        const errors = []
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          } else if (typeof messages === 'object' && messages.message) {
+            errors.push(messages.message)
+          }
+        }
+        errorMessage = errors.join('; ')
+      }
+    } else if (error.message && error.message !== '请求失败') {
+      errorMessage = error.message
     }
+
+    // 显示错误信息
+    ElMessage.error(errorMessage || '登录失败，请检查网络连接')
   } finally {
     loading.value = false
   }
@@ -296,9 +360,22 @@ const verifyTwoFA = async () => {
       window.location.href = '/'
     }, 1000)
   } catch (error) {
-    console.error('2FA验证失败:', error)
-    if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
+    // 使用相同的错误处理逻辑
+    let errorMessage = ''
+
+    if (error.message) {
+      errorMessage = error.message
+    } else if (error.response?.data) {
+      const data = error.response.data
+      if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      }
+    }
+
+    if (errorMessage) {
+      ElMessage.error(errorMessage)
     } else {
       ElMessage.error('验证失败，请检查网络连接')
     }
@@ -319,12 +396,21 @@ const resendTwoFACode = async () => {
     startCountdown()
     ElMessage.success('验证码已重新发送到您的邮箱')
   } catch (error) {
-    console.error('重新发送验证码失败:', error)
-    if (error.response?.data?.error) {
-      ElMessage.error(error.response.data.error)
-    } else {
-      ElMessage.error('发送失败，请稍后重试')
+    // 使用统一的错误处理函数
+    let errorMessage = ''
+
+    if (error.message) {
+      errorMessage = error.message
+    } else if (error.response?.data) {
+      const data = error.response.data
+      if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      }
     }
+
+    ElMessage.error(errorMessage || '发送失败，请稍后重试')
   } finally {
     resendLoading.value = false
   }

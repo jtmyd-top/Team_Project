@@ -583,13 +583,11 @@ body.no-animations * {
 
 /* 确保在任何页面上都不被遮挡 */
 header {
-  z-index: 1000 !important;
   position: relative !important;
 }
 
 nav {
   position: relative !important;
-  z-index: 1001 !important;
 }
 
 /* 防止其他元素遮挡下拉菜单 */

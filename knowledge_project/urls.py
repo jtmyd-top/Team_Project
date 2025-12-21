@@ -1,17 +1,15 @@
 # knowledge_project/urls.py
-from . import views
 from django.urls import path,re_path
-from .views import  SignUpView
-from .views import SignUpView, knowledge_list,captcha_image,check_username,CustomLoginView
+from . import views
 urlpatterns = [
     path('', views.public_notes_list_view, name='home'),
-    path('signup/', SignUpView.as_view(), name='signup'),
-    path('knowledge/', knowledge_list, name='knowledge_list'),
-    path('captcha/', captcha_image, name='captcha_image'),
+    path('signup/', views.SignUpView.as_view(), name='signup'),
+    path('knowledge/', views.knowledge_list, name='knowledge_list'),
+    path('captcha/', views.captcha_image, name='captcha_image'),
     # 【任务二】新增：为实时用户名检查提供API端点
-    path('check-username/', check_username, name='check_username'),
+    path('check-username/', views.check_username, name='check_username'),
     path('send-email-code/', views.SendEmailCodeView.as_view(), name='send_email_code'),
-    path('login/', CustomLoginView.as_view(), name='login'),
+    path('login/', views.CustomLoginView.as_view(), name='login'),
     path('forgot-password/', views.forgot_password_view, name='forgot_password'),
     path('password-reset/', views.password_reset_api, name='password_reset_api'),
     path('reset-password/<int:user_id>/<str:token>/', views.reset_password_view, name='reset_password'),
