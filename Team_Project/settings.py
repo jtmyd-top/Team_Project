@@ -109,6 +109,9 @@ LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'home'
 
+# 密码重置配置 - 设置为24小时过期
+PASSWORD_RESET_TIMEOUT = 86400  # 24小时，以秒为单位
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CACHES = {
@@ -137,12 +140,19 @@ SESSION_COOKIE_AGE = 10800
 SESSION_SAVE_EVERY_REQUEST = True
 #mail设定
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+# 智能邮件后端 (可选，当需要使用智能邮件发送器时取消注释)
+# EMAIL_BACKEND = 'knowledge_project.utils.smart_email_sender.SmartEmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ['true', '1', 't']
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# --- Cloudflare Turnstile Configuration ---
+CLOUDFLARE_TURNSTILE_SITE_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SITE_KEY')
+CLOUDFLARE_TURNSTILE_SECRET_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SECRET_KEY')
 
 # --- 指定使用我们自己下载的、包含高级功能的 JS 文件 ---
 CKEDITOR_5_CUSTOM_JS_URL = 'ckeditor5/ckeditor.js'

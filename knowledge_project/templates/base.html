@@ -234,7 +234,6 @@ document.addEventListener("DOMContentLoaded", function() {
      <!-- 2. 【核心】引入 CKEditor 4 脚本 -->
 
     <!-- 4. 为子模板预留一个可以插入自己脚本的位置 -->
-    {% block scripts %} {% endblock %}
 
     <!-- 确保页面加载器隐藏的脚本 -->
     <script>
@@ -276,6 +275,10 @@ document.addEventListener("DOMContentLoaded", function() {
     </script>
 
     </main>
+
+    <!-- 为子模板预留一个可以插入自己脚本的位置 -->
+    {% load static %}
+    {% block scripts %}{% endblock %}
 
 </body>
 </html>

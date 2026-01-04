@@ -1,6 +1,6 @@
 # knowledge_project/views.py
 from django.contrib.auth import login
-from .utils.code import check_code
+from .utils.turnstile import verify_turnstile_token, get_turnstile_verification_detail, get_site_key
 from django.http import HttpResponse
 from io import BytesIO
 from django.contrib.auth.forms import AuthenticationForm
@@ -70,7 +70,7 @@ from bs4 import BeautifulSoup # 确保已导入
 
 # --- vvv 用下面的代码替换旧的 get_paginated_html 函数 vvv ---
 USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
-def get_paginated_html(html_content, page_number=1, chars_per_page=500):
+def get_paginated_html(html_content, page_number=1, chars_per_page=3000):
     """
     【修正版】
     通过处理顶级HTML块来进行分页，确保图片<img>等无文本标签不会丢失。
@@ -184,63 +184,79 @@ class SendEmailCodeView(View):
     - 修改密码: purpose='password_change'
 
     支持两种模式：
-    1. 传统模式：需要 image_captcha_code 参数进行图形验证码验证
-    2. 预验证模式：通过 captcha_pre_validated=true 跳过图形验证码验证
+    1. Turnstile模式：需要 turnstile_token 参数进行Turnstile验证码验证
+    2. 预验证模式：通过 captcha_pre_validated=true 跳过验证码验证
+
+    安全优化：
+    - 使用原子操作限流，避免竞态条件
+    - 优化执行顺序，先校验Turnstile验证码再检查限流
+    - 使用真实IP地址获取，支持代理环境
     """
 
-    @csrf_exempt
-    def dispatch(self, request, *args, **kwargs):
-        return super().dispatch(request, *args, **kwargs)
-
     def post(self, request, *args, **kwargs):
-        # 1) 识别客户端 IP，用于限流
-        ip_address = request.META.get('REMOTE_ADDR')
-        hourly_key = f"email_attempts_hourly_{ip_address}"
-        daily_key  = f"email_attempts_daily_{ip_address}"
-
-        # 2) 限流（维持你现有阈值）
-        hourly_attempts = cache.get(hourly_key, 0)
-        if hourly_attempts >= 30:
-            return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
-
-        daily_attempts = cache.get(daily_key, 0)
-        if daily_attempts >= 50:
-            return JsonResponse({'status': 'error', 'message': '当前网络环境达到极限，请稍后再试。'}, status=429)
-
-        # 3) 解析参数
+        # 1) 解析参数
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'status': 'error', 'message': '请求格式错误'}, status=400)
 
         email = (data.get('email') or '').strip()
-        image_captcha_code = (data.get('image_captcha_code') or '').strip().upper()
+        turnstile_token = (data.get('turnstile_token') or '').strip()
         purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'email_change' | 'password_change'
-        captcha_pre_validated = data.get('captcha_pre_validated', False)  # 是否已通过图形验证码预验证
+        captcha_pre_validated = data.get('captcha_pre_validated', False)  # 是否已通过预验证
 
-        # 3.5) 新增：检查该项目（用途）的每日发送次数限制（每个项目每天最多3次）
-        # 使用用户ID（如果已登录）或IP地址来标识用户
+        # 2) 轻量级拦截：先校验Turnstile验证码（如果需要）
+        if not captcha_pre_validated:
+            if not turnstile_token:
+                return JsonResponse({'status': 'error', 'message': '请完成人机验证'}, status=400)
+
+            # 获取客户端IP地址
+            from knowledge_project.utils.request_utils import get_client_ip
+            client_ip = get_client_ip(request)
+
+            # 验证Turnstile token
+            if not verify_turnstile_token(turnstile_token, client_ip):
+                return JsonResponse({'status': 'error', 'message': '人机验证失败，请重试'}, status=400)
+
+        # 3) 获取真实客户端IP（支持代理环境）
+        from knowledge_project.utils.request_utils import get_client_ip, check_rate_limit_atomic
+        ip_address = get_client_ip(request)
+
+        # 4) 原子操作限流检查 - 避免竞态条件
+        # IP级别的限流（防止恶意攻击）
+        ip_hourly_key = f"email_attempts_hourly_{ip_address}"
+        ip_daily_key = f"email_attempts_daily_{ip_address}"
+
+        ip_hourly_allowed, ip_hourly_attempts = check_rate_limit_atomic(ip_hourly_key, 3, 3600)
+        if not ip_hourly_allowed:
+            return JsonResponse({'status': 'error', 'message': '当前网络环境每小时请求过于频繁，请稍后再试。'}, status=429)
+
+        ip_daily_allowed, ip_daily_attempts = check_rate_limit_atomic(ip_daily_key, 5, 86400)
+        if not ip_daily_allowed:
+            return JsonResponse({'status': 'error', 'message': '当前网络环境每天请求过于频繁，请稍后再试。'}, status=429)
+
+        # 项目/用户级别的限流
         if request.user.is_authenticated:
             user_identifier = f"user_{request.user.id}"
         else:
             user_identifier = f"ip_{ip_address}"
-        
+
+        purpose_hourly_key = f"email_code_hourly_{purpose}_{user_identifier}"
         purpose_daily_key = f"email_code_daily_{purpose}_{user_identifier}"
-        purpose_daily_attempts = cache.get(purpose_daily_key, 0)
-        
-        if purpose_daily_attempts >= 10:
+
+        purpose_hourly_allowed, purpose_hourly_attempts = check_rate_limit_atomic(purpose_hourly_key, 3, 3600)
+        if not purpose_hourly_allowed:
             return JsonResponse({
                 'status': 'error',
-                'message': '您今天已达到该操作的验证码发送上限（10次），请明天再试。'
+                'message': '该操作每小时验证码发送已达上限（3次），请稍后再试。'
             }, status=429)
 
-        # 4) 校验图片验证码（仅在未预验证时检查）
-        if not captcha_pre_validated:
-            session_code = (request.session.get('captcha_code') or '').upper()
-            if 'captcha_code' in request.session:
-                del request.session['captcha_code']
-            if not session_code or session_code != image_captcha_code:
-                return JsonResponse({'status': 'error', 'message': '图片验证码错误'}, status=400)
+        purpose_daily_allowed, purpose_daily_attempts = check_rate_limit_atomic(purpose_daily_key, 5, 86400)
+        if not purpose_daily_allowed:
+            return JsonResponse({
+                'status': 'error',
+                'message': '该操作每天验证码发送已达上限（5次），请明天再试。'
+            }, status=429)
 
         # 5) 业务区分 & 邮箱可用性检查（共用工具函数）
         if purpose == 'password_change':
@@ -281,8 +297,34 @@ class SendEmailCodeView(View):
             mail_subject = '注册验证码'
             ok_message   = '验证码已发送至您的邮箱'
 
-        # 6) 生成并发送邮件
+        # 6) 生成验证码
         email_code = ''.join(random.choices(string.digits, k=6))
+
+        # 7) 把验证码写入 session（在发送邮件前就写入，确保状态一致）
+        if purpose == 'email_change':
+            session_key = 'email_change_verification'
+        elif purpose == 'password_change':
+            session_key = 'password_change_verification'
+        else:
+            session_key = 'registration_verification'
+
+        # 构建验证信息对象
+        verification_data = {
+            'code': email_code,
+            'email': email,
+            'timestamp': time.time(),
+            'purpose': purpose,
+        }
+
+        # 【用户体验改进】标记已通过人机验证
+        if not captcha_pre_validated and turnstile_token:
+            # 如果是通过Turnstile验证的，标记验证状态
+            verification_data['turnstile_verified'] = True
+
+        request.session[session_key] = verification_data
+        request.session.modified = True
+
+        # 8) 发送邮件（开发环境使用同步发送，生产环境建议使用异步）
         try:
             send_mail(
                 mail_subject,
@@ -291,73 +333,16 @@ class SendEmailCodeView(View):
                 [email],
                 fail_silently=False,
             )
+            logger.info(f"验证码邮件发送成功 (IP: {ip_address}, Email: {email}, Purpose: {purpose})")
         except Exception as e:
-            print(f"邮件发送失败 (IP: {ip_address}, Email: {email}), 错误: {e}")
+            logger.error(f"邮件发送失败 (IP: {ip_address}, Email: {email}), 错误: {e}")
+            # 发送失败时清理session中的验证码
+            if session_key in request.session:
+                del request.session[session_key]
             return JsonResponse({'status': 'error', 'message': '邮件发送失败，请稍后重试。'}, status=500)
-
-        # 7) 发送成功后，更新限流计数
-        if hourly_attempts == 0:
-            cache.set(hourly_key, 1, timeout=3600)   # 1小时
-        else:
-            cache.incr(hourly_key)
-
-        if daily_attempts == 0:
-            cache.set(daily_key, 1, timeout=86400)  # 24小时
-        else:
-            cache.incr(daily_key)
-
-        # 8) 发送成功后，更新该项目的每日发送次数
-        if purpose_daily_attempts == 0:
-            # 第一次发送，设置过期时间为到第二天凌晨
-            import datetime
-            now = timezone.now()
-            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
-            seconds_until_tomorrow = int((tomorrow - now).total_seconds())
-            cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
-        else:
-            cache.incr(purpose_daily_key)
-
-        # 9) 把验证码写入 session，使用不同的 key 避免冲突
-        # 根据不同用途使用不同的 session key，避免被覆盖
-        if purpose == 'email_change':
-            # 修改邮箱专用 key
-            session_key = 'email_change_verification'
-        elif purpose == 'password_change':
-            # 修改密码专用 key
-            session_key = 'password_change_verification'
-        else:
-            # 注册专用 key
-            session_key = 'registration_verification'
-
-        request.session[session_key] = {
-            'code': email_code,
-            'email': email,
-            'timestamp': time.time(),
-            'purpose': purpose,  # 记录用途，方便后续需要时校验
-        }
-
-        # 确保 session 立即保存
-        request.session.modified = True
 
         return JsonResponse({'status': 'success', 'message': ok_message})
 
-def captcha_image(request):
-    """
-    生成验证码图片并将其存储在 session 中
-    """
-    # 调用工具函数生成验证码图片和随机码
-    img, code = check_code()
-
-    # 将验证码保存到 session，用于后续验证
-    request.session['captcha_code'] = code
-
-    # 使用 BytesIO 将图像写入内存字节流
-    buffer = BytesIO()
-    img.save(buffer, format='PNG')
-    image_data = buffer.getvalue()
-
-    # 返回 HTTP 响应，设置 content_type 为 image/png
-    return HttpResponse(image_data, content_type='image/png')
 
 
 
@@ -431,16 +416,28 @@ class CustomLoginView(View):
 
                 # 如果是邮箱验证方式，立即发送验证码
                 if profile.two_fa_method == 'email':
-                    # 检查登录2FA邮件的每日发送次数限制（每天最多3次）
+                    # 检查登录2FA邮件的发送次数限制
                     ip_address = request.META.get('REMOTE_ADDR')
                     user_identifier = f"user_{user.id}"
-                    purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
-                    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
-                    
-                    if purpose_daily_attempts >= 10:
+
+                    # 每小时发送次数限制（登录2FA每小时最多3次）
+                    purpose_hourly_key = f"email_code_hourly_login_2fa_{user_identifier}"
+                    purpose_hourly_attempts = cache.get(purpose_hourly_key, 0)
+
+                    if purpose_hourly_attempts >= 3:
                         return JsonResponse({
                             'status': 'error',
-                            'message': '您今天已达到登录验证码发送上限（10次），请明天再试。'
+                            'message': '登录验证码每小时发送已达上限（3次），请稍后再试。'
+                        }, status=429)
+
+                    # 每天发送次数限制（登录2FA每天最多5次）
+                    purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
+                    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+
+                    if purpose_daily_attempts >= 5:
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': '登录验证码每天发送已达上限（5次），请明天再试。'
                         }, status=429)
                     
                     email_code = ''.join(random.choices(string.digits, k=6))
@@ -457,6 +454,13 @@ class CustomLoginView(View):
                         )
                         
                         # 发送成功后，更新计数
+                        # 更新每小时发送次数
+                        if purpose_hourly_attempts == 0:
+                            cache.set(purpose_hourly_key, 1, timeout=3600)   # 1小时
+                        else:
+                            cache.incr(purpose_hourly_key)
+
+                        # 更新每天发送次数
                         if purpose_daily_attempts == 0:
                             import datetime
                             now = timezone.now()
@@ -1024,6 +1028,39 @@ class SignUpView(View):
         password = data.get('password')
         confirm_password = data.get('confirm_password') or data.get('confirmPassword')
         agree_terms = data.get('agree_terms') or data.get('agreeTerms')
+        turnstile_token = data.get('turnstile_token', '').strip()
+
+        # 获取客户端IP地址
+        def get_client_ip(request):
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+            return ip
+
+        client_ip = get_client_ip(request)
+
+        # 【用户体验改进】如果邮箱验证码已发送且正确，可以放宽人机验证要求
+        verification_info = request.session.get('registration_verification')
+
+        # 检查是否有有效的邮箱验证码记录（意味着之前已通过人机验证）
+        has_valid_verification_record = (
+            verification_info and
+            verification_info.get('email') == email and
+            verification_info.get('code') == email_code and
+            verification_info.get('turnstile_verified', False)
+        )
+
+        # 如果没有有效的验证记录，则需要验证Turnstile
+        if not has_valid_verification_record:
+            # 验证Turnstile验证码
+            if not turnstile_token:
+                return JsonResponse({'status': 'error', 'message': '请完成人机验证'}, status=400)
+
+            # 验证Turnstile token
+            if not verify_turnstile_token(turnstile_token, client_ip):
+                return JsonResponse({'status': 'error', 'message': '人机验证失败，请重试'}, status=400)
 
         # 【核心修改】使用我们功能更强的自定义表单
         form_data = {
@@ -1077,15 +1114,80 @@ class SignUpView(View):
 def public_note_view(request, public_id):
     try:
         note = Note.objects.get(public_id=public_id, is_public=True)
+        # 增加查看次数
+        note.views += 1
+        note.save(update_fields=['views'])
+
+        # 获取所有公开文章的导航数据
+        all_public_notes = Note.objects.filter(
+            is_public=True
+        ).select_related('author').order_by('-updated_at')
+
+        # 构建导航列表
+        navigation_list = []
+        for nav_note in all_public_notes:
+            navigation_list.append({
+                'public_id': str(nav_note.public_id),
+                'title': nav_note.title,
+                'public_url': f"/notes/public/{nav_note.public_id}/"
+            })
+
+        # 找到当前文章在列表中的位置
+        current_index = -1
+        for i, nav_item in enumerate(navigation_list):
+            if nav_item['public_id'] == str(note.public_id):
+                current_index = i
+                break
+
+        # 获取上一篇文章和下一篇文章
+        previous_note = None
+        next_note = None
+
+        if current_index > 0:
+            previous_note = navigation_list[current_index - 1]
+        if current_index < len(navigation_list) - 1:
+            next_note = navigation_list[current_index + 1]
+
+        # 获取作者头像信息
+        author_avatar_url = None
+        if note.author:
+            try:
+                profile = note.author.profile
+                if profile.avatar:
+                    author_avatar_url = profile.avatar.url
+            except Profile.DoesNotExist:
+                pass
+
+        # 获取用户点赞状态和总点赞数
+        user_has_liked = False
+        total_likes = 0
+        if request.user.is_authenticated:
+            user_has_liked = ProfileLike.objects.filter(liker=request.user, profile__user=note.author).exists()
+        total_likes = ProfileLike.objects.filter(profile__user=note.author).count()
+
         context = {
             'note_data': {
                 'id': note.id,
-                'public_id': str(note.public_id), # <--- 【新增】将 public_id 加入数据
+                'public_id': str(note.public_id),
                 'title': note.title,
-                'author': {'username': note.author.username if note.author else '匿名作者'},
-                'created_at': note.created_at.strftime('%Y-%m-%d %H:%M')
+                'author': {
+                    'username': note.author.username if note.author else '匿名作者',
+                    'avatar_url': author_avatar_url
+                },
+                'created_at': note.created_at.strftime('%Y-%m-%d %H:%M'),
+                'views': note.views,
+                'likes': total_likes,
+                'user_has_liked': user_has_liked
             },
             'full_content_data': note.content or "",
+            'navigation_data': {
+                'previous_note': previous_note,
+                'next_note': next_note,
+                'navigation_list': navigation_list,
+                'likes': total_likes,
+                'user_has_liked': user_has_liked,
+                'is_authenticated': request.user.is_authenticated
+            }
         }
         return render(request, 'knowledge/public_note_view.html', context)
 
@@ -1096,6 +1198,81 @@ def public_note_view(request, public_id):
         # 记录未预料到的错误
         print(f"Error in public_note_view for public_id {public_id}: {e}")
         return render(request, 'knowledge/public_note_view.html', {'error_message': '加载笔记时发生了一个错误，请稍后重试。'})
+
+
+@login_required
+def toggle_note_like(request):
+    """
+    切换笔记作者点赞状态
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': '仅支持POST请求'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        note_id = data.get('note_id')
+
+        if not note_id:
+            return JsonResponse({'status': 'error', 'message': '笔记ID缺失'}, status=400)
+
+        note = Note.objects.get(id=note_id)
+
+        # 获取作者的profile
+        try:
+            author_profile = note.author.profile
+        except Profile.DoesNotExist:
+            return JsonResponse({'status': 'error', 'message': '作者资料不存在'}, status=404)
+
+        # 检查用户是否已经点赞过
+        existing_like = ProfileLike.objects.filter(
+            liker=request.user,
+            profile=author_profile
+        ).first()
+
+        if existing_like:
+            # 如果已点赞，则取消点赞
+            existing_like.delete()
+            action = 'unliked'
+            user_has_liked = False
+        else:
+            # 如果未点赞，则添加点赞
+            ProfileLike.objects.create(
+                liker=request.user,
+                profile=author_profile
+            )
+            action = 'liked'
+            user_has_liked = True
+
+        # 计算新的点赞数
+        total_likes = ProfileLike.objects.filter(profile__user=note.author).count()
+
+        return JsonResponse({
+            'status': 'success',
+            'action': action,
+            'total_likes': total_likes,
+            'user_has_liked': user_has_liked
+        })
+
+    except Note.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '笔记不存在'}, status=404)
+    except Exception as e:
+        print(f"Error in toggle_note_like: {e}")
+        return JsonResponse({'status': 'error', 'message': '服务器内部错误'}, status=500)
+
+
+def home_view(request):
+    """
+    首页视图 - 展示所有公开的文章
+    """
+    # 获取所有公开的文章，按更新时间倒序排列
+    articles = Note.objects.filter(
+        is_public=True
+    ).select_related('author').prefetch_related('tags').order_by('-updated_at')[:20]
+    
+    context = {
+        'articles': articles
+    }
+    return render(request, 'home.html', context)
 
 
 @login_required
@@ -1144,8 +1321,10 @@ def note_detail_api(request, note_id):
                 'is_public': note.is_public,
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
                 'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
+                'author': {'id': note.author.id, 'username': note.author.username},
                 'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
                 'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
+                'toc': note.toc or [],  # 添加目录数据
             }
             return JsonResponse(data)
 
@@ -1167,7 +1346,8 @@ def note_detail_api(request, note_id):
             'pagination': {
                 'current_page': int(page),
                 'total_pages': total_pages,
-            }
+            },
+            'toc': note.toc or [],  # 添加目录数据
         }
         return JsonResponse(data)
 
@@ -1340,17 +1520,28 @@ def image_upload_view(request):
         if 'new_asset' in locals() and new_asset.pk:
             new_asset.delete()
         return JsonResponse({'error': '服务器保存文件时出错。'}, status=500)
-@login_required
 def protected_media_view(request, file_path):
-    """【核心修改】权限检查现在只验证上传者。"""
+    """
+    受保护的媒体文件视图，支持公开笔记的图片访问。
+    权限规则：
+    1. 上传者本人可以访问
+    2. 如果请求来自公开笔记页面，允许匿名访问
+    """
     try:
         asset = Asset.objects.get(file=file_path)
     except Asset.DoesNotExist:
         raise Http404
 
-    # 【修改点】权限检查逻辑简化，移除了对项目的检查
-    # 只有文件的上传者才能访问
-    if asset.uploader != request.user:
+    # 检查用户是否已登录且是上传者
+    is_authenticated = request.user.is_authenticated
+    is_uploader = is_authenticated and asset.uploader == request.user
+
+    # 检查请求是否来自公开笔记页面
+    referer = request.META.get('HTTP_REFERER', '')
+    is_from_public_note = '/notes/public/' in referer
+
+    # 权限判断：上传者本人 或 来自公开笔记页面的请求
+    if not is_uploader and not is_from_public_note:
         return HttpResponseForbidden("您无权访问此文件。")
 
     # 文件服务逻辑保持不变
@@ -1461,8 +1652,7 @@ def public_notes_api(request):
     """
     一次性返回所有公开笔记的核心数据，用于前端动态渲染。
     """
-    notes_qs = Note.objects.filter(is_public=True).order_by('-updated_at').select_related('author').prefetch_related(
-        'tags')
+    notes_qs = Note.objects.filter(is_public=True).order_by('-updated_at').select_related('author', 'author__profile').prefetch_related('tags')
 
     notes_data = []
     for note in notes_qs:
@@ -1470,14 +1660,25 @@ def public_notes_api(request):
         soup = BeautifulSoup(note.content or "", 'html.parser')
         excerpt = soup.get_text()[:150] + '...'  # 截取前150个字符作为摘要
 
+        # 获取作者头像URL
+        author_avatar = None
+        if note.author:
+            try:
+                profile = note.author.profile
+                if profile.avatar:
+                    author_avatar = profile.avatar.url
+            except:
+                pass
+
         notes_data.append({
             'id': note.id,
             'title': note.title,
             'public_url': f"/notes/public/{note.public_id}/",
             'author': note.author.username if note.author else "匿名作者",
+            'author_avatar': author_avatar,  # 【新增】添加作者头像URL
             'updated_at': note.updated_at.strftime("%Y年%m月%d日"),
             'excerpt': excerpt,
-            'tags': [tag.name for tag in note.tags.all()]  # 【新增】获取并添加标签列表
+            'tags': [tag.name for tag in note.tags.all()]
         })
 
     return JsonResponse(notes_data, safe=False)
@@ -2007,10 +2208,12 @@ def enable_2fa(request):
             "requires_verification": False,
             "rate_limit_warning": {
                 "title": "重要提醒：验证码发送频率限制",
-                "message": "为了保护您的账户安全，登录验证码每天最多发送3次。建议妥善保管以下备用验证码，以便在需要时使用。",
+                "message": "为了保护您的账户安全，登录验证码每小时最多发送3次，每天最多发送5次。建议妥善保管以下备用验证码，以便在需要时使用。",
                 "details": [
-                    "登录时每天最多可发送3次验证码",
-                    "超过限制后需等到第二天凌晨重置",
+                    "登录时每小时最多可发送3次验证码",
+                    "登录时每天最多可发送5次验证码",
+                    "超过小时限制需等待1小时后重置",
+                    "超过天限制需等到第二天凌晨重置",
                     "请务必保存下方的备用验证码",
                     "每个备用码仅可使用一次",
                     "丢失备用码可在设置中重新生成"
@@ -2294,15 +2497,27 @@ def resend_2fa_email(request):
     if profile.two_fa_method != 'email':
         return JsonResponse({'status': 'error', 'message': '当前不是邮箱验证方式'}, status=400)
 
-    # 检查登录2FA邮件的每日发送次数限制（每天最多3次）
+    # 检查登录2FA邮件的发送次数限制
     user_identifier = f"user_{user.id}"
-    purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
-    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
-    
-    if purpose_daily_attempts >= 10:
+
+    # 每小时发送次数限制（登录2FA每小时最多3次）
+    purpose_hourly_key = f"email_code_hourly_login_2fa_{user_identifier}"
+    purpose_hourly_attempts = cache.get(purpose_hourly_key, 0)
+
+    if purpose_hourly_attempts >= 3:
         return JsonResponse({
             'status': 'error',
-            'message': '您今天已达到登录验证码发送上限（10次），请明天再试。'
+            'message': '登录验证码每小时发送已达上限（3次），请稍后再试。'
+        }, status=429)
+
+    # 每天发送次数限制（登录2FA每天最多5次）
+    purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
+    purpose_daily_attempts = cache.get(purpose_daily_key, 0)
+
+    if purpose_daily_attempts >= 5:
+        return JsonResponse({
+            'status': 'error',
+            'message': '登录验证码每天发送已达上限（5次），请明天再试。'
         }, status=429)
 
     # 生成并发送新的验证码
@@ -2320,6 +2535,13 @@ def resend_2fa_email(request):
         )
         
         # 发送成功后，更新计数
+        # 更新每小时发送次数
+        if purpose_hourly_attempts == 0:
+            cache.set(purpose_hourly_key, 1, timeout=3600)   # 1小时
+        else:
+            cache.incr(purpose_hourly_key)
+
+        # 更新每天发送次数
         if purpose_daily_attempts == 0:
             import datetime
             now = timezone.now()
@@ -2535,6 +2757,10 @@ def forgot_password_view(request):
     """
     忘记密码页面
     """
+    # 如果用户已登录，重定向到主页
+    if request.user.is_authenticated:
+        return redirect('/')
+
     return render(request, 'registration/forgot_password.html')
 
 @require_http_methods(["POST"])
@@ -2543,12 +2769,12 @@ def password_reset_api(request):
     密码重置API（增强安全版本）
     POST: 发送重置密码邮件（需要验证码和频率限制）
     """
+
     if request.method == "POST":
         try:
             data = json.loads(request.body)
             email = data.get('email', '').strip()
-            captcha_id = data.get('captcha_id', '')
-            captcha_code = data.get('captcha_code', '')
+            turnstile_token = data.get('turnstile_token', '').strip()
 
             # 验证必要参数
             if not email:
@@ -2557,10 +2783,10 @@ def password_reset_api(request):
                     "message": "请输入邮箱地址"
                 }, status=400)
 
-            if not captcha_id or not captcha_code:
+            if not turnstile_token:
                 return JsonResponse({
                     "status": "error",
-                    "message": "请输入验证码"
+                    "message": "请完成人机验证"
                 }, status=400)
 
             # 验证邮箱格式
@@ -2577,50 +2803,33 @@ def password_reset_api(request):
             # 获取客户端信息用于频率限制
             client_ip = get_client_ip(request)
             fingerprint = get_client_fingerprint(request)
+            user_agent = request.META.get('HTTP_USER_AGENT', '')[:500]  # 限制长度
 
-            # 检查频率限制
-            is_allowed, rate_limit_message = check_rate_limit(email, client_ip, fingerprint)
+            # 检查频率限制（原有每日/设备/IP限制）
+            is_allowed, rate_limit_message = check_rate_limit(email, client_ip, fingerprint, 3)
             if not is_allowed:
                 return JsonResponse({
                     "status": "error",
                     "message": rate_limit_message
                 }, status=429)
 
-            # 验证验证码
-            from .models import CaptchaSession
-            try:
-                captcha_session = CaptchaSession.objects.get(captcha_id=captcha_id)
-
-                # 验证IP地址是否一致
-                if captcha_session.ip_address != client_ip:
-                    return JsonResponse({
-                        "status": "error",
-                        "message": "验证码与客户端不匹配"
-                    }, status=400)
-
-                # 检查验证码是否已使用或过期
-                if captcha_session.is_used or captcha_session.is_expired:
-                    return JsonResponse({
-                        "status": "error",
-                        "message": "验证码已失效，请重新获取"
-                    }, status=400)
-
-                # 验证验证码（不区分大小写）
-                if captcha_session.captcha_text.lower() != captcha_code.lower():
-                    return JsonResponse({
-                        "status": "error",
-                        "message": "验证码错误"
-                    }, status=400)
-
-                # 标记验证码为已使用
-                captcha_session.is_used = True
-                captcha_session.save(update_fields=['is_used'])
-
-            except CaptchaSession.DoesNotExist:
+            # 验证Turnstile token
+            if not verify_turnstile_token(turnstile_token, client_ip):
                 return JsonResponse({
                     "status": "error",
-                    "message": "验证码无效"
+                    "message": "人机验证失败，请重试"
                 }, status=400)
+
+            from .models import PasswordResetAttempt
+
+            # 创建密码重置尝试记录（用于频率限制跟踪）
+            reset_attempt = PasswordResetAttempt.objects.create(
+                email=email,
+                ip_address=client_ip,
+                fingerprint=fingerprint,
+                user_agent=user_agent,
+                is_successful=False  # 默认为失败，成功发送邮件后会更新
+            )
 
             # 检查邮箱是否存在
             try:
@@ -2674,7 +2883,7 @@ def password_reset_api(request):
                 '''
 
                 try:
-                    send_mail(
+                    result = send_mail(
                         subject=subject,
                         message=message,
                         from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
@@ -2683,83 +2892,18 @@ def password_reset_api(request):
                     )
 
                     # 标记尝试为成功
-                    PasswordResetAttempt.objects.filter(
-                        email=email,
-                        ip_address=client_ip,
-                        fingerprint=fingerprint
-                    ).update(is_successful=True)
+                    reset_attempt.is_successful = True
+                    reset_attempt.save()
 
                 except Exception as e:
                     logger.error(f"发送密码重置邮件失败: {str(e)}")
-                    # 更新尝试记录为失败
-                    PasswordResetAttempt.objects.filter(
-                        email=email,
-                        ip_address=client_ip,
-                        fingerprint=fingerprint
-                    ).update(is_successful=False)
+                    # 记录已经默认为失败状态，无需额外更新
 
             # 统一返回消息，不暴露邮箱是否存在
             return JsonResponse({
                 "status": "success",
                 "message": "如果该邮箱地址已注册，重置密码链接已发送到该邮箱"
             })
-
-        except json.JSONDecodeError:
-            import secrets
-            import string
-            from .models import PasswordResetToken
-
-            # 生成随机token
-            alphabet = string.ascii_letters + string.digits
-            token = ''.join(secrets.choice(alphabet) for _ in range(64))
-
-            # 删除旧的令牌（如果存在）
-            PasswordResetToken.objects.filter(user=user).delete()
-
-            # 创建新的令牌
-            reset_token = PasswordResetToken.objects.create(
-                user=user,
-                token=token
-            )
-
-            # 构建重置URL
-            reset_url = f"{request.scheme}://{request.get_host()}/reset-password/{user.pk}/{token}/"
-
-            # 发送邮件
-            from django.core.mail import send_mail
-            from django.conf import settings
-
-            subject = '重置您的密码'
-            message = f'''
-            您好，{user.username}！
-
-            您请求重置密码。请点击以下链接重置密码：
-            {reset_url}
-
-            此链接将在24小时后失效。
-
-            如果您没有请求重置密码，请忽略此邮件。
-            '''
-
-            try:
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
-                    recipient_list=[email],
-                    fail_silently=False
-                )
-
-                return JsonResponse({
-                    "status": "success",
-                    "message": "重置密码链接已发送到您的邮箱，请查收"
-                })
-            except Exception as e:
-                logger.error(f"发送密码重置邮件失败: {str(e)}")
-                return JsonResponse({
-                    "status": "error",
-                    "message": "邮件发送失败，请稍后重试"
-                }, status=500)
 
         except json.JSONDecodeError:
             return JsonResponse({
@@ -2784,6 +2928,10 @@ def reset_password_view(request, user_id, token):
     GET: 显示重置密码表单
     POST: 处理密码重置
     """
+    # 如果用户已登录，重定向到主页
+    if request.user.is_authenticated:
+        return redirect('/')
+
     from django.contrib.auth.models import User
     from django.contrib.auth import login, update_session_auth_hash
     from .models import PasswordResetToken
@@ -2801,13 +2949,28 @@ def reset_password_view(request, user_id, token):
 
         # 检查令牌是否已使用或过期
         if reset_token.is_used or reset_token.is_expired:
+            if reset_token.is_used:
+                error_message = '重置链接已被使用，如需重置密码，请重新申请'
+            else:
+                remaining_time = reset_token.get_remaining_time()
+                if remaining_time == 0:
+                    error_message = '重置链接已过期（24小时有效期），请重新申请密码重置'
+                else:
+                    error_message = f'重置链接无效'
+
             return render(request, 'registration/reset_password.html', {
-                'error': '重置链接已过期或无效'
+                'error': error_message,
+                'user_id': user_id,
+                'token': token,
+                'username': user.username
             })
 
     except PasswordResetToken.DoesNotExist:
         return render(request, 'registration/reset_password.html', {
-            'error': '无效的重置链接'
+            'error': '无效的重置链接',
+            'user_id': user_id,
+            'token': token,
+            'username': user.username
         })
 
     if request.method == 'POST':
@@ -2914,113 +3077,8 @@ def get_client_fingerprint(request):
     return fingerprint
 
 
-@csrf_exempt
-def captcha_api(request):
-    """
-    生成增强验证码图片并返回验证码ID
-    """
-    if request.method != 'GET':
-        return JsonResponse({'status': 'error', 'message': '仅支持GET请求'}, status=405)
-
-    try:
-        from .models import CaptchaSession
-
-        # 调用工具函数生成验证码图片和随机码
-        img, code = check_code()
-
-        # 生成验证码ID
-        captcha_id = str(uuid.uuid4())
-
-        # 获取客户端信息
-        client_ip = get_client_ip(request)
-        fingerprint = get_client_fingerprint(request)
-
-        # 保存验证码到数据库
-        captcha_session = CaptchaSession.objects.create(
-            captcha_id=captcha_id,
-            captcha_text=code,
-            ip_address=client_ip
-        )
-
-        # 使用 BytesIO 将图像写入内存字节流
-        buffer = BytesIO()
-        img.save(buffer, format='PNG')
-        image_data = buffer.getvalue()
-
-        # 将图片转换为base64
-        image_base64 = base64.b64encode(image_data).decode()
-
-        # 返回验证码ID和图片数据
-        return JsonResponse({
-            'status': 'success',
-            'captcha_id': captcha_id,
-            'captcha_image': f"data:image/png;base64,{image_base64}"
-        })
-
-    except Exception as e:
-        logger.error(f"生成验证码失败: {str(e)}")
-        return JsonResponse({'status': 'error', 'message': '验证码生成失败'}, status=500)
 
 
-@csrf_exempt
-def validate_captcha_api(request):
-    """
-    验证图形验证码
-    """
-    if request.method != 'POST':
-        return JsonResponse({'status': 'error', 'message': '仅支持POST请求'}, status=405)
-
-    try:
-        from .models import CaptchaSession
-
-        data = json.loads(request.body)
-        captcha_id = data.get('captcha_id', '')
-        captcha_code = data.get('captcha_code', '')
-
-        if not captcha_id or not captcha_code:
-            return JsonResponse({'status': 'error', 'message': '参数不完整'}, status=400)
-
-        # 获取客户端信息
-        client_ip = get_client_ip(request)
-        fingerprint = get_client_fingerprint(request)
-
-        # 查找验证码会话
-        try:
-            captcha_session = CaptchaSession.objects.get(captcha_id=captcha_id)
-        except CaptchaSession.DoesNotExist:
-            return JsonResponse({'status': 'error', 'message': '验证码无效或已过期'}, status=400)
-
-        # 验证IP地址是否一致
-        if captcha_session.ip_address != client_ip:
-            return JsonResponse({'status': 'error', 'message': '客户端信息不匹配'}, status=400)
-
-        # 检查是否已使用
-        if captcha_session.is_used:
-            return JsonResponse({'status': 'error', 'message': '验证码已被使用'}, status=400)
-
-        # 检查是否过期
-        if captcha_session.is_expired:
-            return JsonResponse({'status': 'error', 'message': '验证码已过期'}, status=400)
-
-        # 验证验证码（不区分大小写）
-        if captcha_session.captcha_text.lower() != captcha_code.lower():
-            return JsonResponse({'status': 'error', 'message': '验证码错误'}, status=400)
-
-        # 标记为已使用
-        captcha_session.is_used = True
-        captcha_session.save(update_fields=['is_used'])
-
-        # 在session中标记验证通过
-        request.session[f'captcha_verified_{captcha_id}'] = True
-        request.session.modified = True
-
-        return JsonResponse({'status': 'success', 'message': '验证码正确'})
-
-    except json.JSONDecodeError:
-        return JsonResponse({'status': 'error', 'message': '请求格式错误'}, status=400)
-    except Exception as e:
-        logger.error(f"验证验证码失败: {str(e)}")
-        return JsonResponse({'status': 'error', 'message': '验证失败'}, status=500)
 
 
 def get_client_ip(request):
@@ -3097,6 +3155,24 @@ def check_rate_limit(email, ip_address, fingerprint, limit=3):
 
 
 @csrf_exempt
+def turnstile_config(request):
+    """
+    获取Turnstile配置信息
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': '只支持GET请求'}, status=405)
+
+    try:
+        return JsonResponse({
+            'status': 'success',
+            'site_key': get_site_key()
+        })
+    except Exception as e:
+        logger.error(f"获取Turnstile配置失败: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': '配置获取失败'}, status=500)
+
+
+@csrf_exempt
 def login_api(request):
     """
     API端点：处理JSON格式的登录请求
@@ -3110,9 +3186,29 @@ def login_api(request):
         data = json.loads(request.body)
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
+        turnstile_token = data.get('turnstile_token', '').strip()
 
         if not username or not password:
             return JsonResponse({'error': '用户名和密码不能为空'}, status=400)
+
+        # 验证Turnstile验证码
+        if not turnstile_token:
+            return JsonResponse({'error': '请完成人机验证'}, status=400)
+
+        # 获取客户端IP地址
+        def get_client_ip(request):
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+            return ip
+
+        client_ip = get_client_ip(request)
+
+        # 验证Turnstile token
+        if not verify_turnstile_token(turnstile_token, client_ip):
+            return JsonResponse({'error': '人机验证失败，请重试'}, status=400)
 
         # 验证用户名和密码
         user = authenticate(request, username=username, password=password)
@@ -3138,15 +3234,26 @@ def login_api(request):
 
             # 如果是邮箱验证方式，立即发送验证码
             if profile.two_fa_method == 'email':
-                # 检查登录2FA邮件的每日发送次数限制
+                # 检查登录2FA邮件的发送次数限制
                 ip_address = request.META.get('REMOTE_ADDR')
                 user_identifier = f"user_{user.id}"
+
+                # 每小时发送次数限制（登录2FA每小时最多3次）
+                purpose_hourly_key = f"email_code_hourly_login_2fa_{user_identifier}"
+                purpose_hourly_attempts = cache.get(purpose_hourly_key, 0)
+
+                if purpose_hourly_attempts >= 3:
+                    return JsonResponse({
+                        'error': '登录验证码每小时发送已达上限（3次），请稍后再试。'
+                    }, status=429)
+
+                # 每天发送次数限制（登录2FA每天最多5次）
                 purpose_daily_key = f"email_code_daily_login_2fa_{user_identifier}"
                 purpose_daily_attempts = cache.get(purpose_daily_key, 0)
 
-                if purpose_daily_attempts >= 10:
+                if purpose_daily_attempts >= 5:
                     return JsonResponse({
-                        'error': '您今天已达到登录验证码发送上限（10次），请明天再试。'
+                        'error': '登录验证码每天发送已达上限（5次），请明天再试。'
                     }, status=429)
 
                 email_code = ''.join(random.choices(string.digits, k=6))
@@ -3163,6 +3270,13 @@ def login_api(request):
                     )
 
                     # 更新计数
+                    # 更新每小时发送次数
+                    if purpose_hourly_attempts == 0:
+                        cache.set(purpose_hourly_key, 1, timeout=3600)   # 1小时
+                    else:
+                        cache.incr(purpose_hourly_key)
+
+                    # 更新每天发送次数
                     if purpose_daily_attempts == 0:
                         import datetime
                         now = timezone.now()
@@ -3170,7 +3284,7 @@ def login_api(request):
                         seconds_until_tomorrow = int((tomorrow - now).total_seconds())
                         cache.set(purpose_daily_key, 1, timeout=seconds_until_tomorrow)
                     else:
-                        cache.set(purpose_daily_key, purpose_daily_attempts + 1, timeout=86400)
+                        cache.incr(purpose_daily_key)
 
                 except Exception as e:
                     logger.error(f"发送2FA邮件失败: {e}")

@@ -24,40 +24,36 @@ class ThemeManager {
     const mergedSettings = { ...this.defaultSettings, ...settings };
     this.currentSettings = mergedSettings;
 
-    console.log('🎯 应用主题设置:', mergedSettings);
-
+  
     // 设置主题模式属性
     document.documentElement.setAttribute('data-theme', mergedSettings.mode);
-    console.log('✓ 设置主题模式:', mergedSettings.mode);
-
+    
     // 设置CSS变量
     document.documentElement.style.setProperty('--primary-color', mergedSettings.primary_color);
     document.documentElement.style.setProperty('--font-size-base', mergedSettings.font_size + 'px');
-    console.log('✓ 设置CSS变量: --primary-color =', mergedSettings.primary_color);
-    console.log('✓ 设置CSS变量: --font-size-base =', mergedSettings.font_size + 'px');
-
+    
     // 应用紧凑模式
     if (mergedSettings.compact_mode) {
       document.body.classList.add('compact-mode');
-      console.log('✓ 启用紧凑模式');
+      
     } else {
       document.body.classList.remove('compact-mode');
-      console.log('✓ 禁用紧凑模式');
+      
     }
 
     // 应用动画设置
     if (!mergedSettings.animations) {
       document.body.classList.add('no-animations');
-      console.log('✓ 禁用动画');
+      
     } else {
       document.body.classList.remove('no-animations');
-      console.log('✓ 启用动画');
+      
     }
 
     // 保存到localStorage作为缓存
     try {
       localStorage.setItem('theme-settings', JSON.stringify(mergedSettings));
-      console.log('✓ 已保存到localStorage缓存');
+      
     } catch (error) {
       console.warn('⚠️ 无法保存主题设置到localStorage:', error);
     }

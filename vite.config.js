@@ -26,18 +26,33 @@ export default defineConfig({
         // 认证相关入口文件
         login: path.resolve(__dirname, 'static/JS/login_entry.js'),
         signup: path.resolve(__dirname, 'static/JS/signup_entry.js'),
+        // 首页
+        home: path.resolve(__dirname, 'static/JS/home_entry.js'),
+        // 公共笔记页面
+        'public-note-entry': path.resolve(__dirname, 'static/JS/public-note-entry.js'),
+        // 知识笔记列表页面
+        'knowledge-list': path.resolve(__dirname, 'static/JS/knowledge_list_entry.js'),
         // 添加其他需要构建的JavaScript文件
         'theme-manager': path.resolve(__dirname, 'static/JS/theme-manager.js'),
         'api-service': path.resolve(__dirname, 'static/JS/services/apiService.js'),
         'public-note-page': path.resolve(__dirname, 'static/JS/public_note_page.js'),
         'public-notes-list': path.resolve(__dirname, 'static/JS/public_notes_list.js'),
         'forgot-password': path.resolve(__dirname, 'static/JS/forgot_password_entry.js'),
+        'reset-password': path.resolve(__dirname, 'static/JS/reset-password.js'),
       },
       output: {
         format: 'es',  // 主格式为 ES 模块
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]',
+        // CSS 使用固定文件名，方便模板引用
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name?.endsWith('.css')) {
+            // CSS 文件使用固定名称，只按 entry 分组
+            const name = assetInfo.name.replace(/-[\w\d]+\.css$/, '.css')
+            return `assets/${name}`
+          }
+          return 'assets/[name]-[hash][extname]'
+        },
 
         // 手动分割代码块，优化加载性能
         manualChunks(id) {

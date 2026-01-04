@@ -1,5 +1,10 @@
 <template>
   <div class="auth-container">
+    <!-- 浮动光球 -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    
     <div class="auth-card">
       <!-- 卡片头部 -->
       <div class="auth-header">
@@ -41,6 +46,25 @@
               :prefix-icon="Lock"
               @keyup.enter="handleLogin"
             />
+          </el-form-item>
+
+          <!-- Turnstile验证码 -->
+          <el-form-item>
+            <div class="turnstile-wrapper" :class="{ 'turnstile-refreshing': isRefreshingTurnstile }">
+              <Turnstile
+                ref="turnstileRef"
+                :key="turnstileKey"
+                :site-key="turnstileSiteKey"
+                language="zh-CN"
+                @verified="onTurnstileVerified"
+                @error="onTurnstileError"
+                @expired="onTurnstileExpired"
+              />
+              <div v-if="isRefreshingTurnstile" class="turnstile-refresh-overlay">
+                <i class="fas fa-sync fa-spin"></i>
+                <span>正在刷新验证...</span>
+              </div>
+            </div>
           </el-form-item>
 
           <el-form-item>
@@ -168,11 +192,50 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Key } from '@element-plus/icons-vue'
+import Turnstile from '../Turnstile.vue'
+import { useTurnstile } from '../../composables/useTurnstile'
 // apiService 已经挂载到 window 对象上
 
 // ==================== 状态管理 ====================
 const loginFormRef = ref()
 const twoFaFormRef = ref()
+const turnstileRef = ref()
+
+// 使用 useTurnstile composable
+const {
+  token: turnstileToken,
+  siteKey: turnstileSiteKey,
+  onVerified: handleTurnstileVerified,
+  onError: handleTurnstileError,
+  onExpired: handleTurnstileExpired,
+  fetchSiteKey,
+  reset: resetTurnstile
+} = useTurnstile({
+  showMessage: true,
+  messageHandler: (type, message) => ElMessage[type](message)
+})
+
+// Turnstile 显示控制（用于动画刷新）
+const turnstileKey = ref(0)
+const isRefreshingTurnstile = ref(false)
+
+/**
+ * 刷新 Turnstile 验证码（带动画效果）
+ * 用于登录失败后重新验证
+ */
+const refreshTurnstile = () => {
+  // 显示刷新状态
+  isRefreshingTurnstile.value = true
+
+  // 重置 token
+  resetTurnstile()
+
+  // 延迟后通过更新 key 强制重新渲染组件
+  setTimeout(() => {
+    turnstileKey.value++
+    isRefreshingTurnstile.value = false
+  }, 500) // 给用户一些视觉反馈时间
+}
 
 // 登录表单数据
 const loginForm = reactive({
@@ -226,20 +289,47 @@ const twoFaRules = computed(() => {
   }
 })
 
+// ==================== Turnstile 回调绑定 ====================
+// 使用 composable 提供的回调
+const onTurnstileVerified = handleTurnstileVerified
+const onTurnstileError = handleTurnstileError
+const onTurnstileExpired = handleTurnstileExpired
+
 // ==================== 方法定义 ====================
 // 处理登录
 const handleLogin = async () => {
   if (!loginFormRef.value) return
 
+  // 验证表单 - 使用 .catch() 确保 Element Plus 正常显示字段错误
+  const valid = await loginFormRef.value.validate().catch(() => false)
+  if (!valid) {
+    // 表单验证失败
+    // 检查是否有字段已填写但不符合规则
+    const hasContent = loginForm.username || loginForm.password
+    if (hasContent) {
+      // 用户已输入内容但不符合规则，提示用户名或密码错误
+      ElMessage.error('用户名或密码格式不正确')
+    } else {
+      // 用户未输入内容，提示填写信息
+      ElMessage.warning('请填写用户名和密码')
+    }
+    return
+  }
+
+  // 验证Turnstile验证码
+  if (!turnstileToken.value) {
+    ElMessage.warning('请完成人机验证')
+    return
+  }
+
+  // 表单验证通过，开始登录
+  loading.value = true
+  
   try {
-    const valid = await loginFormRef.value.validate()
-    if (!valid) return
-
-    loading.value = true
-
     const response = await window.apiService.auth.login({
       username: loginForm.username,
-      password: loginForm.password
+      password: loginForm.password,
+      turnstile_token: turnstileToken.value
     })
 
     if (response.require_2fa) {
@@ -262,52 +352,67 @@ const handleLogin = async () => {
       }, 1000)
     }
   } catch (error) {
-    console.error('登录失败:', error)
-    // 优先显示具体的错误信息
+    // 这里只处理API请求错误
     let errorMessage = ''
 
-    if (error.message) {
-      errorMessage = error.message
-    } else if (error.response?.data) {
+    if (error.response?.data) {
       const data = error.response.data
-      // 处理表单验证错误
-      if (data.errors) {
-        // 如果是errors对象格式
-        const errors = []
-        for (const [field, messages] of Object.entries(data.errors)) {
-          if (Array.isArray(messages)) {
-            errors.push(...messages)
-          } else {
-            errors.push(messages)
-          }
-        }
-        errorMessage = errors.join('; ')
+      
+      // 处理各种可能的错误格式
+      if (typeof data === 'string') {
+        errorMessage = data
+      } else if (data.status === 'error' && data.message) {
+        errorMessage = data.message
       } else if (data.error) {
         errorMessage = data.error
       } else if (data.message) {
         errorMessage = data.message
+      } else if (data.errors) {
+        // {errors: {...}}
+        const errors = []
+        for (const [field, messages] of Object.entries(data.errors)) {
+          if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          }
+        }
+        errorMessage = errors.join('; ')
       } else if (typeof data === 'object' && data !== null) {
-        // 处理 {password: ["此字段不能为空"]} 格式
+        // Django表单验证格式: {username: ['错误1'], password: ['错误2']}
         const errors = []
         for (const [field, messages] of Object.entries(data)) {
           if (Array.isArray(messages)) {
-            errors.push(`${field}: ${messages.join(', ')}`)
-          } else {
-            errors.push(`${field}: ${messages}`)
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          } else if (typeof messages === 'object' && messages.message) {
+            errors.push(messages.message)
           }
         }
         errorMessage = errors.join('; ')
       }
-    } else if (error.error) {
-      errorMessage = error.error
+    } else if (error.message && error.message !== '请求失败') {
+      errorMessage = error.message
     }
 
     // 显示错误信息
-    if (errorMessage) {
-      ElMessage.error(errorMessage)
-    } else {
-      ElMessage.error('登录失败，请检查网络连接')
-    }
+    ElMessage.error(errorMessage || '登录失败，请检查网络连接')
+
+    // 登录失败后自动刷新 Turnstile 验证码（带动画）
+    refreshTurnstile()
   } finally {
     loading.value = false
   }
@@ -318,8 +423,13 @@ const verifyTwoFA = async () => {
   if (!twoFaFormRef.value) return
 
   try {
-    const valid = await twoFaFormRef.value.validate()
-    if (!valid) return
+    // 简化的验证：只检查是否为空
+    const codeValue = twoFaForm.code.trim()
+
+    if (!codeValue) {
+      ElMessage.error('验证码错误')
+      return
+    }
 
     twoFaLoading.value = true
 
@@ -334,26 +444,64 @@ const verifyTwoFA = async () => {
       window.location.href = '/'
     }, 1000)
   } catch (error) {
-    console.error('2FA验证失败:', error)
-    // 使用相同的错误处理逻辑
+    // 使用与主登录表单相同的详细错误处理逻辑
     let errorMessage = ''
 
-    if (error.message) {
-      errorMessage = error.message
-    } else if (error.response?.data) {
+    if (error.response?.data) {
       const data = error.response.data
-      if (data.error) {
+
+      // 处理各种可能的错误格式
+      if (typeof data === 'string') {
+        errorMessage = data
+      } else if (data.status === 'error' && data.message) {
+        errorMessage = data.message
+      } else if (data.error) {
         errorMessage = data.error
       } else if (data.message) {
         errorMessage = data.message
+      } else if (data.errors) {
+        // {errors: {...}}
+        const errors = []
+        for (const [field, messages] of Object.entries(data.errors)) {
+          if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          }
+        }
+        errorMessage = errors.join('; ')
+      } else if (typeof data === 'object' && data !== null) {
+        // Django表单验证格式: {code: ['错误1'], ...}
+        const errors = []
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+              if (typeof msg === 'object' && msg.message) {
+                errors.push(msg.message)
+              } else if (typeof msg === 'string') {
+                errors.push(msg)
+              }
+            })
+          } else if (typeof messages === 'string') {
+            errors.push(messages)
+          } else if (typeof messages === 'object' && messages.message) {
+            errors.push(messages.message)
+          }
+        }
+        errorMessage = errors.join('; ')
       }
+    } else if (error.message && error.message !== '请求失败') {
+      errorMessage = error.message
     }
 
-    if (errorMessage) {
-      ElMessage.error(errorMessage)
-    } else {
-      ElMessage.error('验证失败，请检查网络连接')
-    }
+    // 显示错误信息
+    ElMessage.error(errorMessage || '验证失败，请检查网络连接')
   } finally {
     twoFaLoading.value = false
   }
@@ -371,7 +519,6 @@ const resendTwoFACode = async () => {
     startCountdown()
     ElMessage.success('验证码已重新发送到您的邮箱')
   } catch (error) {
-    console.error('重新发送验证码失败:', error)
     // 使用统一的错误处理函数
     let errorMessage = ''
 
@@ -409,6 +556,11 @@ const backToPassword = () => {
   twoFaForm.code = ''
   useBackupCode.value = false
   countdown.value = 0
+  // 重置Turnstile验证码
+  if (turnstileRef.value) {
+    turnstileRef.value.reset()
+  }
+  resetTurnstile()
 }
 
 // 添加高级水波效果
@@ -442,30 +594,177 @@ const addRippleEffect = (event) => {
 // 组件挂载
 onMounted(() => {
   // 可以在这里添加初始化逻辑，比如检查是否已经登录
+  // 使用 composable 的 fetchSiteKey，配置为使用项目的 API 端点
+  fetchSiteKey('/api/turnstile/config/').then(key => {
+    if (!key) {
+      ElMessage.error('获取验证码配置失败')
+    }
+  })
 })
 </script>
 
 <style scoped>
+/* ========== 背景容器 ========== */
 .auth-container {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
+/* 渐变网格覆盖 */
+.auth-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 20% 80%, rgba(240, 147, 251, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(168, 85, 247, 0.2) 0%, transparent 50%);
+  opacity: 0.8;
+  z-index: 1;
+}
+
+/* 添加多个浮动光球 */
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.orb-1 {
+  width: 500px;
+  height: 500px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6), rgba(168, 85, 247, 0.6));
+  top: -10%;
+  left: -10%;
+  animation: orbFloat1 20s ease-in-out infinite;
+}
+
+.orb-2 {
+  width: 400px;
+  height: 400px;
+  background: linear-gradient(135deg, rgba(240, 147, 251, 0.5), rgba(245, 87, 108, 0.5));
+  bottom: -10%;
+  right: -10%;
+  animation: orbFloat2 18s ease-in-out infinite 7s;
+}
+
+.orb-3 {
+  width: 350px;
+  height: 350px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(102, 126, 234, 0.4));
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: orbFloat3 22s ease-in-out infinite 14s;
+}
+
+@keyframes orbFloat1 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(50px, -50px);
+  }
+  66% {
+    transform: translate(-50px, 50px);
+  }
+}
+
+@keyframes orbFloat2 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(-60px, 40px);
+  }
+  66% {
+    transform: translate(40px, -60px);
+  }
+}
+
+@keyframes orbFloat3 {
+  0%, 100% {
+    transform: translate(-50%, -50%);
+  }
+  33% {
+    transform: translate(calc(-50% + 30px), calc(-50% - 40px));
+  }
+  66% {
+    transform: translate(calc(-50% - 40px), calc(-50% + 30px));
+  }
+}
+
+/* ========== 毛玻璃卡片 ========== */
+.auth-card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 480px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 32px;
+  overflow: hidden;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: cardEntrance 0.8s ease-out;
+}
+
+@keyframes cardEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+}
 
 .auth-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+  transform: translateY(-5px) scale(1.01);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
+/* ========== 卡片头部 ========== */
 .auth-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: transparent;
   padding: 40px 30px;
   text-align: center;
   color: white;
+  position: relative;
 }
 
 .auth-logo {
@@ -618,6 +917,51 @@ onMounted(() => {
   .auth-button {
     height: 45px;
     font-size: 1rem;
+  }
+}
+
+/* ========== Turnstile 动画效果 ========== */
+.turnstile-wrapper {
+  position: relative;
+  min-height: 65px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.3s ease;
+}
+
+.turnstile-wrapper.turnstile-refreshing {
+  opacity: 0.5;
+}
+
+.turnstile-refresh-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #667eea;
+  font-size: 0.95rem;
+  border-radius: 8px;
+  z-index: 10;
+  animation: fadeIn 0.3s ease;
+}
+
+.turnstile-refresh-overlay i {
+  font-size: 1.2rem;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 </style>

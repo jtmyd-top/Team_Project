@@ -18,6 +18,7 @@ from django.conf import settings
 from django.utils.safestring import mark_safe
 from django.core.validators import MaxLengthValidator
 from io import BytesIO
+from django.core.serializers.json import DjangoJSONEncoder
 
 logger = logging.getLogger(__name__)
 # ---------------- 标签 ----------------
@@ -50,7 +51,11 @@ class Note(models.Model):
     )
     is_public = models.BooleanField(default=False, verbose_name="是否公开")
     public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    views = models.PositiveIntegerField(default=0, verbose_name="查看次数")
     tags = models.ManyToManyField(Tag, blank=True, related_name='notes', verbose_name="标签")
+
+    # 目录数据（JSON 格式存储）
+    toc = models.JSONField(default=list, blank=True, verbose_name="目录结构")
 
     def has_permission(self, user):
         if self.is_public:
@@ -66,10 +71,11 @@ class Note(models.Model):
                 'article', 'header', 'footer', 'nav', 'aside', 'figure', 'figcaption',
                 'details', 'summary'
             }
+            # 允许标题有 id 属性（用于目录跳转）
             allowed_attributes = {
                 'a': {'href', 'title', 'target'},
                 'img': {'alt', 'title', 'width', 'height', 'src'},
-                '*': {'class'},
+                '*': {'class', 'id'},  # 添加 id 属性
             }
             self.content = nh3.clean(
                 self.content,
@@ -78,6 +84,13 @@ class Note(models.Model):
                 strip_comments=True,
                 url_schemes={'http', 'https'}
             )
+
+            # 提取目录并注入 ID 到标题
+            from knowledge_project.utils.toc_extractor import extract_toc_from_html
+            toc_list, updated_html = extract_toc_from_html(self.content)
+            self.toc = toc_list
+            self.content = updated_html
+
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -386,6 +399,15 @@ class PasswordResetToken(models.Model):
             self.expires_at = timezone.now() + timedelta(hours=24)
         super().save(*args, **kwargs)
 
+    def get_remaining_time(self):
+        """获取剩余有效时间（小时）"""
+        from django.utils import timezone
+        from datetime import timedelta
+        if self.is_expired:
+            return 0
+        remaining = self.expires_at - timezone.now()
+        return max(0, remaining.total_seconds() / 3600)
+
     def __str__(self):
         return f'{self.user.username} - {self.token[:8]}...'
 
@@ -412,40 +434,6 @@ class PasswordResetAttempt(models.Model):
         return f'{self.email} - {self.ip_address} - {self.attempted_at.strftime("%Y-%m-%d %H:%M")}'
 
 
-class CaptchaSession(models.Model):
-    """验证码会话"""
-    captcha_id = models.CharField('验证码ID', max_length=64, unique=True, db_index=True)
-    captcha_text = models.CharField('验证码文本', max_length=6)
-    expires_at = models.DateTimeField('过期时间', db_index=True)
-    is_used = models.BooleanField('是否已使用', default=False)
-    ip_address = models.GenericIPAddressField('IP地址', db_index=True)
-    created_at = models.DateTimeField('创建时间', auto_now_add=True)
-
-    class Meta:
-        verbose_name = '验证码会话'
-        verbose_name_plural = '验证码会话'
-        indexes = [
-            models.Index(fields=['captcha_id']),
-            models.Index(fields=['expires_at']),
-            models.Index(fields=['ip_address']),
-        ]
-
-    @property
-    def is_expired(self):
-        """检查验证码是否已过期"""
-        from django.utils import timezone
-        return timezone.now() > self.expires_at
-
-    def save(self, *args, **kwargs):
-        # 设置5分钟过期
-        if not self.pk:
-            from django.utils import timezone
-            from datetime import timedelta
-            self.expires_at = timezone.now() + timedelta(minutes=5)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f'Captcha {self.captcha_id[:8]}...'
 
 
 class LoginDevice(models.Model):

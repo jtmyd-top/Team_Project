@@ -125,23 +125,7 @@
           </el-input>
         </el-form-item>
 
-        <el-form-item label="图片验证码">
-          <div style="display: flex; gap: 12px;">
-            <el-input
-              v-model="emailForm.imageCaptcha"
-              placeholder="请输入图片验证码"
-              style="flex: 1;">
-              <template #prefix>
-                <i class="fas fa-shield-alt"></i>
-              </template>
-            </el-input>
-            <img 
-              :src="captchaUrl" 
-              @click="refreshCaptcha" 
-              style="height: 40px; cursor: pointer; border-radius: 4px;">
-          </div>
-        </el-form-item>
-
+  
         <el-form-item label="邮箱验证码">
           <div style="display: flex; gap: 12px;">
             <el-input
@@ -244,14 +228,11 @@ const showEmailDialog = ref(false);
 // 倒计时
 const emailCountdown = useCountdown();
 
-// 图片验证码URL
-const captchaUrl = ref('/captcha/?_=' + Date.now());
 
 // 邮箱表单
 const emailForm = reactive({
   new_email: '',
   password: '',
-  imageCaptcha: '',
   code: '',
   codeSending: false,
   show2FA: false,
@@ -431,12 +412,6 @@ const saveProfile = async () => {
   }
 };
 
-/**
- * 刷新图片验证码
- */
-const refreshCaptcha = () => {
-  captchaUrl.value = '/captcha/?_=' + Date.now();
-};
 
 /**
  * 邮箱检查核心逻辑
@@ -504,13 +479,10 @@ const sendEmailCode = async () => {
   const email = emailForm.new_email.trim();
   if (!EMAIL_REGEX.test(email)) return ElMessage.warning("请输入正确邮箱");
   if (emailCheck.status !== 'ok') return ElMessage.warning(emailCheck.message || "该邮箱不可用");
-  if (!emailForm.imageCaptcha) return ElMessage.warning("请输入图片验证码");
-
   emailForm.codeSending = true;
   try {
     const data = await window.apiService.auth.sendEmailCode({
       email,
-      image_captcha_code: emailForm.imageCaptcha,
       purpose: "email_change"
     });
     
@@ -539,7 +511,6 @@ const sendEmailCode = async () => {
 const changeEmail = async () => {
   if (emailCheck.status !== 'ok') return ElMessage.warning(emailCheck.message || "该邮箱不可用");
   if (!emailForm.password) return ElMessage.warning("请输入当前密码");
-  if (!emailForm.imageCaptcha) return ElMessage.warning("请输入图片验证码");
   if (!emailForm.code) return ElMessage.warning("请输入邮箱验证码");
 
   if (emailForm.show2FA && !emailForm.twoFaCode) {
@@ -551,7 +522,6 @@ const changeEmail = async () => {
       password: emailForm.password,
       new_email: emailForm.new_email.trim(),
       code: emailForm.code.trim(),
-      image_captcha_code: emailForm.imageCaptcha.trim(),
     };
 
     if (emailForm.show2FA) {
@@ -619,7 +589,6 @@ const changeEmail = async () => {
 const resetEmailForm = () => {
   emailForm.new_email = '';
   emailForm.password = '';
-  emailForm.imageCaptcha = '';
   emailForm.code = '';
   emailForm.show2FA = false;
   emailForm.twoFaCode = '';

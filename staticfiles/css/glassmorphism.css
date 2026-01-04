@@ -19,18 +19,10 @@
   overflow: hidden;
   z-index: 0; /* 修改：确保背景层覆盖整个页面 */
 
-  /* 深色渐变背景 */
-  background:
-    radial-gradient(ellipse at top left, rgba(120, 119, 198, 0.3), transparent 50%),
-    radial-gradient(ellipse at bottom right, rgba(255, 119, 198, 0.3), transparent 50%),
-    radial-gradient(ellipse at center, rgba(120, 219, 255, 0.2), transparent 50%),
-    linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
-
-  background-size: 200% 200%, 200% 200%, 100% 100%, 100% 100%;
-  background-attachment: fixed, fixed, fixed, fixed;
-  animation:
-    gradientShift1 20s ease infinite;
-  /* 移除 gradientShift2 动画以避免旋转干扰 */
+  /* 淡紫蓝色渐变背景 - 统一主题色 */
+  background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+  background-size: 100% 100%;
+  background-attachment: fixed;
 }
 
 /* 确保登录页面的body和html没有白色背景 */
@@ -54,12 +46,11 @@ body:has(.glassmorphism-container) main {
   padding: 0 !important;
   position: relative;
   z-index: 1;
-  overflow: hidden !important;
-}
+   
 
 /* 禁用登录页面上的所有滚动条和滚动行为 */
 body:has(.glassmorphism-container) * {
-  overflow: hidden !important;
+ 
   scrollbar-width: none !important;  /* Firefox */
   -ms-overflow-style: none !important;  /* IE and Edge */
 }

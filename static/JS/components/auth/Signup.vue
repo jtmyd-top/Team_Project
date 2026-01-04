@@ -1,5 +1,10 @@
 <template>
   <div class="auth-container">
+    <!-- 浮动光球 -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    
     <div class="auth-card">
       <!-- 卡片头部 -->
       <div class="auth-header">
@@ -44,16 +49,13 @@
               @blur="[handleUsernameBlur, checkUsernameOnServer]"
               :loading="usernameCheckLoading"
             />
-            <div class="validation-rules" :class="{ show: showUsernameRules }" v-show="showUsernameRules && signupForm.username">
-              <!-- 只显示第一条错误的规则 -->
-              <div
-                v-for="rule in getUsernameFirstInvalidRule()"
-                :key="rule.text"
-                :class="{ 'rule-invalid': !rule.valid }"
-                class="validation-rule"
-              >
-                <i class="fas fa-exclamation-circle"></i>
-                {{ rule.text }}
+          <!-- 显示用户名验证提示 - 统一为红色边框样式 -->
+            <div v-if="shouldShowUsernameError" class="validation-rules custom-validation"
+                 style="display: block !important; visibility: visible !important; overflow: visible !important; margin-top: 8px; padding: 8px 12px; background: rgba(245, 108, 108, 0.1); border: 1px solid rgba(245, 108, 108, 0.3); border-radius: 6px; position: relative; z-index: 1000; max-width: 100%; box-sizing: border-box;">
+              <div class="validation-rule rule-invalid"
+                   style="color: #f56c6c !important; font-size: 14px; display: flex; align-items: center; gap: 6px; overflow: visible !important; word-wrap: break-word; word-break: break-all; line-height:0%;height: 100%;">
+                <span style="color: #f56c6c; flex-shrink: 0;">●</span>
+                <span style="flex: 1; min-width: 0;">{{ getUsernameErrorMessage() }}</span>
               </div>
             </div>
             <div v-if="usernameError" class="field-error">
@@ -70,9 +72,19 @@
               size="large"
               clearable
               :prefix-icon="Message"
+              @input="validateEmail"
               @blur="checkEmailOnServer"
               :loading="emailCheckLoading"
             />
+            <!-- 显示邮箱验证提示 - 统一为红色边框样式 -->
+            <div v-if="shouldShowEmailError" class="validation-rules custom-validation"
+                 style="display: block !important; visibility: visible !important; overflow: visible !important; margin-top: 8px; padding: 8px 12px; background: rgba(245, 108, 108, 0.1); border: 1px solid rgba(245, 108, 108, 0.3); border-radius: 6px; position: relative; z-index: 1000; max-width: 100%; box-sizing: border-box;">
+              <div class="validation-rule rule-invalid"
+                   style="color: #f56c6c !important; font-size: 14px; display: flex; align-items: center; gap: 6px; overflow: visible !important; word-wrap: break-word; word-break: break-all; line-height: 0%; min-height: auto;">
+                <span style="color: #f56c6c; flex-shrink: 0;">●</span>
+                <span style="flex: 1; min-width: 0;">{{ getEmailErrorMessage() }}</span>
+              </div>
+            </div>
             <div v-if="emailError" class="field-error">
               <i class="fas fa-exclamation-circle"></i>
               {{ emailError }}
@@ -93,34 +105,13 @@
               @blur="handlePasswordBlur"
               @input="validatePassword"
             />
-            <div class="password-strength" v-show="showPasswordRules && signupForm.password">
-              <div class="strength-bars">
-                <div
-                  v-for="level in 4"
-                  :key="level"
-                  :class="{
-                    'strength-bar': true,
-                    'strength-weak': passwordStrength.level === 1 && level <= 1,
-                    'strength-medium': passwordStrength.level === 2 && level <= 2,
-                    'strength-strong': passwordStrength.level === 3 && level <= 3,
-                    'strength-very-strong': passwordStrength.level === 4 && level <= 4
-                  }"
-                ></div>
-              </div>
-              <div class="strength-text" :class="`strength-${passwordStrength.level}`">
-                {{ passwordStrength.text }}
-              </div>
-            </div>
-            <div class="validation-rules" :class="{ show: showPasswordRules }">
-              <!-- 只显示第一条错误的规则 -->
-              <div
-                v-for="rule in getPasswordFirstInvalidRule()"
-                :key="rule.text"
-                :class="{ 'rule-invalid': !rule.valid }"
-                class="validation-rule"
-              >
-                <i class="fas fa-exclamation-circle"></i>
-                {{ rule.text }}
+            <!-- 显示密码验证提示 - 统一为红色边框样式 -->
+            <div v-if="shouldShowPasswordError" class="validation-rules custom-validation"
+                 style="display: block !important; visibility: visible !important; overflow: visible !important; margin-top: 8px; padding: 8px 12px; background: rgba(245, 108, 108, 0.1); border: 1px solid rgba(245, 108, 108, 0.3); border-radius: 6px; position: relative; z-index: 1000; max-width: 100%; box-sizing: border-box;">
+              <div class="validation-rule rule-invalid"
+                   style="color: #f56c6c !important; font-size: 14px; display: flex; align-items: center; gap: 6px; overflow: visible !important; word-wrap: break-word; word-break: break-all; line-height: 0%; min-height: auto;">
+                <span style="color: #f56c6c; flex-shrink: 0;">●</span>
+                <span style="flex: 1; min-width: 0;">{{ getPasswordErrorMessage() }}</span>
               </div>
             </div>
           </el-form-item>
@@ -134,6 +125,28 @@
               size="large"
               show-password
               :prefix-icon="Lock"
+              @input="validateConfirmPassword"
+            />
+            <!-- 显示确认密码验证提示 - 统一为红色边框样式 -->
+            <div v-if="shouldShowConfirmPasswordError" class="validation-rules custom-validation"
+                 style="display: block !important; visibility: visible !important; overflow: visible !important; margin-top: 8px; padding: 8px 12px; background: rgba(245, 108, 108, 0.1); border: 1px solid rgba(245, 108, 108, 0.3); border-radius: 6px; position: relative; z-index: 1000; max-width: 100%; box-sizing: border-box;">
+              <div class="validation-rule rule-invalid"
+                   style="color: #f56c6c !important; font-size: 14px; display: flex; align-items: center; gap: 6px; overflow: visible !important; word-wrap: break-word; word-break: break-all; line-height:0%;height: 100%;">
+                <span style="color: #f56c6c; flex-shrink: 0;">●</span>
+                <span style="flex: 1; min-width: 0;">{{ getConfirmPasswordErrorMessage() }}</span>
+              </div>
+            </div>
+          </el-form-item>
+
+          <!-- Turnstile验证码 -->
+          <el-form-item>
+            <Turnstile
+              ref="turnstileRef"
+              :site-key="turnstileSiteKey"
+              language="zh-CN"
+              @verified="onTurnstileVerified"
+              @error="onTurnstileError"
+              @expired="onTurnstileExpired"
             />
           </el-form-item>
 
@@ -149,14 +162,14 @@
                 class="email-code-input"
               />
               <el-button
-                :disabled="countdown > 0 || !isEmailValid || emailCodeLoading || emailCheckLoading"
+                :disabled="countdown > 0 || !isEmailValid || emailCodeLoading || emailCheckLoading || !turnstileToken"
                 :loading="emailCodeLoading || emailCheckLoading"
                 @click="handleSendVerificationCode"
                 class="email-code-button"
                 size="large"
               >
                 {{ emailCheckLoading ? '检查中...' : emailCodeButtonText }}
-            </el-button>
+              </el-button>
             </div>
           </el-form-item>
 
@@ -215,96 +228,43 @@
       </template>
     </el-dialog>
 
-    <!-- 图形验证码弹窗 -->
-    <el-dialog
-      v-model="showCaptchaDialog"
-      title="安全验证"
-      width="380px"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      center
-      class="captcha-dialog"
-    >
-      <div class="captcha-dialog-content">
-        <div class="captcha-header">
-          <div class="captcha-icon">
-            <i class="fas fa-shield-alt"></i>
-          </div>
-          <h3>请完成人机验证</h3>
-          <p>为确保账户安全，请输入下方验证码</p>
-        </div>
-
-        <div class="captcha-body">
-          <div class="captcha-input-group">
-            <el-input
-              v-model.trim="captchaDialogForm.captcha"
-              placeholder="请输入验证码"
-              size="large"
-              maxlength="5"
-              class="captcha-input"
-              :prefix-icon="Key"
-              @keyup.enter="submitCaptcha"
-              @input="handleCaptchaInput"
-              ref="captchaInputRef"
-            />
-          </div>
-
-          <div class="captcha-image-container">
-            <img
-              :src="captchaUrl"
-              alt="验证码"
-              class="captcha-display"
-              @click="() => refreshCaptcha(true)"
-            />
-            <div class="captcha-refresh-hint" @click="() => refreshCaptcha(true)">
-              <i class="fas fa-sync-alt"></i>
-              <span>点击刷新验证码</span>
-            </div>
-          </div>
-
-          <div v-if="captchaDialogError" class="captcha-error">
-            <i class="fas fa-exclamation-triangle"></i>
-            <span class="error-text">{{ captchaDialogError }}</span>
-            <button class="error-clear-btn" @click="captchaDialogError = ''" title="清空错误">
-              <i class="fas fa-times"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <template #footer>
-        <div class="captcha-dialog-footer">
-          <el-button
-            @click="cancelCaptcha"
-            size="large"
-            class="captcha-cancel-btn"
-          >
-            取消
-          </el-button>
-          <el-button
-            type="primary"
-            @click="submitCaptcha"
-            size="large"
-            :loading="captchaSubmitting"
-            class="captcha-submit-btn"
-          >
-            <i class="fas fa-check"></i>
-            验证并发送
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
-  </div>
+    </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Lock, Message, Key } from '@element-plus/icons-vue'
+import Turnstile from '../Turnstile.vue'
+import { usePasswordStrength } from '../../composables/usePasswordStrength'
+import { useTurnstile } from '../../composables/useTurnstile'
 // apiService 已经挂载到 window 对象上
+
+// ==================== Composables ====================
+// 使用密码强度检测
+const {
+  strength: passwordStrengthData,
+  rules: passwordRulesData,
+  isValid: isPasswordValid,
+  strengthText,
+  strengthLevel,
+  updateStrength: updatePasswordStrength
+} = usePasswordStrength()
+
+// 使用 Turnstile 验证码
+const {
+  token: turnstileToken,
+  siteKey: turnstileSiteKey,
+  isVerified: isTurnstileVerified,
+  onVerified: onTurnstileVerified,
+  onError: onTurnstileError,
+  onExpired: onTurnstileExpired,
+  fetchSiteKey: fetchTurnstileSiteKey
+} = useTurnstile()
 
 // ==================== 状态管理 ====================
 const signupFormRef = ref()
+const turnstileRef = ref()
 
 // 注册表单数据
 const signupForm = reactive({
@@ -329,19 +289,6 @@ const emailError = ref('')
 
 // 验证码倒计时
 const countdown = ref(0)
-
-// 验证码弹窗状态
-const showCaptchaDialog = ref(false)
-const captchaSubmitting = ref(false)
-const captchaDialogError = ref('')
-const captchaDialogForm = reactive({
-  captcha: ''
-})
-const captchaInputRef = ref(null)
-
-// 验证码相关
-const captchaUrl = ref('')
-const currentCaptchaId = ref('')
 const emailCodeSent = ref(false)
 
 // 提示框状态
@@ -364,14 +311,15 @@ const validatePasswordRule = (rule, value, callback) => {
   }
 }
 
-// 验证确认密码
-const validateConfirmPassword = (rule, value, callback) => {
+// 表单验证需要的验证函数
+const validateConfirmPasswordForm = (rule, value, callback) => {
   if (value !== signupForm.password) {
     callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
+    return
   }
+  callback()
 }
+
 
 // ==================== 验证规则 ====================
 // 用户名验证规则
@@ -389,39 +337,32 @@ const passwordRules = ref([
   { text: '包含数字', valid: false }
 ])
 
+// 邮箱验证规则
+const emailRules = ref([
+  { text: '请输入邮箱地址', valid: false },
+  { text: '邮箱格式不正确', valid: false }
+])
+
+// 确认密码验证规则
+const confirmPasswordRules = ref([
+  { text: '请再次输入密码', valid: false },
+  { text: '两次输入的密码不一致', valid: false }
+])
+
 // 密码强度
 const passwordStrength = ref({
   level: 0,
   text: '请输入密码'
 })
 
-// 表单验证规则
+// 表单验证规则 - 完全禁用Element Plus的错误显示，只保留后端验证
 const signupRules = {
-  username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 6, message: '用户名至少6位', trigger: 'blur' },
-    { pattern: /^[a-z][a-z0-9_]*$/, message: '用户名必须以小写字母开头，只能包含小写字母数字下划线', trigger: 'blur' }
-  ],
-  email: [
-    { required: true, message: '请输入邮箱地址', trigger: 'blur' },
-    { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
-  ],
-  password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 8, message: '密码至少8位', trigger: 'blur' },
-    { validator: validatePasswordRule, trigger: 'blur' }
-  ],
-  confirmPassword: [
-    { required: true, message: '请再次输入密码', trigger: 'blur' },
-    { validator: validateConfirmPassword, trigger: 'blur' }
-  ],
-  emailCode: [
-    { required: true, message: '请输入邮箱验证码', trigger: 'blur' },
-    
-  ],
-  agreeTerms: [
-    { required: true, message: '请同意服务条款和隐私政策', trigger: 'change' }
-  ]
+  username: [],  // 清空所有Element Plus验证规则，完全依赖自定义验证
+  email: [],     // 清空所有Element Plus验证规则，完全依赖自定义验证
+  password: [],  // 清空所有Element Plus验证规则，完全依赖自定义验证
+  confirmPassword: [],  // 清空所有Element Plus验证规则，完全依赖自定义验证
+  emailCode: [], // 清空所有Element Plus验证规则，完全依赖自定义验证
+  agreeTerms: [] // 清空所有Element Plus验证规则，完全依赖自定义验证
 }
 
 // ==================== 计算属性 ====================
@@ -454,9 +395,15 @@ const canSubmit = computed(() => {
   )
 })
 
+// Turnstile 回调函数已移至 useTurnstile composable
+
 // ==================== 方法定义 ====================
-// 验证密码
+// 验证密码 - 使用 composable
 const validatePassword = () => {
+  // 更新 composable 中的密码值并触发验证
+  passwordStrengthData.value = signupForm.password
+  updatePasswordStrength()
+
   const password = signupForm.password
 
   // 验证各个规则
@@ -500,6 +447,185 @@ const validatePassword = () => {
   passwordStrength.value = strengthLevels[Math.min(strength, 4)]
 }
 
+// 验证邮箱
+const validateEmail = () => {
+  const email = signupForm.email
+
+  // 验证各个规则
+  const hasValue = email.length > 0
+  const isValidFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
+  // 更新邮箱规则
+  emailRules.value = [
+    { text: '请输入邮箱地址', valid: hasValue },
+    { text: '邮箱格式不正确', valid: isValidFormat }
+  ]
+}
+
+// 验证确认密码
+const validateConfirmPassword = () => {
+  const confirmPassword = signupForm.confirmPassword
+  const password = signupForm.password
+
+  // 验证各个规则
+  const hasValue = confirmPassword.length > 0
+  const isMatch = confirmPassword === password && password.length > 0
+
+  // 更新确认密码规则
+  confirmPasswordRules.value = [
+    { text: '请再次输入密码', valid: hasValue },
+    { text: '两次输入的密码不一致', valid: isMatch }
+  ]
+}
+
+// 获取邮箱错误提示信息
+const getEmailErrorMessage = () => {
+  const email = signupForm.email
+
+  if (!email) {
+    return '请输入邮箱地址'
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email)) {
+    return '请输入正确的邮箱格式'
+  }
+
+  return '' // 符合要求，返回空字符串不显示提示
+}
+
+// 获取确认密码错误提示信息
+const getConfirmPasswordErrorMessage = () => {
+  const confirmPassword = signupForm.confirmPassword
+  const password = signupForm.password
+
+  if (!confirmPassword) {
+    return '请再次输入密码'
+  }
+
+  if (confirmPassword !== password) {
+    return '两次输入的密码不一致'
+  }
+
+  return '' // 符合要求，返回空字符串不显示提示
+}
+
+// 获取用户名错误提示信息
+const getUsernameErrorMessage = () => {
+  const username = signupForm.username
+
+  if (!username) {
+    return '请输入用户名'
+  }
+
+  if (username.length < 6) {
+    return '用户名至少6位'
+  }
+
+  if (!/^[a-z]/.test(username)) {
+    return '用户名必须以小写字母开头'
+  }
+
+  if (!/^[a-z0-9_]*$/.test(username)) {
+    return '用户名只能包含小写字母、数字、下划线'
+  }
+
+  return '' // 符合要求，返回空字符串不显示提示
+}
+
+// 获取密码错误提示信息
+const getPasswordErrorMessage = () => {
+  const password = signupForm.password
+
+  if (!password) {
+    return '请输入密码'
+  }
+
+  if (password.length < 8) {
+    return '密码至少8位'
+  }
+
+  const hasUpperCase = /[A-Z]/.test(password)
+  const hasLowerCase = /[a-z]/.test(password)
+  const hasNumber = /\d/.test(password)
+
+  if (!hasUpperCase) {
+    return '密码必须包含大写字母'
+  }
+
+  if (!hasLowerCase) {
+    return '密码必须包含小写字母'
+  }
+
+  if (!hasNumber) {
+    return '密码必须包含数字'
+  }
+
+  if (passwordStrength.value.level < 2) {
+    return '密码强度太弱，请增加复杂度'
+  }
+
+  return '' // 符合要求，返回空字符串不显示提示
+}
+
+// 判断是否应该显示邮箱错误提示 - 改为计算属性以确保响应式更新
+const shouldShowEmailError = computed(() => {
+  const email = signupForm.email
+  if (!email) {
+    return false
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const isValid = emailRegex.test(email)
+  return !isValid
+})
+
+// 判断是否应该显示确认密码错误提示 - 改为计算属性以确保响应式更新
+const shouldShowConfirmPasswordError = computed(() => {
+  const confirmPassword = signupForm.confirmPassword
+  const password = signupForm.password
+
+  if (!confirmPassword) {
+    return false
+  }
+  const isMatch = confirmPassword === password
+  return !isMatch
+})
+
+// 判断是否应该显示用户名错误提示 - 改为计算属性以确保响应式更新
+const shouldShowUsernameError = computed(() => {
+  const username = signupForm.username
+
+  if (!username) {
+    return false
+  }
+
+  // 检查用户名验证规则
+  const hasMinLength = username.length >= 6
+  const startsWithLower = /^[a-z]/.test(username)
+  const validChars = /^[a-z0-9_]*$/.test(username)
+
+  const isValid = hasMinLength && startsWithLower && validChars
+  return !isValid
+})
+
+// 判断是否应该显示密码错误提示 - 改为计算属性以确保响应式更新
+const shouldShowPasswordError = computed(() => {
+  const password = signupForm.password
+
+  if (!password) {
+    return false
+  }
+
+  // 检查密码验证规则
+  const hasMinLength = password.length >= 8
+  const hasUpperCase = /[A-Z]/.test(password)
+  const hasLowerCase = /[a-z]/.test(password)
+  const hasNumber = /\d/.test(password)
+
+  const isValid = hasMinLength && hasUpperCase && hasLowerCase && hasNumber && passwordStrength.value.level >= 2
+  return !isValid
+})
 
 // 检查用户名
 const checkUsernameOnServer = async () => {
@@ -539,9 +665,13 @@ const checkEmailOnServer = async () => {
   }
 }
 
-// 发送验证码前的验证和弹窗显示
+// 发送验证码前的验证
 const handleSendVerificationCode = async () => {
   if (!isEmailValid.value) return
+  if (!turnstileToken.value) {
+    ElMessage.warning('请先完成人机验证')
+    return
+  }
 
   // 先检查邮箱是否可用
   emailCheckLoading.value = true
@@ -554,122 +684,39 @@ const handleSendVerificationCode = async () => {
       return
     }
 
-    // 邮箱可用，显示验证码弹窗
-    showCaptchaDialog.value = true
-    // 清空之前的错误信息
-    captchaDialogForm.captcha = ''
-    captchaDialogError.value = ''
-    refreshCaptcha()
-    // 聚焦到验证码输入框
-    setTimeout(() => {
-      captchaInputRef.value?.focus()
-    }, 100)
+    // 邮箱可用，发送验证码（包含Turnstile token进行验证）
+    const data = await window.apiService.auth.sendEmailCode({
+      email: signupForm.email,
+      purpose: 'register',
+      turnstile_token: turnstileToken.value
+    })
+
+    ElMessage.success('验证码已发送到您的邮箱，请查收')
+    emailCodeSent.value = true
+    startCountdown()
   } catch (error) {
-    // 静默处理错误
+    // 处理后端返回的详细错误信息
+    let errorMessage = '发送验证码失败，请稍后重试'
+
+    if (error.response?.data) {
+      const data = error.response.data
+      if (data.status === 'error' && data.message) {
+        errorMessage = data.message
+      } else if (data.error) {
+        errorMessage = data.error
+      } else if (data.message) {
+        errorMessage = data.message
+      }
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+
+    ElMessage.error(errorMessage)
   } finally {
     emailCheckLoading.value = false
   }
 }
 
-
-// 弹窗验证码相关方法
-const refreshCaptcha = async (clearError = false) => {
-  try {
-    const response = await fetch('/api/captcha/', {
-      method: 'GET',
-      headers: {
-        'X-CSRFToken': window.SETTINGS_INITIAL?.csrfToken || ''
-      }
-    })
-
-    const data = await response.json()
-
-    if (data.status === 'success') {
-      captchaUrl.value = data.captcha_image
-      currentCaptchaId.value = data.captcha_id
-      captchaDialogForm.captcha = ''
-      // 根据参数决定是否清空错误信息
-      if (clearError) {
-        captchaDialogError.value = ''
-      }
-    } else {
-      captchaDialogError.value = data.message || '验证码生成失败'
-    }
-  } catch (error) {
-    // 静默处理错误
-    captchaDialogError.value = '网络错误，请稍后重试'
-  }
-}
-
-const cancelCaptcha = () => {
-  showCaptchaDialog.value = false
-  captchaDialogForm.captcha = ''
-  captchaDialogError.value = ''
-}
-
-const submitCaptcha = async () => {
-  if (!captchaDialogForm.captcha || captchaDialogForm.captcha.trim().length !== 5) {
-    captchaDialogError.value = '请输入5位验证码'
-    // 不刷新验证码，让用户看到错误提示
-    return
-  }
-
-  captchaSubmitting.value = true
-
-  try {
-    // 验证图形验证码
-    const response = await fetch('/api/validate-captcha/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        captcha_id: currentCaptchaId.value,
-        captcha_code: captchaDialogForm.captcha
-      })
-    })
-
-    const data = await response.json()
-
-    if (data.status === 'success') {
-      // 验证码正确，发送邮箱验证码
-      try {
-        await window.apiService.auth.sendEmailCode(signupForm.email, 'register', true)
-        ElMessage.success('验证码已发送到您的邮箱，请查收')
-        emailCodeSent.value = true
-        startCountdown()
-        // 关闭弹窗
-        showCaptchaDialog.value = false
-        captchaDialogForm.captcha = ''
-        captchaDialogError.value = ''
-      } catch (emailError) {
-        // 发送邮箱验证码失败，显示错误信息
-        if (emailError.message) {
-          captchaDialogError.value = emailError.message
-        } else {
-          captchaDialogError.value = '发送验证码失败，请稍后重试'
-        }
-      }
-    } else {
-      captchaDialogError.value = data.message || '验证码错误'
-      // 不刷新验证码，让错误信息持续显示
-    }
-  } catch (error) {
-    // 优先使用错误对象的message属性
-    if (error.message) {
-      captchaDialogError.value = error.message
-    } else if (error.response?.data?.error) {
-      captchaDialogError.value = error.response.data.error
-    } else if (error.response?.data?.message) {
-      captchaDialogError.value = error.response.data.message
-    } else {
-      captchaDialogError.value = '发送失败，请稍后重试'
-    }
-    // 不刷新验证码，让错误信息持续显示
-  } finally {
-    captchaSubmitting.value = false
-  }
-}
 
 // 开始倒计时
 const startCountdown = () => {
@@ -680,14 +727,6 @@ const startCountdown = () => {
       clearInterval(timer)
     }
   }, 1000)
-}
-
-// 处理验证码输入
-const handleCaptchaInput = (value) => {
-  // 当用户开始输入时，清空错误信息
-  if (captchaDialogError.value && value && value.length > 0) {
-    captchaDialogError.value = ''
-  }
 }
 
 // 显示提示
@@ -710,35 +749,61 @@ const closePrompt = () => {
 const submitForm = async () => {
   if (!signupFormRef.value) return
 
-  // 验证表单 - 使用 .catch() 捕获验证错误并提取具体信息
-  let validationErrors = []
-  const valid = await signupFormRef.value.validate().catch((errors) => {
-    // 提取验证失败的字段信息
-    if (errors && typeof errors === 'object') {
-      for (const field in errors) {
-        const fieldErrors = errors[field]
-        if (Array.isArray(fieldErrors)) {
-          fieldErrors.forEach(err => {
-            if (err && err.message) {
-              validationErrors.push(err.message)
-            }
-          })
-        }
-      }
-    }
-    return false
-  })
-  
-  if (!valid) {
-    // 表单验证失败，显示具体的验证错误
-    if (validationErrors.length > 0) {
-      // 显示所有验证错误
-      validationErrors.forEach(error => {
-        ElMessage.error(error)
-      })
+  // 跳过Element Plus表单验证，直接进行自定义验证
+  const customValidationErrors = []
+
+  // 自定义验证逻辑
+  if (!signupForm.username) {
+    customValidationErrors.push('请输入用户名')
+  } else if (signupForm.username.length < 6) {
+    customValidationErrors.push('用户名至少6位')
+  } else if (!/^[a-z][a-z0-9_]*$/.test(signupForm.username)) {
+    customValidationErrors.push('用户名必须以小写字母开头，只能包含小写字母数字下划线')
+  }
+
+  if (!signupForm.email) {
+    customValidationErrors.push('请输入邮箱地址')
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(signupForm.email)) {
+    customValidationErrors.push('请输入正确的邮箱格式')
+  }
+
+  if (!signupForm.password) {
+    customValidationErrors.push('请输入密码')
+  } else if (signupForm.password.length < 8) {
+    customValidationErrors.push('密码至少8位')
+  } else if (passwordStrength.value.level < 2) {
+    customValidationErrors.push('密码强度太弱，请按照要求设置密码')
+  }
+
+  if (!signupForm.confirmPassword) {
+    customValidationErrors.push('请再次输入密码')
+  } else if (signupForm.confirmPassword !== signupForm.password) {
+    customValidationErrors.push('两次输入的密码不一致')
+  }
+
+  if (!signupForm.emailCode) {
+    customValidationErrors.push('请输入邮箱验证码')
+  }
+
+  if (!signupForm.agreeTerms) {
+    customValidationErrors.push('请同意服务条款和隐私政策')
+  }
+
+  if (customValidationErrors.length > 0) {
+    // 显示自定义验证错误
+    customValidationErrors.forEach(error => {
+      ElMessage.error(error)
+    })
+    return
+  }
+
+  // 检查Turnstile验证码
+  if (!turnstileToken.value) {
+    // 如果邮箱验证码已填写且表单其他部分都验证通过，可能是token过期
+    if (signupForm.emailCode) {
+      ElMessage.warning('人机验证已过期，请重新完成验证')
     } else {
-      // 如果无法提取错误信息，显示通用提示
-      ElMessage.warning('请检查并填写完整信息')
+      ElMessage.warning('请完成人机验证')
     }
     return
   }
@@ -754,7 +819,8 @@ const submitForm = async () => {
       password: signupForm.password,
       confirm_password: signupForm.confirmPassword,
       email_code: signupForm.emailCode,
-      agree_terms: signupForm.agreeTerms
+      agree_terms: signupForm.agreeTerms,
+      turnstile_token: turnstileToken.value
     }
 
     await window.apiService.auth.register(formData)
@@ -813,7 +879,12 @@ const submitForm = async () => {
       
       serverErrors.value = errors.length > 0 ? errors : ['注册失败，请检查信息后重试']
     } else if (error.message && error.message !== '请求失败') {
-      serverErrors.value = [error.message]
+      // 如果是人机验证相关错误，给出更友好的提示
+      if (error.message.includes('人机验证')) {
+        serverErrors.value = ['人机验证已过期，请重新完成验证后重试']
+      } else {
+        serverErrors.value = [error.message]
+      }
     } else {
       serverErrors.value = ['网络错误，请稍后重试']
     }
@@ -919,29 +990,180 @@ const getPasswordFirstInvalidRule = () => {
   const invalidRule = passwordRules.value.find(rule => !rule.valid)
   return invalidRule ? [invalidRule] : []
 }
+
+// 组件挂载
+onMounted(() => {
+  // 使用 composable 的 fetchSiteKey
+  fetchTurnstileSiteKey('/api/turnstile/config/').then(key => {
+    if (!key) {
+      ElMessage.error('获取验证码配置失败')
+    }
+  })
+})
 </script>
 
 <style scoped>
+/* ========== 背景容器 ========== */
 .auth-container {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
+/* 渐变网格覆盖 */
+.auth-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 20% 80%, rgba(240, 147, 251, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(168, 85, 247, 0.2) 0%, transparent 50%);
+  opacity: 0.8;
+  z-index: 1;
+}
+
+/* 浮动光球 */
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.orb-1 {
+  width: 500px;
+  height: 500px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6), rgba(168, 85, 247, 0.6));
+  top: -10%;
+  left: -10%;
+  animation: orbFloat1 20s ease-in-out infinite;
+}
+
+.orb-2 {
+  width: 400px;
+  height: 400px;
+  background: linear-gradient(135deg, rgba(240, 147, 251, 0.5), rgba(245, 87, 108, 0.5));
+  bottom: -10%;
+  right: -10%;
+  animation: orbFloat2 18s ease-in-out infinite 7s;
+}
+
+.orb-3 {
+  width: 350px;
+  height: 350px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(102, 126, 234, 0.4));
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: orbFloat3 22s ease-in-out infinite 14s;
+}
+
+@keyframes orbFloat1 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(50px, -50px);
+  }
+  66% {
+    transform: translate(-50px, 50px);
+  }
+}
+
+@keyframes orbFloat2 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(-60px, 40px);
+  }
+  66% {
+    transform: translate(40px, -60px);
+  }
+}
+
+@keyframes orbFloat3 {
+  0%, 100% {
+    transform: translate(-50%, -50%);
+  }
+  33% {
+    transform: translate(calc(-50% + 30px), calc(-50% - 40px));
+  }
+  66% {
+    transform: translate(calc(-50% - 40px), calc(-50% + 30px));
+  }
+}
+
+/* ========== 毛玻璃卡片 ========== */
+.auth-card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 520px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 32px;
+  overflow: hidden;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: cardEntrance 0.8s ease-out;
+}
+
+@keyframes cardEntrance {
+  from {
+    opacity: 1;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+}
 
 .auth-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+  transform: translateY(-5px) scale(1.01);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
+/* ========== 卡片头部 ========== */
 .auth-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: transparent;
   padding: 40px 30px;
   text-align: center;
   color: white;
+  position: relative;
 }
 
 .auth-logo {
@@ -994,7 +1216,26 @@ const getPasswordFirstInvalidRule = () => {
   color: #764ba2;
 }
 
-/* 验证规则样式 */
+/* 字段提示样式 */
+.field-hint {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  margin-top: 5px;
+  margin-left: 4px;
+  font-style: italic;
+}
+
+/* 字段错误样式 */
+.field-error {
+  color: #f56c6c;
+  font-size: 0.85rem;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 验证规则样式 - 统一为灰白色 */
 .validation-rules {
   margin-top: 8px;
   display: flex;
@@ -1007,7 +1248,8 @@ const getPasswordFirstInvalidRule = () => {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #999;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
   transition: color 0.3s ease;
 }
 
@@ -1016,16 +1258,51 @@ const getPasswordFirstInvalidRule = () => {
 }
 
 .rule-invalid {
-  color: #999;
+  color: rgba(255, 255, 255, 0.7);
 }
 
-.field-error {
+/* 内联验证错误样式 - 确保文字在红色边框内 */
+.inline-validation-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(245, 108, 108, 0.1);
+  border: 1px solid rgba(245, 108, 108, 0.3);
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.inline-validation-error .error-icon {
   color: #f56c6c;
   font-size: 0.85rem;
-  margin-top: 5px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.inline-validation-error .error-text {
+  color: #f56c6c;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  flex: 1;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+/* 输入框容器样式 */
+.input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* 带错误状态的输入框 */
+.input-wrapper :deep(.el-input.has-error .el-input__wrapper) {
+  box-shadow: 0 0 0 1px rgba(245, 108, 108, 0.5) inset;
 }
 
 /* 密码强度样式 */
@@ -1089,241 +1366,6 @@ const getPasswordFirstInvalidRule = () => {
   white-space: nowrap;
 }
 
-/* 弹窗式验证码样式 */
-.captcha-dialog .el-dialog {
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.captcha-dialog .el-dialog__header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 0;
-  margin: 0;
-  border-radius: 16px 16px 0 0;
-}
-
-.captcha-dialog .el-dialog__header .el-dialog__title {
-  color: white;
-  font-weight: 600;
-  font-size: 18px;
-  padding: 20px 24px;
-}
-
-.captcha-dialog .el-dialog__headerbtn .el-dialog__close {
-  color: white;
-  font-size: 20px;
-}
-
-.captcha-dialog-content {
-  padding: 0;
-}
-
-.captcha-header {
-  background: linear-gradient(135deg, #f8f9ff 0%, #e8f4ff 100%);
-  padding: 32px 24px;
-  text-align: center;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.captcha-icon {
-  width: 60px;
-  height: 60px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 16px;
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
-}
-
-.captcha-icon i {
-  color: white;
-  font-size: 24px;
-}
-
-.captcha-header h3 {
-  margin: 0 0 8px 0;
-  color: #2c3e50;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.captcha-header p {
-  margin: 0;
-  color: #64748b;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.captcha-body {
-  padding: 32px 24px;
-}
-
-.captcha-input-group {
-  margin-bottom: 24px;
-}
-
-.captcha-input {
-  width: 100%;
-}
-
-.captcha-input .el-input__wrapper {
-  background: rgba(255, 255, 255, 0.9);
-  border: 2px solid #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  transition: all 0.3s ease;
-}
-
-.captcha-input .el-input__wrapper:hover {
-  border-color: #cbd5e0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.captcha-input .el-input__wrapper.is-focus {
-  border-color: #667eea;
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
-}
-
-.captcha-image-container {
-  position: relative;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.captcha-display {
-  width: 100%;
-  max-width: 200px;
-  height: 70px;
-  border: 2px solid #e2e8f0;
-  border-radius: 12px;
-  object-fit: cover;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-
-.captcha-display:hover {
-  border-color: #667eea;
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
-  transform: scale(1.02);
-}
-
-.captcha-refresh-hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #64748b;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.captcha-refresh-hint:hover {
-  color: #667eea;
-}
-
-.captcha-refresh-hint i {
-  font-size: 14px;
-}
-
-.captcha-error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  color: #dc2626;
-  font-size: 14px;
-  margin-top: 12px;
-  animation: slideInUp 0.3s ease;
-  position: relative;
-}
-
-.captcha-error i {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.captcha-error .error-text {
-  flex: 1;
-  line-height: 1.4;
-}
-
-.captcha-error .error-clear-btn {
-  background: none;
-  border: none;
-  color: #dc2626;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-  flex-shrink: 0;
-}
-
-.captcha-error .error-clear-btn:hover {
-  background: rgba(220, 38, 38, 0.1);
-}
-
-.captcha-dialog-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 24px 24px 32px 24px;
-  background: #f8fafc;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.captcha-cancel-btn {
-  background: white;
-  border: 2px solid #e2e8f0;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.captcha-cancel-btn:hover {
-  background: #f8fafc;
-  border-color: #cbd5e0;
-  color: #475569;
-}
-
-.captcha-submit-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  color: white;
-  font-weight: 600;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.captcha-submit-btn:hover {
-  background: linear-gradient(135deg, #5a67d8 0%, #6b4b8d 100%);
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
-  transform: translateY(-1px);
-}
-
-.captcha-submit-btn i {
-  font-size: 14px;
-}
-
-@keyframes slideInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 /* 服务条款样式 */
 .terms-checkbox {
@@ -1367,6 +1409,53 @@ const getPasswordFirstInvalidRule = () => {
   font-size: 1.1rem;
   color: #333;
   margin: 0;
+}
+
+/* 完全隐藏Element Plus的错误信息，避免重复显示 */
+.auth-form :deep(.el-form-item__error) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 修复全局overflow冲突 - 使用更强的选择器确保验证提示能够显示 */
+.auth-form :deep(.el-form-item) {
+  overflow: visible !important;
+}
+
+.auth-form :deep(.el-form-item__content) {
+  overflow: visible !important;
+  position: relative !important;
+}
+
+.auth-form .custom-validation {
+  display: block !important;
+  visibility: visible !important;
+  overflow: visible !important;
+  position: relative !important;
+  z-index: 99999 !important;
+  opacity: 1 !important;
+  height: auto !important;
+  max-height: none !important;
+  pointer-events: auto !important;
+  transform: none !important;
+}
+
+.auth-form .custom-validation .validation-rule {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* 额外的兜底样式 - 针对所有可能的情况 */
+.auth-card :deep(.el-form-item),
+.auth-card :deep(.el-form-item__content) {
+  overflow: visible !important;
 }
 
 /* 响应式设计 */

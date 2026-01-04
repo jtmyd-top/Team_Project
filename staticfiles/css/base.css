@@ -175,6 +175,12 @@ html, body {
 header {
   flex-shrink: 0;
   min-width: 100%;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background-color: var(--bg-primary);
 }
 
 main {
@@ -183,6 +189,7 @@ main {
     align-items: flex-start;
     justify-content: center;
     align-content: flex-start;
+    margin-top: 64px; /* 为固定导航栏留出空间 */
 }
 
 nav {
@@ -192,7 +199,7 @@ nav {
   background-color: var(--bg-primary);
   display: flex;
   align-items: center;
-  justify-content: space-between; /* 未登录时 nav-right 不存在，左侧自然靠左 */
+  justify-content: space-between; /* 未登录时 nav-right 不存在,左侧自然靠左 */
   transition: var(--transition-base);
 }
 

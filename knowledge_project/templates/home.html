@@ -1,5 +1,39 @@
 {% extends 'base.html' %}
-{% block title %}首页{% endblock %}
-{% block content %}<h1>欢迎来到我们的知识协作平台！</h1>
-<p>你已成功登录。</p>
+{% load static %}
+{% block title %}探索知识宇宙{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
+<link rel="stylesheet" href="{% static 'JS/dist/assets/home.css' %}">
+<style>
+/* 强制移除body和main的白色背景 */
+body, html {
+  margin: 0 !important;
+  padding: 0 !important;
+  #height: 100% !important;
+  min-height: 100vh !important;
+  background: transparent !important;
+  overflow: auto !important;
+}
+
+main {
+  background: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 100vh !important;
+}
+
+/* 确保Vue应用占满全屏 */
+#home-app {
+  width: 100%;
+  min-height: 100vh;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="home-app"></div>
+
+<!-- 加载构建后的Vue应用 -->
+<script type="module" src="{% static 'JS/dist/home.js' %}"></script>
 {% endblock %}

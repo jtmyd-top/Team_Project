@@ -268,14 +268,24 @@ def send_operation_2fa_email(user, operation_type='general'):
         # 如果已有验证码，返回True表示不需要再发送
         return True, ''
     
-    # 【新增】每日发送次数限制（每个操作类型每天最多3次）
+    # 【新增】发送次数限制（每个操作类型每小时3次，每天5次）
     user_identifier = f"user_{user.id}"
+
+    # 每小时发送次数限制
+    purpose_hourly_key = f"email_code_hourly_{operation_type}_2fa_{user_identifier}"
+    purpose_hourly_attempts = cache.get(purpose_hourly_key, 0)
+
+    if purpose_hourly_attempts >= 3:
+        logger.warning(f"用户 {user.id} 的{operation_type}验证码每小时发送次数已达上限")
+        return False, '该操作每小时验证码发送已达上限（3次），请稍后再试。'
+
+    # 每天发送次数限制
     purpose_daily_key = f"email_code_daily_{operation_type}_2fa_{user_identifier}"
     purpose_daily_attempts = cache.get(purpose_daily_key, 0)
-    
-    if purpose_daily_attempts >= 10:
-        logger.warning(f"用户 {user.id} 的{operation_type}验证码今日发送次数已达上限")
-        return False, '您今天已达到该操作的验证码发送上限（10次），请明天再试。'
+
+    if purpose_daily_attempts >= 5:
+        logger.warning(f"用户 {user.id} 的{operation_type}验证码每日发送次数已达上限")
+        return False, '该操作每天验证码发送已达上限（5次），请明天再试。'
     
     # 生成6位验证码
     code = ''.join(random.choices('0123456789', k=6))
@@ -286,7 +296,14 @@ def send_operation_2fa_email(user, operation_type='general'):
     # 设置发送锁，90秒内不允许重复发送同类型的验证码
     cache.set(send_lock_key, True, timeout=90)
     
-    # 【新增】更新每日发送次数
+    # 【新增】更新发送次数
+    # 更新每小时发送次数
+    if purpose_hourly_attempts == 0:
+        cache.set(purpose_hourly_key, 1, timeout=3600)   # 1小时
+    else:
+        cache.incr(purpose_hourly_key)
+
+    # 更新每天发送次数
     if purpose_daily_attempts == 0:
         # 第一次发送，设置过期时间为到第二天凌晨
         now = timezone.now()

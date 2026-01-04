@@ -11,166 +11,43 @@
 
 {% block head_extra %}
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
     <link rel="stylesheet" href="{% static 'css/modern-note-detail.css' %}">
 {% endblock %}
 
 {% block content %}
 
 <div class="note-detail-container">
+    <!-- 背景动画效果 -->
+    <div class="bg-animation">
+        <div class="floating-shapes">
+            <div class="shape shape-1"></div>
+            <div class="shape shape-2"></div>
+            <div class="shape shape-3"></div>
+            <div class="shape shape-4"></div>
+            <div class="shape shape-5"></div>
+        </div>
+    </div>
+
     <!-- 阅读进度条 -->
     <div class="reading-progress">
         <div class="reading-progress-bar" id="reading-progress-bar"></div>
     </div>
 
-    <div id="public-note-app" v-cloak>
-        <div v-if="note">
-            <!-- 顶部导航栏 -->
-            <nav class="detail-navbar">
-                <div class="navbar-content">
-                    <div class="navbar-left">
-                        <a href="{% url 'knowledge_list' %}" class="back-button">
-                            <i class="fas fa-arrow-left"></i>
-                            返回列表
-                        </a>
-                    </div>
-
-                    <div class="navbar-actions">
-                        <button class="action-button" @click="toggleTheme" title="切换主题">
-                            <i class="fas fa-moon"></i>
-                        </button>
-                        <button class="action-button" @click="adjustFontSize" title="调整字体">
-                            <i class="fas fa-font"></i>
-                        </button>
-                        <button class="action-button" @click="toggleToc" title="目录">
-                            <i class="fas fa-list"></i>
-                        </button>
-                        <button class="action-button" @click="shareArticle" title="分享">
-                            <i class="fas fa-share-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </nav>
-
-            <!-- 主内容区域 -->
-            <main class="detail-main">
-                <!-- 文章头部 -->
-                <header class="article-header scroll-animate" data-animation="fadeInUp">
-                    <h1 class="article-title gradient-text animate-fade-in-down">[[ note.title ]]</h1>
-
-                    <div class="article-meta">
-                        <div class="meta-item author-info hover-3d">
-                            <div class="author-avatar animate-breathe">[[ note.author.username.charAt(0).toUpperCase() ]]</div>
-                            <div class="author-details">
-                                <span class="author-name">[[ note.author.username ]]</span>
-                                <span class="publish-date">发布于 [[ note.createdAt ]]</span>
-                            </div>
-                        </div>
-
-                        <div class="meta-item">
-                            <i class="fas fa-clock"></i>
-                            <span>阅读时间 [[ readingTime ]] 分钟</span>
-                        </div>
-
-                        <div class="meta-item">
-                            <i class="fas fa-eye"></i>
-                            <span>[[ note.views || 0 ]] 次阅读</span>
-                        </div>
-                    </div>
-                </header>
-
-                <!-- 文章内容 -->
-                <article class="article-content scroll-animate" data-animation="fadeInUp" data-delay="0.2" v-html="currentPageContent" id="article-content"></article>
-
-                <!-- 文章标签 -->
-                <div v-if="note.tags && note.tags.length > 0" class="article-tags scroll-animate" data-animation="fadeInUp" data-delay="0.4">
-                    <span v-for="tag in note.tags" :key="tag" class="tag hover-magnetic" data-tooltip="点击查看相关文章">
-                        [[ tag ]]
-                    </span>
-                </div>
-
-                <!-- 分页控件 -->
-                <div v-if="totalPages > 1" class="pagination-controls">
-                    <button @click="prevPage" :disabled="currentPage === 1" class="pagination-btn">
-                        <i class="fas fa-chevron-left"></i>
-                    </button>
-                    <div class="pagination-info">
-                        第 [[ currentPage ]] / [[ totalPages ]] 页
-                    </div>
-                    <button @click="nextPage" :disabled="currentPage === totalPages" class="pagination-btn">
-                        <i class="fas fa-chevron-right"></i>
-                    </button>
-                </div>
-
-                <!-- 章节导航 -->
-                <div class="chapter-navigation">
-                    <a v-if="previousNote" :href="previousNote.public_url" class="chapter-link prev">
-                        <i class="fas fa-chevron-left"></i>
-                        <div class="chapter-info">
-                            <span class="chapter-label">上一篇</span>
-                            <span class="chapter-title">[[ previousNote.title ]]</span>
-                        </div>
-                    </a>
-
-                    <div v-else class="chapter-link prev" style="opacity: 0.5; cursor: not-allowed;">
-                        <i class="fas fa-chevron-left"></i>
-                        <div class="chapter-info">
-                            <span class="chapter-label">上一篇</span>
-                            <span class="chapter-title">没有更多文章了</span>
-                        </div>
-                    </div>
-
-                    <a v-if="nextNote" :href="nextNote.public_url" class="chapter-link next">
-                        <div class="chapter-info">
-                            <span class="chapter-label">下一篇</span>
-                            <span class="chapter-title">[[ nextNote.title ]]</span>
-                        </div>
-                        <i class="fas fa-chevron-right"></i>
-                    </a>
-
-                    <div v-else class="chapter-link next" style="opacity: 0.5; cursor: not-allowed;">
-                        <div class="chapter-info">
-                            <span class="chapter-label">下一篇</span>
-                            <span class="chapter-title">没有更多文章了</span>
-                        </div>
-                        <i class="fas fa-chevron-right"></i>
-                    </div>
-                </div>
-            </main>
-
-            <!-- 目录 (可选显示) -->
-            <div v-if="showToc" class="table-of-contents">
-                <div class="toc-title">目录</div>
-                <ul class="toc-list">
-                    <li v-for="heading in headings" :key="heading.id" class="toc-item">
-                        <a :href="'#' + heading.id" class="toc-link" :class="{ active: activeHeading === heading.id }">
-                            [[ heading.text ]]
-                        </a>
-                    </li>
-                </ul>
-            </div>
-        </div>
-
-        <!-- 错误状态 -->
-        <div v-else class="message-container">
-            <div class="message-icon">
-                <i class="fas fa-exclamation-triangle"></i>
-            </div>
-            <h2 class="message-title">文章不存在</h2>
-            <p class="message-text">[[ message || '抱歉，您访问的文章不存在或已被删除。' ]]</p>
-            <a href="{% url 'knowledge_list' %}" class="message-action">
-                <i class="fas fa-arrow-left"></i>
-                返回文章列表
-            </a>
-        </div>
-    </div>
+    <!-- Vue组件将在这里渲染 -->
+    <div id="public-note-app" v-cloak></div>
 </div>
 
 {% if note_data %}{{ note_data|json_script:"note-data" }}{% endif %}
 {% if full_content_data %}{{ full_content_data|json_script:"full-content-data" }}{% endif %}
+{% if navigation_data %}{{ navigation_data|json_script:"navigation-data" }}{% endif %}
 {% if error_message %}{{ error_message|json_script:"error-message" }}{% endif %}
 {% endblock %}
 
 {% block scripts %}
-<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-<script src="{% static 'JS/dist/public-note-page.js'%}"></script>
+<!-- Vue 3 Production Build -->
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<!-- Vue Component -->
+<script src="{% static 'JS/dist/public-note-entry.js' %}"></script>
+
 {% endblock %}

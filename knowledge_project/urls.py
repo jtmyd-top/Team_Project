@@ -2,10 +2,10 @@
 from django.urls import path,re_path
 from . import views
 urlpatterns = [
-    path('', views.public_notes_list_view, name='home'),
+    path('', views.home_view, name='home'),
+    #path('public-notes/', views.public_notes_list_view, name='public_notes_list'),
     path('signup/', views.SignUpView.as_view(), name='signup'),
     path('knowledge/', views.knowledge_list, name='knowledge_list'),
-    path('captcha/', views.captcha_image, name='captcha_image'),
     # 【任务二】新增：为实时用户名检查提供API端点
     path('check-username/', views.check_username, name='check_username'),
     path('send-email-code/', views.SendEmailCodeView.as_view(), name='send_email_code'),
@@ -13,8 +13,6 @@ urlpatterns = [
     path('forgot-password/', views.forgot_password_view, name='forgot_password'),
     path('password-reset/', views.password_reset_api, name='password_reset_api'),
     path('reset-password/<int:user_id>/<str:token>/', views.reset_password_view, name='reset_password'),
-    path('api/captcha/', views.captcha_api, name='captcha_api'),
-    path('api/validate-captcha/', views.validate_captcha_api, name='validate_captcha_api'),
     path('api/notes/search/', views.search_notes_api, name='api_search_notes'),
     path('api/notes/<int:note_id>/', views.note_detail_api, name='api_note_detail'),
     path('api/notes/all/', views.get_all_notes_api, name='get_all_notes_api'),
@@ -32,6 +30,7 @@ urlpatterns = [
     path("update-email/", views.update_email, name="update_email"),
     path('check-email/', views.check_email, name='check_email'),
     path('api/toggle-like/', views.toggle_profile_like, name='toggle_profile_like'),
+    path('api/toggle-note-like/', views.toggle_note_like, name='toggle_note_like'),
 
     # ==================== 账户安全相关 API ====================
     path('api/security/send-operation-2fa/', views.send_operation_2fa_code, name='send_operation_2fa_code'),
@@ -46,6 +45,9 @@ urlpatterns = [
 
     # ==================== 主题设置 API ====================
     path('api/theme-settings/', views.theme_settings, name='theme_settings'),
+
+    # ==================== Turnstile API ====================
+    path('api/turnstile/config/', views.turnstile_config, name='turnstile_config'),
 
     # ==================== 登录API ====================
     path('api/login/', views.login_api, name='login_api'),

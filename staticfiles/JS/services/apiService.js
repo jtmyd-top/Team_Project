@@ -36,9 +36,7 @@ async function postRequest(url, body) {
 
   if (!response.ok) {
     // 创建一个包含更多信息的错误对象
-    // 优先使用 error 字段，如果没有则使用 message
-    const errorMessage = data.error || data.message || '请求失败';
-    const error = new Error(errorMessage);
+    const error = new Error('请求失败');
     error.response = {
       status: response.status,
       data: data
@@ -134,12 +132,30 @@ const apiService = {
     /**
      * 发送邮箱验证码
      */
-    sendEmailCode(email, purpose = 'register', captchaPreValidated = false) {
-      return postRequest('/send-email-code/', {
-        email,
-        purpose,
-        captcha_pre_validated: captchaPreValidated
-      });
+    sendEmailCode(params) {
+      // 支持两种调用方式：
+      // 1. 旧方式：sendEmailCode(email, purpose)
+      // 2. 新方式：sendEmailCode({email, purpose, turnstile_token})
+      let requestData = {};
+
+      if (typeof params === 'string') {
+        // 旧方式：第一个参数是email，第二个参数是purpose
+        requestData = {
+          email: arguments[0],
+          purpose: arguments[1] || 'register'
+        };
+      } else if (typeof params === 'object') {
+        // 新方式：传递参数对象
+        requestData = {
+          email: params.email,
+          purpose: params.purpose || 'register'
+        };
+        if (params.turnstile_token) {
+          requestData.turnstile_token = params.turnstile_token;
+        }
+      }
+
+      return postRequest('/send-email-code/', requestData);
     },
 
     /**

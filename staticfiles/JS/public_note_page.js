@@ -1,6 +1,6 @@
-// static/JS/public_note_page.js (最终完整版)
+// static/JS/public_note_page.js (功能完整版)
 
-const { createApp, ref, computed, onMounted, nextTick } = Vue;
+const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
 
 // 每页的字符数 (可以根据需要调整)
 const CHARS_PER_PAGE = 2000;
@@ -23,6 +23,14 @@ createApp({
         const isEditingPageNumber = ref(false);
         const pageInputNumber = ref(1);
         const pageInputRef = ref(null);
+
+        // 【新增】工具栏功能相关状态
+        const showToc = ref(false); // 是否显示目录
+        const headings = ref([]); // 文章标题列表
+        const activeHeading = ref(''); // 当前激活的标题
+        const currentTheme = ref('light'); // 当前主题
+        const currentFontSize = ref('medium'); // 当前字体大小：small, medium, large
+        const readingTime = ref(0); // 阅读时间（分钟）
 
         // --- 数据初始化 ---
         onMounted(() => {
@@ -102,6 +110,14 @@ createApp({
             return fullContent.value.substring(start, end);
         });
 
+        // 计算阅读时间（假设每分钟阅读300字）
+        watch(fullContent, (newContent) => {
+            if (newContent) {
+                const wordCount = newContent.length;
+                readingTime.value = Math.ceil(wordCount / 300);
+            }
+        });
+
         // --- 方法 ---
         const updateUrl = (newPage) => {
             const url = new URL(window.location.href);
@@ -135,14 +151,140 @@ createApp({
             isEditingPageNumber.value = false;
         };
 
+        // 【新增】主题切换功能
+        const toggleTheme = () => {
+            currentTheme.value = currentTheme.value === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', currentTheme.value);
+            localStorage.setItem('theme', currentTheme.value);
+        };
+
+        // 【新增】字体大小调整
+        const adjustFontSize = () => {
+            const sizes = ['small', 'medium', 'large'];
+            const currentIndex = sizes.indexOf(currentFontSize.value);
+            const nextIndex = (currentIndex + 1) % sizes.length;
+            currentFontSize.value = sizes[nextIndex];
+            
+            const contentElement = document.querySelector('.article-content');
+            if (contentElement) {
+                contentElement.className = contentElement.className.replace(/font-size-\w+/, '');
+                contentElement.classList.add(`font-size-${currentFontSize.value}`);
+            }
+            localStorage.setItem('fontSize', currentFontSize.value);
+        };
+
+        // 【新增】目录切换
+        const toggleToc = () => {
+            showToc.value = !showToc.value;
+            
+            // 第一次打开目录时提取标题
+            if (showToc.value && headings.value.length === 0) {
+                extractHeadings();
+            }
+        };
+
+        // 【新增】提取文章标题
+        const extractHeadings = () => {
+            nextTick(() => {
+                const contentElement = document.querySelector('.article-content');
+                if (!contentElement) return;
+                
+                const headingElements = contentElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
+                headings.value = Array.from(headingElements).map((heading, index) => {
+                    // 为标题添加ID（如果没有）
+                    if (!heading.id) {
+                        heading.id = `heading-${index}`;
+                    }
+                    return {
+                        id: heading.id,
+                        text: heading.textContent,
+                        level: parseInt(heading.tagName.substring(1))
+                    };
+                });
+            });
+        };
+
+        // 【新增】分享文章
+        const shareArticle = async () => {
+            const url = window.location.href;
+            const title = note.value?.title || '分享文章';
+            
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: title,
+                        url: url
+                    });
+                } catch (err) {
+                    if (err.name !== 'AbortError') {
+                        copyToClipboard(url);
+                    }
+                }
+            } else {
+                copyToClipboard(url);
+            }
+        };
+
+        // 复制到剪贴板
+        const copyToClipboard = (text) => {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('链接已复制到剪贴板');
+            }).catch(() => {
+                // 备用方案
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                alert('链接已复制到剪贴板');
+            });
+        };
+
+        // 【新增】监听滚动，高亮当前标题
+        const handleScroll = () => {
+            if (!showToc.value || headings.value.length === 0) return;
+            
+            const scrollPosition = window.scrollY + 100;
+            
+            for (let i = headings.value.length - 1; i >= 0; i--) {
+                const heading = document.getElementById(headings.value[i].id);
+                if (heading && heading.offsetTop <= scrollPosition) {
+                    activeHeading.value = headings.value[i].id;
+                    break;
+                }
+            }
+        };
+
+        // 初始化时加载保存的设置
+        onMounted(() => {
+            // 加载主题设置
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            currentTheme.value = savedTheme;
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            
+            // 加载字体大小设置
+            const savedFontSize = localStorage.getItem('fontSize') || 'medium';
+            currentFontSize.value = savedFontSize;
+            nextTick(() => {
+                const contentElement = document.querySelector('.article-content');
+                if (contentElement) {
+                    contentElement.classList.add(`font-size-${savedFontSize}`);
+                }
+            });
+
+            // 添加滚动监听
+            window.addEventListener('scroll', handleScroll);
+        });
+
         return {
             note,
             message,
             currentPage,
             totalPages,
             currentPageContent,
-            previousNote, // <-- 暴露给模板
-            nextNote,     // <-- 暴露给模板
+            previousNote,
+            nextNote,
             prevPage,
             nextPage,
             isEditingPageNumber,
@@ -150,6 +292,17 @@ createApp({
             pageInputRef,
             editPageNumber,
             goToPage,
+            // 新增的工具栏功能
+            showToc,
+            headings,
+            activeHeading,
+            currentTheme,
+            currentFontSize,
+            readingTime,
+            toggleTheme,
+            adjustFontSize,
+            toggleToc,
+            shareArticle,
         };
     }
 }).mount('#public-note-app');

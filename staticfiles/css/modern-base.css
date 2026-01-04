@@ -240,14 +240,15 @@ header {
   box-shadow: var(--shadow-xs);
   transition: var(--transition-colors);
   width: 100%;
-  position: relative;
-  box-sizing: border-box; /* 确保边框和padding计算正确 */
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 1000;
-  overflow: visible; /* 关键修复：允许内容溢出 */
+  overflow: visible;
 }
 
 nav {
@@ -325,13 +326,13 @@ main {
   flex: 1;
   max-width: 1280px;
   width: 100%;
-  margin: 0; /* 移除外边距，让内容紧贴body边框 */
-  padding: 0; /* 移除padding，让内容完全贴边 */
+  margin: 0;
+  padding: 0;
+  padding-top: 0;
   background-color: var(--bg-primary);
   position: relative;
   z-index: 1;
-  box-sizing: border-box; /* 确保计算正确 */
-  /* 确保与导航栏左对齐 */
+  box-sizing: border-box;
   align-self: stretch;
 }
 
@@ -583,7 +584,7 @@ body.no-animations * {
 
 /* 确保在任何页面上都不被遮挡 */
 header {
-  position: relative !important;
+  /* position: relative !important; 已移除 */
 }
 
 nav {

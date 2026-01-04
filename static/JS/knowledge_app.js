@@ -135,6 +135,10 @@ createApp({
         min_height: 400,
         max_height: 700,
         license_key: 'gpl',
+        // 禁用license key manager插件自动加载
+        plugin_base_urls: {},
+        // 显式禁用不需要的插件
+        forced_plugins: [],
         plugins: ['preview', 'searchreplace', 'autolink', 'fullscreen', 'image', 'link', 'media', 'code', 'codesample', 'table', 'nonbreaking', 'charmap', 'pagebreak', 'anchor', 'lists', 'textpattern', 'help', 'emoticons', 'autosave', 'wordcount', 'tpImportword', 'tpIndent2em'].join(' '),
         toolbar: ['undo redo | styles | bold italic underline strikethrough | forecolor backcolor | removeformat', 'alignleft aligncenter alignright alignjustify | bullist numlist | outdent indent | tpIndent2em | lineheight | blockquote | subscript superscript', 'link unlink anchor |image media | table | nonbreaking | hr pagebreak |charmap emoticons | code codesample | tpImportword | searchreplace | preview fullscreen | wordcount | help'],
         automatic_uploads: true,
