@@ -188,7 +188,8 @@ def folder_notes_api(request, folder_id):
             'id': note.id,
             'title': note.title,
             'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
-            'is_favorited': note.is_favorited
+            'is_favorited': note.is_favorited,
+            'is_secret': note.is_secret  # 添加保密标志
         } for note in notes]
     })
 
@@ -196,21 +197,23 @@ def folder_notes_api(request, folder_id):
 @login_required
 @require_http_methods(["GET"])
 def inbox_notes_api(request):
-    """获取收件箱中的笔记（没有分配文件夹的笔记）"""
+    """获取收件箱中的笔记（没有分配文件夹的笔记，排除保密笔记）"""
     user = request.user
-    
+
     notes = Note.objects.filter(
-        author=user, 
-        folder__isnull=True, 
+        author=user,
+        folder__isnull=True,
+        is_secret=False,  # 排除保密笔记
         is_trashed=False
     ).order_by('-updated_at')
-    
+
     return JsonResponse({
         'notes': [{
             'id': note.id,
             'title': note.title,
             'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
-            'is_favorited': note.is_favorited
+            'is_favorited': note.is_favorited,
+            'is_secret': note.is_secret
         } for note in notes]
     })
 

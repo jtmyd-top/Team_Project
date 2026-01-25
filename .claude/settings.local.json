@@ -33,7 +33,10 @@
       "Bash(git push:*)",
       "Bash(ping:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(python3:*)",
+      "Bash(iconv:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": []

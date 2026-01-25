@@ -1481,16 +1481,21 @@ def search_notes_api(request):
 
 @login_required
 def get_all_notes_api(request):
+    """获取所有笔记（排除保密柜笔记）"""
     user = request.user
     sidebar_notes_key = f"sidebar_notes_user_{user.id}"
     all_notes = cache.get(sidebar_notes_key)
 
     if all_notes is None:
-        # 【修改点】查询逻辑与 knowledge_list 视图保持一致
+        # 查询逻辑：排除 is_secret=True 的笔记
         all_notes = list(
-            Note.objects.filter(author=user)
+            Note.objects.filter(
+                author=user,
+                is_secret=False,  # 排除保密柜笔记
+                is_trashed=False
+            )
             .order_by('-updated_at')
-            .values('id', 'title')
+            .values('id', 'title', 'is_secret', 'folder_id', 'is_favorited')
         )
         cache.set(sidebar_notes_key, all_notes, timeout=900)
 
@@ -1670,6 +1675,7 @@ def create_note_api(request):
     """
     为当前登录用户创建一篇新的空白笔记。
     支持指定 folder_id 将笔记放入特定文件夹。
+    支持 is_secret 参数标记为保密笔记。
     """
     user = request.user
 
@@ -1679,6 +1685,7 @@ def create_note_api(request):
         title = data.get('title', '无标题笔记')
         content = data.get('content', '')
         folder_id = data.get('folder_id')
+        is_secret = data.get('is_secret', False)  # 添加保密参数
 
         # 验证文件夹归属（如果指定了 folder_id）
         folder = None
@@ -1699,7 +1706,8 @@ def create_note_api(request):
             author=user,
             title=title,
             content=content,
-            folder=folder
+            folder=folder,
+            is_secret=is_secret  # 设置保密标志
         )
 
         # 清除侧边栏缓存
@@ -1714,7 +1722,8 @@ def create_note_api(request):
         return JsonResponse({
             'id': new_note.id,
             'title': new_note.title,
-            'folder_id': folder.id if folder else None
+            'folder_id': folder.id if folder else None,
+            'is_secret': new_note.is_secret
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '无效的请求数据'}, status=400)
@@ -4036,6 +4045,9 @@ def vault_notes_list(request):
         'created_at': note.created_at.isoformat(),
         'updated_at': note.updated_at.isoformat(),
         'is_favorited': note.is_favorited,
+        'is_secret': note.is_secret,  # 保密标志
+        'folder_id': note.folder_id,
+        'is_trashed': note.is_trashed
     } for note in notes]
 
     return JsonResponse({

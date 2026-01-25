@@ -20,6 +20,6 @@ knowledge_project/static/ckeditor5
 # Frontend
 frontend/node_modules/
 node_modules/
-
+staticfiles/
 # Build output (keep in static/dist for Django)
 # static/dist/ is tracked since it's needed for deployment
