@@ -716,7 +716,6 @@ onMounted(async () => {
     viewMode.value = 'read'
     isLoadingNote.value = false
   }
-  }
 })
 
 // 组件卸载时移除事件监听
