@@ -501,6 +501,36 @@ async function handleNoteRename(note, newTitle) {
   }
 }
 
+async function handleToggleSecret(note) {
+  try {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+
+    const response = await fetch(`/api/notes/${note.id}/toggle-secret/`, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': csrfToken,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (!response.ok) throw new Error('切换失败')
+
+    const data = await response.json()
+    if (data.status === 'success') {
+      const actionText = note.is_secret ? '移出保险柜' : '加入保险柜'
+      ElMessage.success(data.message || `笔记已${actionText}`)
+
+      // 刷新笔记列表
+      await sidebarStore.loadModuleData()
+    } else {
+      throw new Error(data.message || '操作失败')
+    }
+  } catch (e) {
+    console.error('切换保险柜失败:', e)
+    ElMessage.error('操作失败，请重试')
+  }
+}
+
 async function handleNoteTrash(note) {
   try {
     await ElMessageBox.confirm(
@@ -592,6 +622,10 @@ async function handleContextMenuAction(action, note) {
 
     case 'favorite':
       handleNoteFavorite(note)
+      break
+
+    case 'toggle-secret':
+      handleToggleSecret(note)
       break
 
     case 'move':

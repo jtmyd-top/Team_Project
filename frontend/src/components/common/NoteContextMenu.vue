@@ -36,6 +36,14 @@
 
           <div class="menu-divider"></div>
 
+          <!-- 加入/移出保险柜 -->
+          <div class="menu-item" @click="handleAction('toggle-secret')">
+            <i class="fas" :class="note?.is_secret ? 'fa-unlock' : 'fa-lock'"></i>
+            <span>{{ note?.is_secret ? '移出保险柜' : '加入保险柜' }}</span>
+          </div>
+
+          <div class="menu-divider"></div>
+
           <!-- 移动到 -->
           <div class="menu-item has-submenu" @click="handleAction('move')">
             <i class="fas fa-folder-open"></i>

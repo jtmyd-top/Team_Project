@@ -209,6 +209,7 @@ const currentNoteData = ref({
   updated_at: null,
   author: null,
   is_public: false,
+  is_secret: false,
   public_url: ''
 })
 
@@ -321,6 +322,7 @@ async function fetchNoteDetail(noteId) {
       updated_at: data.updated_at,
       author: data.author,
       is_public: data.is_public || false,
+      is_secret: data.is_secret || false,
       public_url: data.public_url || ''
     }
     
@@ -359,6 +361,9 @@ async function handleCreateNote(folderId = null) {
     // 使用当前文件夹 ID（如果没有传入）
     const targetFolderId = folderId ?? sidebarStore.currentFolderId
 
+    // 检查是否在保险柜视图中
+    const isVaultModule = sidebarStore.activeModule === 'vault'
+
     const response = await fetch('/api/notes/create/', {
       method: 'POST',
       headers: {
@@ -368,7 +373,8 @@ async function handleCreateNote(folderId = null) {
       body: JSON.stringify({
         title: '无标题笔记',
         content: '',
-        folder_id: targetFolderId
+        folder_id: targetFolderId,
+        is_secret: isVaultModule  // 在保险柜中创建时自动标记为保密
       })
     })
 
@@ -412,6 +418,11 @@ async function handleCreateNote(folderId = null) {
 
       // 加载新笔记数据
       await fetchNoteDetail(noteId)
+
+      // 在 fetchNoteDetail 后，检查是否在保险柜中创建，如果是则设置 is_secret
+      if (isVaultModule) {
+        currentNoteData.value.is_secret = true
+      }
 
       // 数据加载完成后，再设置笔记 ID
       currentNoteId.value = noteId

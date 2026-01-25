@@ -29,7 +29,11 @@
       />
 
       <!-- 标题 - 正常状态 -->
-      <h4 v-else class="note-title">{{ note.title || '无标题' }}</h4>
+      <div v-else class="note-title-wrapper">
+        <!-- 保密图标 -->
+        <i v-if="note.is_secret" class="fas fa-lock vault-badge" title="保密笔记"></i>
+        <h4 class="note-title">{{ note.title || '无标题' }}</h4>
+      </div>
 
       <!-- 元信息 -->
       <div class="note-meta">
@@ -300,6 +304,19 @@ function handleDelete() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.note-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.vault-badge {
+  color: #f56c6c;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .note-title-edit {
