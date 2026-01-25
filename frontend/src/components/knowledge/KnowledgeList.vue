@@ -693,6 +693,9 @@ onMounted(async () => {
   // 添加页面离开前的防呆提醒
   window.addEventListener('beforeunload', handleBeforeUnload)
 
+  // 监听笔记保密状态变化事件
+  window.addEventListener('note-secret-toggled', handleNoteSecretToggled)
+
   // 从 URL 恢复状态
   // initFromUrl 会在 my-space 的收件箱/文件夹视图时自动加载笔记数据
   const { noteId } = await sidebarStore.initFromUrl()
@@ -721,6 +724,7 @@ onMounted(async () => {
 // 组件卸载时移除事件监听
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('note-secret-toggled', handleNoteSecretToggled)
 })
 
 // 页面离开前的防呆提醒
@@ -731,6 +735,22 @@ function handleBeforeUnload(e) {
     e.preventDefault()
     e.returnValue = message
     return message
+  }
+}
+
+// 处理笔记保密状态变化事件
+function handleNoteSecretToggled(event) {
+  const { noteId, isSecret, isPublic } = event.detail
+
+  // 如果当前编辑的笔记被切换了保密状态，更新其状态
+  if (currentNoteId.value === noteId) {
+    currentNoteData.value.is_secret = isSecret
+    currentNoteData.value.is_public = isPublic
+
+    // 如果笔记被加入保险柜且被取消分享，显示提示
+    if (isSecret) {
+      ElMessage.info('笔记已加入保密柜')
+    }
   }
 }
 </script>

@@ -517,11 +517,44 @@ async function handleToggleSecret(note) {
 
     const data = await response.json()
     if (data.status === 'success') {
-      const actionText = note.is_secret ? '移出保险柜' : '加入保险柜'
-      ElMessage.success(data.message || `笔记已${actionText}`)
+      const actionText = data.is_secret ? '加入保密柜' : '移出保密柜'
 
-      // 刷新笔记列表
-      await sidebarStore.loadModuleData()
+      // 如果笔记是公开的且被加入保险柜，自动取消分享
+      if (data.is_secret && !data.is_public) {
+        ElMessage.success(`${actionText}成功！已自动取消分享`)
+      } else {
+        ElMessage.success(`${actionText}成功`)
+      }
+
+      // 刷新不同模块的数据
+      if (sidebarStore.activeModule === 'all-notes' && data.is_secret) {
+        // 如果加入保险柜，从全部笔记列表中移除
+        const index = sidebarStore.currentNotes.findIndex(n => n.id === note.id)
+        if (index > -1) {
+          sidebarStore.currentNotes.splice(index, 1)
+        }
+      } else if (sidebarStore.activeModule === 'vault' && !data.is_secret) {
+        // 如果移出保险柜，从保险柜列表中移除
+        const index = sidebarStore.currentNotes.findIndex(n => n.id === note.id)
+        if (index > -1) {
+          sidebarStore.currentNotes.splice(index, 1)
+        }
+      } else {
+        // 其他情况，重新加载数据
+        await sidebarStore.loadModuleData()
+      }
+
+      // 如果当前正在编辑该笔记，更新其状态
+      if (activeNoteId.value === note.id) {
+        // 发射事件通知 KnowledgeList 更新笔记状态
+        window.dispatchEvent(new CustomEvent('note-secret-toggled', {
+          detail: {
+            noteId: note.id,
+            isSecret: data.is_secret,
+            isPublic: data.is_public
+          }
+        }))
+      }
     } else {
       throw new Error(data.message || '操作失败')
     }

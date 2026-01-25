@@ -4062,6 +4062,7 @@ def vault_notes_list(request):
 def note_toggle_secret(request, note_id):
     """
     切换笔记的保密状态
+    如果笔记被标记为保密（is_secret=True），自动取消分享
     """
     try:
         note = Note.objects.get(id=note_id, author=request.user)
@@ -4073,10 +4074,20 @@ def note_toggle_secret(request, note_id):
 
     # 切换保密状态
     note.is_secret = not note.is_secret
-    note.save(update_fields=['is_secret'])
+
+    # 如果加入保险柜（is_secret=True），自动取消分享
+    if note.is_secret and note.is_public:
+        note.is_public = False
+
+    note.save(update_fields=['is_secret', 'is_public'])
+
+    # 清除缓存 - 这很重要！
+    sidebar_notes_key = f"sidebar_notes_user_{request.user.id}"
+    cache.delete(sidebar_notes_key)
 
     return JsonResponse({
         'status': 'success',
         'is_secret': note.is_secret,
+        'is_public': note.is_public,
         'message': '已加入保密柜' if note.is_secret else '已移出保密柜'
     })
