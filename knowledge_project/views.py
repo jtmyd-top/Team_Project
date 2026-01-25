@@ -1,6 +1,7 @@
 # knowledge_project/views.py
 from django.contrib.auth import login
-from .utils.turnstile import verify_turnstile_token, get_turnstile_verification_detail, get_site_key
+from .utils.turnstile import verify_turnstile_token, get_turnstile_verification_detail, get_site_key, is_turnstile_enabled
+from .utils.code import check_code
 from django.http import HttpResponse
 from io import BytesIO
 from django.contrib.auth.forms import AuthenticationForm
@@ -28,7 +29,7 @@ from django.db.models import Q
 import json # <--- 确保在文件顶部导入了 json 模块
 from django.core.paginator import Paginator  # 添加这行导入
 from django.core.cache import cache
-from .models import  Note,Asset ,Tag, ProfileLike, Profile
+from .models import  Note, Asset, Tag, ProfileLike, Profile, Folder
 from django.shortcuts import render, redirect
 from django.contrib import messages
 import subprocess
@@ -202,21 +203,22 @@ class SendEmailCodeView(View):
 
         email = (data.get('email') or '').strip()
         turnstile_token = (data.get('turnstile_token') or '').strip()
+        image_captcha = (data.get('image_captcha') or '').strip()
+        captcha_type = (data.get('captcha_type') or 'turnstile').strip()
         purpose = (data.get('purpose') or 'register').strip()  # 'register' | 'email_change' | 'password_change'
         captcha_pre_validated = data.get('captcha_pre_validated', False)  # 是否已通过预验证
 
-        # 2) 轻量级拦截：先校验Turnstile验证码（如果需要）
+        # 2) 轻量级拦截：先校验验证码（如果需要）
         if not captcha_pre_validated:
-            if not turnstile_token:
-                return JsonResponse({'status': 'error', 'message': '请完成人机验证'}, status=400)
-
-            # 获取客户端IP地址
-            from knowledge_project.utils.request_utils import get_client_ip
-            client_ip = get_client_ip(request)
-
-            # 验证Turnstile token
-            if not verify_turnstile_token(turnstile_token, client_ip):
-                return JsonResponse({'status': 'error', 'message': '人机验证失败，请重试'}, status=400)
+            # 统一验证码验证
+            captcha_valid, captcha_error = verify_captcha_unified(
+                request,
+                turnstile_token=turnstile_token,
+                image_captcha=image_captcha,
+                captcha_type=captcha_type
+            )
+            if not captcha_valid:
+                return JsonResponse({'status': 'error', 'message': captcha_error}, status=400)
 
         # 3) 获取真实客户端IP（支持代理环境）
         from knowledge_project.utils.request_utils import get_client_ip, check_rate_limit_atomic
@@ -1028,18 +1030,11 @@ class SignUpView(View):
         password = data.get('password')
         confirm_password = data.get('confirm_password') or data.get('confirmPassword')
         agree_terms = data.get('agree_terms') or data.get('agreeTerms')
+
+        # 验证码参数：支持 turnstile 和图形验证码
         turnstile_token = data.get('turnstile_token', '').strip()
-
-        # 获取客户端IP地址
-        def get_client_ip(request):
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-            if x_forwarded_for:
-                ip = x_forwarded_for.split(',')[0]
-            else:
-                ip = request.META.get('REMOTE_ADDR')
-            return ip
-
-        client_ip = get_client_ip(request)
+        image_captcha = data.get('image_captcha', '').strip()
+        captcha_type = data.get('captcha_type', 'turnstile')
 
         # 【用户体验改进】如果邮箱验证码已发送且正确，可以放宽人机验证要求
         verification_info = request.session.get('registration_verification')
@@ -1052,15 +1047,17 @@ class SignUpView(View):
             verification_info.get('turnstile_verified', False)
         )
 
-        # 如果没有有效的验证记录，则需要验证Turnstile
+        # 如果没有有效的验证记录，则需要验证码验证
         if not has_valid_verification_record:
-            # 验证Turnstile验证码
-            if not turnstile_token:
-                return JsonResponse({'status': 'error', 'message': '请完成人机验证'}, status=400)
-
-            # 验证Turnstile token
-            if not verify_turnstile_token(turnstile_token, client_ip):
-                return JsonResponse({'status': 'error', 'message': '人机验证失败，请重试'}, status=400)
+            # 统一验证码验证
+            captcha_valid, captcha_error = verify_captcha_unified(
+                request,
+                turnstile_token=turnstile_token,
+                image_captcha=image_captcha,
+                captcha_type=captcha_type
+            )
+            if not captcha_valid:
+                return JsonResponse({'status': 'error', 'message': captcha_error}, status=400)
 
         # 【核心修改】使用我们功能更强的自定义表单
         form_data = {
@@ -1303,11 +1300,11 @@ def knowledge_list(request):
 
 
 @login_required
-@require_http_methods(["GET", "PUT", "DELETE"])
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
 def note_detail_api(request, note_id):
     note = get_object_or_404(Note, pk=note_id)
     if not note.has_permission(request.user):
-        return HttpResponseForbidden("您没有权限访问此笔记。")
+        return JsonResponse({'error': '您没有权限访问此笔记'}, status=403)
     # --- 统一进行时区转换 ---
     # 使用 timezone.localtime 将数据库中的UTC时间转换为settings.py中定义的本地时间
     local_updated_at = timezone.localtime(note.updated_at)
@@ -1394,6 +1391,57 @@ def note_detail_api(request, note_id):
             }
         }
         return JsonResponse(updated_data)
+
+    # --- PATCH 请求处理（部分更新）---
+    if request.method == 'PATCH':
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': '无效的JSON格式'}, status=400)
+
+        try:
+            # 只更新提供的字段
+            if 'title' in data:
+                note.title = data['title']
+            if 'is_public' in data:
+                note.is_public = data['is_public']
+            if 'content' in data:
+                note.content = data['content']
+
+            note.last_modified_by = request.user
+
+            # 如果设置为公开且没有公开ID，生成一个
+            if note.is_public and not note.public_id:
+                note.public_id = uuid.uuid4()
+
+            note.save()
+
+            # 如果更新了内容，自动生成标签
+            if 'content' in data and note.content and len(BeautifulSoup(note.content, 'html.parser').get_text()) > 20:
+                auto_generate_tags_for_note(Note, note, created=True)
+
+            # 清理缓存
+            cache.delete(get_sidebar_cache_key(request.user.id))
+
+            # 发送笔记修改通知（如果有内容或标题变化）
+            if 'content' in data or 'title' in data:
+                send_note_activity_notification(request, request.user, note.title, 'updated')
+
+            # 返回更新后的数据
+            patch_local_updated_at = timezone.localtime(note.updated_at)
+            response_data = {
+                'id': note.id,
+                'title': note.title,
+                'is_public': note.is_public,
+                'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
+                'updated_at': patch_local_updated_at.strftime('%Y-%m-%d %H:%M'),
+                'toc': note.toc or [],
+                'message': '更新成功'
+            }
+            return JsonResponse(response_data)
+        except Exception as e:
+            logger.error(f"更新笔记 {note_id} 时发生错误: {e}", exc_info=True)
+            return JsonResponse({'error': f'更新失败: {str(e)}'}, status=500)
 
     # --- 4. DELETE 请求处理 (已优化) ---
     if request.method == 'DELETE':
@@ -1621,32 +1669,150 @@ def ckeditor_image_upload_view(request):
 def create_note_api(request):
     """
     为当前登录用户创建一篇新的空白笔记。
-    【修正版】：笔记不关联任何项目
+    支持指定 folder_id 将笔记放入特定文件夹。
     """
     user = request.user
 
     try:
-        # 创建新的笔记实例，不关联任何项目
+        # 解析请求体
+        data = json.loads(request.body) if request.body else {}
+        title = data.get('title', '无标题笔记')
+        content = data.get('content', '')
+        folder_id = data.get('folder_id')
+
+        # 验证文件夹归属（如果指定了 folder_id）
+        folder = None
+        if folder_id is not None and folder_id != '':
+            # 确保 folder_id 是整数类型
+            try:
+                folder_id = int(folder_id)
+            except (ValueError, TypeError):
+                return JsonResponse({'error': '无效的文件夹ID'}, status=400)
+
+            try:
+                folder = Folder.objects.get(id=folder_id, owner=user)
+            except Folder.DoesNotExist:
+                return JsonResponse({'error': '文件夹不存在或无权访问'}, status=400)
+
+        # 创建新的笔记实例
         new_note = Note.objects.create(
             author=user,
-            title="无标题笔记",
-            content="",
-
+            title=title,
+            content=content,
+            folder=folder
         )
 
         # 清除侧边栏缓存
-        cache.delete(get_sidebar_cache_key(user.id))
+        try:
+            cache.delete(get_sidebar_cache_key(user.id))
+        except Exception:
+            pass  # 缓存清除失败不影响主流程
 
         # 发送笔记创建通知
         send_note_activity_notification(request, user, new_note.title, 'created')
 
         return JsonResponse({
             'id': new_note.id,
-            'title': new_note.title
+            'title': new_note.title,
+            'folder_id': folder.id if folder else None
         })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '无效的请求数据'}, status=400)
     except Exception as e:
         logger.error(f"为用户 {user.id} 创建新笔记时出错: {e}", exc_info=True)
         return JsonResponse({'error': '创建笔记时发生内部错误'}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_note_api(request, note_id):
+    """
+    更新指定笔记的标题和内容。
+    """
+    user = request.user
+
+    try:
+        # 获取笔记并验证权限
+        try:
+            note = Note.objects.get(id=note_id, author=user)
+        except Note.DoesNotExist:
+            return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
+
+        # 解析请求体
+        data = json.loads(request.body) if request.body else {}
+        title = data.get('title')
+        content = data.get('content')
+
+        # 更新笔记
+        if title is not None:
+            note.title = title
+        if content is not None:
+            note.content = content
+
+        note.last_modified_by = user
+        note.save()
+
+        # 清除侧边栏缓存
+        try:
+            cache.delete(get_sidebar_cache_key(user.id))
+        except Exception:
+            pass
+
+        # 发送笔记修改通知
+        send_note_activity_notification(request, user, note.title, 'updated')
+
+        return JsonResponse({
+            'status': 'success',
+            'id': note.id,
+            'title': note.title,
+            'toc': note.toc,
+            'updated_at': note.updated_at.isoformat()
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '无效的请求数据'}, status=400)
+    except Exception as e:
+        logger.error(f"为用户 {user.id} 更新笔记 {note_id} 时出错: {e}", exc_info=True)
+        return JsonResponse({'error': '更新笔记时发生内部错误'}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def delete_note_api(request, note_id):
+    """
+    删除指定笔记（移至回收站）。
+    """
+    user = request.user
+
+    try:
+        # 获取笔记并验证权限
+        try:
+            note = Note.objects.get(id=note_id, author=user)
+        except Note.DoesNotExist:
+            return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
+
+        # 移至回收站
+        note.is_trashed = True
+        note.trashed_at = timezone.now()
+        note.save()
+
+        # 清除侧边栏缓存
+        try:
+            cache.delete(get_sidebar_cache_key(user.id))
+        except Exception:
+            pass
+
+        # 发送笔记删除通知
+        send_note_activity_notification(request, user, note.title, 'deleted')
+
+        return JsonResponse({
+            'status': 'success',
+            'message': '笔记已移至回收站'
+        })
+    except Exception as e:
+        logger.error(f"为用户 {user.id} 删除笔记 {note_id} 时出错: {e}", exc_info=True)
+        return JsonResponse({'error': '删除笔记时发生内部错误'}, status=500)
+
+
 # 【新增】公开笔记列表视图
 def public_notes_api(request):
     """
@@ -2768,13 +2934,20 @@ def password_reset_api(request):
     """
     密码重置API（增强安全版本）
     POST: 发送重置密码邮件（需要验证码和频率限制）
+    支持 Turnstile 和图形验证码双模式
     """
+    logger.info("[密码重置API] 收到请求")
 
     if request.method == "POST":
         try:
             data = json.loads(request.body)
             email = data.get('email', '').strip()
+            logger.info(f"[密码重置API] 请求邮箱: {email}")
+
+            # 验证码参数：支持 turnstile 和图形验证码
             turnstile_token = data.get('turnstile_token', '').strip()
+            image_captcha = data.get('image_captcha', '').strip()
+            captcha_type = data.get('captcha_type', 'turnstile')
 
             # 验证必要参数
             if not email:
@@ -2783,10 +2956,17 @@ def password_reset_api(request):
                     "message": "请输入邮箱地址"
                 }, status=400)
 
-            if not turnstile_token:
+            # 统一验证码验证
+            captcha_valid, captcha_error = verify_captcha_unified(
+                request,
+                turnstile_token=turnstile_token,
+                image_captcha=image_captcha,
+                captcha_type=captcha_type
+            )
+            if not captcha_valid:
                 return JsonResponse({
                     "status": "error",
-                    "message": "请完成人机验证"
+                    "message": captcha_error
                 }, status=400)
 
             # 验证邮箱格式
@@ -2813,13 +2993,6 @@ def password_reset_api(request):
                     "message": rate_limit_message
                 }, status=429)
 
-            # 验证Turnstile token
-            if not verify_turnstile_token(turnstile_token, client_ip):
-                return JsonResponse({
-                    "status": "error",
-                    "message": "人机验证失败，请重试"
-                }, status=400)
-
             from .models import PasswordResetAttempt
 
             # 创建密码重置尝试记录（用于频率限制跟踪）
@@ -2835,9 +3008,11 @@ def password_reset_api(request):
             try:
                 user = User.objects.get(email=email)
                 user_exists = True
+                logger.info(f"[密码重置] 邮箱 {email} 存在，用户: {user.username}")
             except User.DoesNotExist:
                 # 邮箱不存在，但继续执行以确保响应时间一致
                 user_exists = False
+                logger.info(f"[密码重置] 邮箱 {email} 不存在于系统中")
 
             # 为了防止时序攻击，无论邮箱是否存在都执行相同的操作
             import time
@@ -2883,6 +3058,10 @@ def password_reset_api(request):
                 '''
 
                 try:
+                    logger.info(f"[密码重置] 准备发送邮件到: {email}")
+                    logger.info(f"[密码重置] 发件人: {getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')}")
+                    logger.info(f"[密码重置] SMTP配置: HOST={settings.EMAIL_HOST}, PORT={settings.EMAIL_PORT}, USER={settings.EMAIL_HOST_USER}")
+                    
                     result = send_mail(
                         subject=subject,
                         message=message,
@@ -2890,13 +3069,15 @@ def password_reset_api(request):
                         recipient_list=[email],
                         fail_silently=False
                     )
+                    
+                    logger.info(f"[密码重置] 邮件发送结果: {result} (1表示成功)")
 
                     # 标记尝试为成功
                     reset_attempt.is_successful = True
                     reset_attempt.save()
 
                 except Exception as e:
-                    logger.error(f"发送密码重置邮件失败: {str(e)}")
+                    logger.error(f"[密码重置] 发送邮件失败: {str(e)}", exc_info=True)
                     # 记录已经默认为失败状态，无需额外更新
 
             # 统一返回消息，不暴露邮箱是否存在
@@ -3026,6 +3207,10 @@ def reset_password_view(request, user_id, token):
             # 标记令牌为已使用
             reset_token.is_used = True
             reset_token.save(update_fields=['is_used'])
+
+            # 【重要】解除保密柜锁定
+            from .signals import on_password_reset
+            on_password_reset(user)
 
             # 自动登录用户
             login(request, user)
@@ -3157,26 +3342,370 @@ def check_rate_limit(email, ip_address, fingerprint, limit=3):
 @csrf_exempt
 def turnstile_config(request):
     """
-    获取Turnstile配置信息
+    获取Turnstile配置信息，包含是否启用状态
+    前端可根据 enabled 字段决定是否加载 Turnstile
     """
     if request.method != 'GET':
         return JsonResponse({'error': '只支持GET请求'}, status=405)
 
     try:
+        enabled = is_turnstile_enabled()
+        site_key = get_site_key() if enabled else None
         return JsonResponse({
             'status': 'success',
-            'site_key': get_site_key()
+            'enabled': enabled,
+            'site_key': site_key
         })
     except Exception as e:
         logger.error(f"获取Turnstile配置失败: {str(e)}")
         return JsonResponse({'status': 'error', 'message': '配置获取失败'}, status=500)
 
 
+# ==================== 图形验证码 API（纵深防御版本） ====================
+
+# 验证码安全配置
+CAPTCHA_CONFIG = {
+    'init_token_ttl': 30,           # init令牌有效期（秒）
+    'generate_delay': 0.5,          # 生成延迟（秒），防止CPU耗尽攻击
+    'ip_rate_limit': 10,            # 单IP每分钟最多请求次数
+    'ip_rate_window': 60,           # 限流窗口（秒）
+    'global_rate_limit': 100,       # 全局每分钟最多请求次数（熔断阈值）
+    'global_rate_window': 60,       # 全局限流窗口（秒）
+}
+
+
+@csrf_exempt
+def captcha_init(request):
+    """
+    验证码初始化接口 - 采用 Proof of Work 机制防止脚本滥用
+
+    流程：
+    1. GET  请求：返回 challenge（prefix + difficulty），前端需计算 PoW
+    2. POST 请求：验证 PoW solution，通过后返回 init_token
+
+    安全机制：
+    - PoW 难度设置为 4（SHA256 前 4 位为 0），前端需计算约 6.5 万次哈希
+    - challenge 绑定 IP 和时间戳，30 秒过期
+    - 一个 challenge 只能使用一次
+    - 普通 Python 脚本需要 1-3 秒才能计算出 solution，浏览器 JS 约 0.3-1 秒
+    """
+    from knowledge_project.utils.request_utils import get_client_ip
+    import secrets
+
+    client_ip = get_client_ip(request)
+
+    if request.method == 'GET':
+        # ========== 第一步：生成 PoW challenge ==========
+        try:
+            # 生成随机前缀（16 字符）
+            pow_prefix = secrets.token_hex(8)
+            # 难度：SHA256 结果前 N 位必须是 0（十六进制）
+            # 难度 4 表示前 4 个十六进制字符为 0，概率 1/65536
+            pow_difficulty = 4
+
+            # 存入 session
+            request.session['pow_challenge'] = pow_prefix
+            request.session['pow_difficulty'] = pow_difficulty
+            request.session['pow_challenge_ip'] = client_ip
+            request.session['pow_challenge_time'] = time.time()
+            # 标记 challenge 未被使用
+            request.session['pow_challenge_used'] = False
+
+            logger.debug(f"[PoW] 生成 challenge (IP: {client_ip}, prefix: {pow_prefix[:8]}...)")
+
+            return JsonResponse({
+                'status': 'challenge',
+                'prefix': pow_prefix,
+                'difficulty': pow_difficulty,
+                'expires_in': 30
+            })
+
+        except Exception as e:
+            logger.error(f"PoW challenge 生成失败: {str(e)}")
+            return JsonResponse({'error': '初始化失败'}, status=500)
+
+    elif request.method == 'POST':
+        # ========== 第二步：验证 PoW solution ==========
+        try:
+            data = json.loads(request.body)
+            nonce = data.get('nonce', '')
+
+            # 获取 session 中的 challenge
+            stored_prefix = request.session.get('pow_challenge')
+            stored_difficulty = request.session.get('pow_difficulty', 4)
+            stored_ip = request.session.get('pow_challenge_ip')
+            stored_time = request.session.get('pow_challenge_time', 0)
+            challenge_used = request.session.get('pow_challenge_used', True)
+
+            # 验证 challenge 存在
+            if not stored_prefix:
+                return JsonResponse({'error': '请先获取 challenge'}, status=400)
+
+            # 验证 challenge 未被使用
+            if challenge_used:
+                return JsonResponse({'error': 'Challenge 已被使用，请重新获取'}, status=400)
+
+            # 验证是否过期（30 秒）
+            if time.time() - stored_time > 30:
+                # 清除过期 challenge
+                for key in ['pow_challenge', 'pow_difficulty', 'pow_challenge_ip', 'pow_challenge_time', 'pow_challenge_used']:
+                    request.session.pop(key, None)
+                return JsonResponse({'error': 'Challenge 已过期，请刷新重试'}, status=400)
+
+            # 验证 IP（记录警告但不拒绝，移动端 IP 可能变化）
+            if stored_ip != client_ip:
+                logger.warning(f"[PoW] IP 不匹配: stored={stored_ip}, current={client_ip}")
+
+            # 验证 nonce
+            if not nonce:
+                return JsonResponse({'error': '缺少 nonce'}, status=400)
+
+            # 计算 SHA256(prefix + nonce)
+            hash_input = f"{stored_prefix}{nonce}"
+            hash_result = hashlib.sha256(hash_input.encode()).hexdigest()
+
+            # 检查前 N 位是否为 0
+            expected_prefix = '0' * stored_difficulty
+
+            # 调试日志
+            logger.info(f"[PoW DEBUG] prefix={stored_prefix}, nonce={nonce}, input={hash_input}")
+            logger.info(f"[PoW DEBUG] hash={hash_result}, expected_prefix={expected_prefix}, match={hash_result.startswith(expected_prefix)}")
+
+            if not hash_result.startswith(expected_prefix):
+                logger.warning(f"[PoW] 验证失败 (IP: {client_ip}): hash={hash_result[:16]}...")
+                return JsonResponse({'error': 'PoW 验证失败'}, status=400)
+
+            # PoW 验证通过，标记 challenge 已使用
+            request.session['pow_challenge_used'] = True
+
+            # 生成 init_token
+            init_token = secrets.token_urlsafe(32)
+
+            # 存储 init_token（用于后续验证码生成）
+            request.session['captcha_init_token'] = init_token
+            request.session['captcha_init_ip'] = client_ip
+            request.session['captcha_init_time'] = time.time()
+
+            # 清除 PoW challenge（已完成使命）
+            for key in ['pow_challenge', 'pow_difficulty', 'pow_challenge_ip', 'pow_challenge_time', 'pow_challenge_used']:
+                request.session.pop(key, None)
+
+            logger.debug(f"[PoW] 验证通过 (IP: {client_ip}, nonce: {nonce[:16]}..., hash: {hash_result[:8]}...)")
+
+            return JsonResponse({
+                'status': 'success',
+                'init_token': init_token,
+                'expires_in': CAPTCHA_CONFIG['init_token_ttl']
+            })
+
+        except json.JSONDecodeError:
+            return JsonResponse({'error': '无效的 JSON 数据'}, status=400)
+        except Exception as e:
+            logger.error(f"PoW 验证失败: {str(e)}")
+            return JsonResponse({'error': '验证失败'}, status=500)
+
+    else:
+        return JsonResponse({'error': '只支持 GET/POST 请求'}, status=405)
+
+
+def _verify_captcha_init_token(request, init_token):
+    """
+    验证 init_token 的有效性
+    返回: (bool, str) - (是否有效, 错误信息)
+    """
+    from knowledge_project.utils.request_utils import get_client_ip
+
+    if not init_token:
+        return False, '缺少初始化令牌'
+
+    stored_token = request.session.get('captcha_init_token')
+    stored_ip = request.session.get('captcha_init_ip')
+    stored_time = request.session.get('captcha_init_time', 0)
+
+    if not stored_token:
+        return False, '请先初始化验证码'
+
+    if init_token != stored_token:
+        return False, '令牌无效'
+
+    # 验证 IP 是否匹配（记录警告但不拒绝，避免影响移动端用户）
+    client_ip = get_client_ip(request)
+    if stored_ip != client_ip:
+        logger.warning(f"[验证码] IP不匹配: stored={stored_ip}, current={client_ip}")
+
+    # 验证是否过期
+    if time.time() - stored_time > CAPTCHA_CONFIG['init_token_ttl']:
+        request.session.pop('captcha_init_token', None)
+        request.session.pop('captcha_init_ip', None)
+        request.session.pop('captcha_init_time', None)
+        return False, '令牌已过期，请刷新页面'
+
+    return True, None
+
+
+def _check_captcha_rate_limits(request):
+    """
+    检查验证码请求的限流和熔断
+    返回: (bool, str) - (是否允许, 错误信息)
+    """
+    from knowledge_project.utils.request_utils import get_client_ip, check_rate_limit_atomic
+
+    client_ip = get_client_ip(request)
+
+    # 1. 单 IP 限流检查
+    ip_key = f"captcha_ip_limit_{client_ip}"
+    ip_allowed, ip_count = check_rate_limit_atomic(
+        ip_key,
+        CAPTCHA_CONFIG['ip_rate_limit'],
+        CAPTCHA_CONFIG['ip_rate_window']
+    )
+
+    if not ip_allowed:
+        logger.warning(f"[验证码限流] IP {client_ip} 超过限制 ({ip_count}/{CAPTCHA_CONFIG['ip_rate_limit']})")
+        return False, '请求过于频繁，请稍后再试'
+
+    # 2. 全局熔断检查
+    global_key = "captcha_global_limit"
+    global_allowed, global_count = check_rate_limit_atomic(
+        global_key,
+        CAPTCHA_CONFIG['global_rate_limit'],
+        CAPTCHA_CONFIG['global_rate_window']
+    )
+
+    if not global_allowed:
+        logger.critical(f"[验证码熔断] 全局请求量超过阈值 ({global_count}/{CAPTCHA_CONFIG['global_rate_limit']}), IP: {client_ip}")
+        return False, '系统繁忙，请稍后再试'
+
+    return True, None
+
+
+@csrf_exempt
+def captcha_generate(request):
+    """
+    生成图形验证码（纵深防御版本）
+
+    安全措施：
+    1. 必须携带有效的 init_token（防止直接调用）
+    2. 单 IP 限流（每分钟最多 10 次）
+    3. 全局熔断（每分钟最多 100 次，防止分布式攻击）
+    4. 生成延迟（500ms，防止 CPU 耗尽攻击）
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': '只支持GET请求'}, status=405)
+
+    try:
+        from knowledge_project.utils.request_utils import get_client_ip
+
+        client_ip = get_client_ip(request)
+
+        # 1. 验证 init_token
+        init_token = request.GET.get('token', '')
+        token_valid, token_error = _verify_captcha_init_token(request, init_token)
+        if not token_valid:
+            logger.warning(f"[验证码] 令牌验证失败 (IP: {client_ip}): {token_error}")
+            return JsonResponse({'error': token_error}, status=403)
+
+        # 2. 限流和熔断检查
+        rate_allowed, rate_error = _check_captcha_rate_limits(request)
+        if not rate_allowed:
+            return JsonResponse({'error': rate_error}, status=429)
+
+        # 3. 延迟生成（防止 CPU 耗尽攻击）
+        time.sleep(CAPTCHA_CONFIG['generate_delay'])
+
+        # 4. 生成验证码
+        img, code = check_code()
+
+        # 将验证码存入 session
+        request.session['image_captcha'] = code.upper()
+        request.session['image_captcha_time'] = time.time()
+
+        # 5. 使 init_token 失效（一次性使用）
+        request.session.pop('captcha_init_token', None)
+        request.session.pop('captcha_init_ip', None)
+        request.session.pop('captcha_init_time', None)
+
+        # 将图片转为二进制流返回
+        buf = BytesIO()
+        img.save(buf, 'PNG')
+        buf.seek(0)
+
+        logger.debug(f"[验证码] 生成成功 (IP: {client_ip})")
+
+        return HttpResponse(buf.getvalue(), content_type='image/png')
+
+    except Exception as e:
+        logger.error(f"生成验证码失败: {str(e)}")
+        return JsonResponse({'error': '验证码生成失败'}, status=500)
+
+
+def verify_image_captcha(request, user_input):
+    """
+    验证图形验证码
+    :param request: Django request 对象
+    :param user_input: 用户输入的验证码
+    :return: (bool, str) - (是否验证通过, 错误信息)
+    """
+    if not user_input:
+        return False, '请输入验证码'
+
+    stored_code = request.session.get('image_captcha')
+    captcha_time = request.session.get('image_captcha_time', 0)
+
+    if not stored_code:
+        return False, '验证码已过期，请刷新'
+
+    # 验证码有效期 5 分钟
+    if time.time() - captcha_time > 300:
+        # 清除过期验证码
+        request.session.pop('image_captcha', None)
+        request.session.pop('image_captcha_time', None)
+        return False, '验证码已过期，请刷新'
+
+    # 不区分大小写比较
+    if user_input.upper() != stored_code.upper():
+        return False, '验证码错误'
+
+    # 验证成功后清除验证码（一次性使用）
+    request.session.pop('image_captcha', None)
+    request.session.pop('image_captcha_time', None)
+
+    return True, None
+
+
+def verify_captcha_unified(request, turnstile_token=None, image_captcha=None, captcha_type='turnstile'):
+    """
+    统一的验证码验证函数，支持 Turnstile 和图形验证码
+    :param request: Django request 对象
+    :param turnstile_token: Turnstile token
+    :param image_captcha: 图形验证码
+    :param captcha_type: 验证类型 'turnstile' 或 'image'
+    :return: (bool, str) - (是否验证通过, 错误信息)
+    """
+    from knowledge_project.utils.request_utils import get_client_ip
+
+    # 统一使用工具函数获取真实 IP
+    client_ip = get_client_ip(request)
+
+    if captcha_type == 'turnstile':
+        if not turnstile_token:
+            return False, '请完成人机验证'
+        if not verify_turnstile_token(turnstile_token, client_ip):
+            return False, '人机验证失败，请重试'
+        return True, None
+
+    elif captcha_type == 'image':
+        return verify_image_captcha(request, image_captcha)
+
+    else:
+        return False, '未知的验证类型'
+
+
 @csrf_exempt
 def login_api(request):
     """
     API端点：处理JSON格式的登录请求
-    支持两因素认证
+    支持两因素认证，支持 Turnstile 和图形验证码双模式
     """
     if request.method != 'POST':
         return JsonResponse({'error': '只支持POST请求'}, status=405)
@@ -3186,29 +3715,24 @@ def login_api(request):
         data = json.loads(request.body)
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
+
+        # 验证码参数：支持 turnstile 和图形验证码
         turnstile_token = data.get('turnstile_token', '').strip()
+        image_captcha = data.get('image_captcha', '').strip()
+        captcha_type = data.get('captcha_type', 'turnstile')  # 默认使用 turnstile
 
         if not username or not password:
             return JsonResponse({'error': '用户名和密码不能为空'}, status=400)
 
-        # 验证Turnstile验证码
-        if not turnstile_token:
-            return JsonResponse({'error': '请完成人机验证'}, status=400)
-
-        # 获取客户端IP地址
-        def get_client_ip(request):
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-            if x_forwarded_for:
-                ip = x_forwarded_for.split(',')[0]
-            else:
-                ip = request.META.get('REMOTE_ADDR')
-            return ip
-
-        client_ip = get_client_ip(request)
-
-        # 验证Turnstile token
-        if not verify_turnstile_token(turnstile_token, client_ip):
-            return JsonResponse({'error': '人机验证失败，请重试'}, status=400)
+        # 统一验证码验证
+        captcha_valid, captcha_error = verify_captcha_unified(
+            request,
+            turnstile_token=turnstile_token,
+            image_captcha=image_captcha,
+            captcha_type=captcha_type
+        )
+        if not captcha_valid:
+            return JsonResponse({'error': captcha_error}, status=400)
 
         # 验证用户名和密码
         user = authenticate(request, username=username, password=password)
@@ -3313,3 +3837,234 @@ def login_api(request):
     except Exception as e:
         logger.error(f"登录API错误: {e}")
         return JsonResponse({'error': '服务器内部错误'}, status=500)
+
+
+# ==================== 保密柜（Vault）相关 API ====================
+
+from knowledge_project.decorators import (
+    check_vault_access, grant_vault_access, revoke_vault_access,
+    get_vault_access_remaining, verify_vault_2fa, require_vault_access,
+    send_operation_2fa_email
+)
+
+
+@login_required
+@require_http_methods(["GET"])
+def vault_status(request):
+    """
+    获取保密柜状态
+    返回：是否已启用2FA、是否已验证、剩余时间、保密笔记数量
+    """
+    user = request.user
+    profile = getattr(user, 'profile', None)
+
+    two_fa_enabled = profile.two_fa_enabled if profile else False
+    two_fa_method = profile.two_fa_method if profile else None
+
+    # 检查是否已验证
+    is_verified = check_vault_access(user) if two_fa_enabled else True
+    remaining_seconds = get_vault_access_remaining(user) if two_fa_enabled else 0
+
+    # 获取保密笔记数量
+    secret_notes_count = Note.objects.filter(
+        author=user,
+        is_secret=True,
+        is_trashed=False
+    ).count()
+
+    return JsonResponse({
+        'status': 'success',
+        'two_fa_enabled': two_fa_enabled,
+        'two_fa_method': two_fa_method,
+        'is_verified': is_verified,
+        'remaining_seconds': remaining_seconds,
+        'secret_notes_count': secret_notes_count
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def vault_verify(request):
+    """
+    验证保密柜2FA
+    成功后授予时间窗口内的访问权限
+    支持速率限制、指数退避和CAPTCHA验证
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'status': 'error', 'message': 'JSON格式错误'}, status=400)
+
+    code = data.get('code', '').strip()
+    use_backup = data.get('use_backup', False)
+
+    # 提取CAPTCHA参数
+    captcha_params = None
+    captcha_type = data.get('captcha_type')
+    if captcha_type:
+        captcha_params = {
+            'captcha_type': captcha_type,
+            'turnstile_token': data.get('turnstile_token', ''),
+            'image_captcha': data.get('image_captcha', '')
+        }
+
+    if not code:
+        return JsonResponse({'status': 'error', 'message': '请输入验证码'}, status=400)
+
+    # 使用新的验证函数（返回dict），传入CAPTCHA参数
+    result = verify_vault_2fa(request, code, use_backup, captcha_params)
+
+    if result['success']:
+        return JsonResponse({
+            'status': 'success',
+            'message': '验证成功',
+            'expire_time': result['expire_time'],
+            'remaining_seconds': result['remaining_seconds']
+        })
+
+    # 根据状态返回不同的响应
+    response_data = {
+        'status': result['status'],
+        'message': result['message'],
+        'fail_count': result['fail_count'],
+        'require_captcha': result.get('require_captcha', False)
+    }
+
+    if result['status'] == 'locked':
+        response_data['lock_seconds'] = result['lock_seconds']
+
+    return JsonResponse(response_data, status=400 if result['status'] == 'error' else 200)
+
+
+@login_required
+@require_http_methods(["POST"])
+def vault_lock(request):
+    """
+    主动锁定保密柜（撤销访问权限）
+    """
+    revoke_vault_access(request.user)
+    return JsonResponse({
+        'status': 'success',
+        'message': '保密柜已锁定'
+    })
+
+
+@login_required
+@require_http_methods(["GET"])
+def vault_lock_status(request):
+    """
+    检查保密柜验证锁定状态
+    用于前端显示锁定倒计时
+    """
+    from .decorators import check_vault_locked
+
+    user = request.user
+    is_locked, remaining_seconds, fail_count = check_vault_locked(user.id)
+
+    return JsonResponse({
+        'is_locked': is_locked,
+        'remaining_seconds': remaining_seconds,
+        'fail_count': fail_count
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def vault_send_email_code(request):
+    """
+    发送保密柜访问的邮箱验证码
+    """
+    user = request.user
+    profile = getattr(user, 'profile', None)
+
+    if not profile or not profile.two_fa_enabled:
+        return JsonResponse({
+            'status': 'error',
+            'message': '未启用两因素认证'
+        }, status=400)
+
+    if profile.two_fa_method != 'email':
+        return JsonResponse({
+            'status': 'error',
+            'message': '当前不是邮箱验证方式'
+        }, status=400)
+
+    success, message = send_operation_2fa_email(user, 'vault_access')
+
+    if success:
+        return JsonResponse({
+            'status': 'success',
+            'message': '验证码已发送'
+        })
+
+    return JsonResponse({
+        'status': 'error',
+        'message': message
+    }, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def vault_notes_list(request):
+    """
+    获取保密柜中的笔记列表
+    需要先通过2FA验证
+    """
+    user = request.user
+    profile = getattr(user, 'profile', None)
+
+    # 检查2FA验证状态
+    if profile and profile.two_fa_enabled:
+        if not check_vault_access(user):
+            return JsonResponse({
+                'status': 'require_vault_2fa',
+                'code': 'require_vault_2fa',
+                'message': '访问保密柜需要两因素认证验证',
+                'method': profile.two_fa_method
+            })
+
+    # 获取保密笔记列表
+    notes = Note.objects.filter(
+        author=user,
+        is_secret=True,
+        is_trashed=False
+    ).order_by('-updated_at')
+
+    notes_data = [{
+        'id': note.id,
+        'title': note.title,
+        'created_at': note.created_at.isoformat(),
+        'updated_at': note.updated_at.isoformat(),
+        'is_favorited': note.is_favorited,
+    } for note in notes]
+
+    return JsonResponse({
+        'status': 'success',
+        'notes': notes_data,
+        'remaining_seconds': get_vault_access_remaining(user) if profile and profile.two_fa_enabled else 0
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def note_toggle_secret(request, note_id):
+    """
+    切换笔记的保密状态
+    """
+    try:
+        note = Note.objects.get(id=note_id, author=request.user)
+    except Note.DoesNotExist:
+        return JsonResponse({
+            'status': 'error',
+            'message': '笔记不存在'
+        }, status=404)
+
+    # 切换保密状态
+    note.is_secret = not note.is_secret
+    note.save(update_fields=['is_secret'])
+
+    return JsonResponse({
+        'status': 'success',
+        'is_secret': note.is_secret,
+        'message': '已加入保密柜' if note.is_secret else '已移出保密柜'
+    })

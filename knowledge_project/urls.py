@@ -1,6 +1,8 @@
 # knowledge_project/urls.py
 from django.urls import path,re_path
 from . import views
+from . import folder_views
+
 urlpatterns = [
     path('', views.home_view, name='home'),
     #path('public-notes/', views.public_notes_list_view, name='public_notes_list'),
@@ -17,6 +19,8 @@ urlpatterns = [
     path('api/notes/<int:note_id>/', views.note_detail_api, name='api_note_detail'),
     path('api/notes/all/', views.get_all_notes_api, name='get_all_notes_api'),
     path('api/notes/create/', views.create_note_api, name='create_note_api'),
+    path('api/notes/<int:note_id>/update/', views.update_note_api, name='update_note_api'),
+    path('api/notes/<int:note_id>/delete/', views.delete_note_api, name='delete_note_api'),
     path('notes/public/<uuid:public_id>/', views.public_note_view, name='public_note_view'),
     # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
     path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),
@@ -49,6 +53,10 @@ urlpatterns = [
     # ==================== Turnstile API ====================
     path('api/turnstile/config/', views.turnstile_config, name='turnstile_config'),
 
+    # ==================== 图形验证码 API ====================
+    path('api/captcha/init/', views.captcha_init, name='captcha_init'),
+    path('api/captcha/', views.captcha_generate, name='captcha_generate'),
+
     # ==================== 登录API ====================
     path('api/login/', views.login_api, name='login_api'),
 
@@ -56,7 +64,31 @@ urlpatterns = [
     path('api/2fa/verify/', views.verify_2fa_login, name='verify_2fa_login'),
     path('api/2fa/resend-email/', views.resend_2fa_email, name='resend_2fa_email'),
 
+    # ==================== 文件夹相关 API ====================
+    path('api/folders/', folder_views.folder_list_api, name='folder_list_api'),
+    path('api/folders/<int:folder_id>/', folder_views.folder_detail_api, name='folder_detail_api'),
+    path('api/folders/<int:folder_id>/notes/', folder_views.folder_notes_api, name='folder_notes_api'),
+    path('api/folders/<int:folder_id>/breadcrumb/', folder_views.folder_breadcrumb_api, name='folder_breadcrumb_api'),
+    path('api/folders/inbox/notes/', folder_views.inbox_notes_api, name='inbox_notes_api'),
     
+    # ==================== 笔记管理 API（增强版）====================
+    path('api/notes/flat/', folder_views.all_notes_flat_api, name='all_notes_flat_api'),
+    path('api/notes/favorited/', folder_views.favorited_notes_api, name='favorited_notes_api'),
+    path('api/notes/trashed/', folder_views.trashed_notes_api, name='trashed_notes_api'),
+    path('api/notes/<int:note_id>/move/', folder_views.move_note_api, name='move_note_api'),
+    path('api/notes/<int:note_id>/favorite/', folder_views.toggle_note_favorite_api, name='toggle_note_favorite_api'),
+    path('api/notes/<int:note_id>/trash/', folder_views.trash_note_api, name='trash_note_api'),
+    path('api/notes/<int:note_id>/restore/', folder_views.restore_note_api, name='restore_note_api'),
+    path('api/notes/<int:note_id>/permanent-delete/', folder_views.permanent_delete_note_api, name='permanent_delete_note_api'),
+
+    # ==================== 保密柜（Vault）API ====================
+    path('api/vault/status/', views.vault_status, name='vault_status'),
+    path('api/vault/verify/', views.vault_verify, name='vault_verify'),
+    path('api/vault/lock/', views.vault_lock, name='vault_lock'),
+    path('api/vault/lock-status/', views.vault_lock_status, name='vault_lock_status'),
+    path('api/vault/send-email-code/', views.vault_send_email_code, name='vault_send_email_code'),
+    path('api/vault/notes/', views.vault_notes_list, name='vault_notes_list'),
+    path('api/notes/<int:note_id>/toggle-secret/', views.note_toggle_secret, name='note_toggle_secret'),
 
     #path("logout/", views.logout_view, name="logout"),
 ]

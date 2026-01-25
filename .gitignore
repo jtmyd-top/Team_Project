@@ -16,4 +16,10 @@ tests.py
 xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5
-node_modules
+
+# Frontend
+frontend/node_modules/
+node_modules/
+
+# Build output (keep in static/dist for Django)
+# static/dist/ is tracked since it's needed for deployment

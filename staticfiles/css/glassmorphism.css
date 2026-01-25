@@ -16,7 +16,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  overflow: hidden;
+  
   z-index: 0; /* 修改：确保背景层覆盖整个页面 */
 
   /* 淡紫蓝色渐变背景 - 统一主题色 */
@@ -46,7 +46,7 @@ body:has(.glassmorphism-container) main {
   padding: 0 !important;
   position: relative;
   z-index: 1;
-   
+}
 
 /* 禁用登录页面上的所有滚动条和滚动行为 */
 body:has(.glassmorphism-container) * {
@@ -156,13 +156,8 @@ body:has(.glassmorphism-container) header {
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-top: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
   transition: all 0.3s ease;
   position: relative;
-  overflow: hidden;
 }
 
 .glass-card::before {
@@ -187,10 +182,6 @@ body:has(.glassmorphism-container) header {
 
 .glass-card:hover {
   transform: translateY(-5px);
-  box-shadow:
-    0 16px 64px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
   border-color: rgba(255, 255, 255, 0.15);
 }
 

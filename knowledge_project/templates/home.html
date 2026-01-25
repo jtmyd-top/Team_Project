@@ -4,7 +4,7 @@
 
 {% block head_extra %}
 <link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
-<link rel="stylesheet" href="{% static 'JS/dist/assets/home.css' %}">
+<link rel="stylesheet" href="{% static 'dist/assets/home.css' %}">
 <style>
 /* 强制移除body和main的白色背景 */
 body, html {
@@ -35,5 +35,5 @@ main {
 <div id="home-app"></div>
 
 <!-- 加载构建后的Vue应用 -->
-<script type="module" src="{% static 'JS/dist/home.js' %}"></script>
+<script type="module" src="{% static 'dist/home.js' %}"></script>
 {% endblock %}

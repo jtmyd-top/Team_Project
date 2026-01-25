@@ -6,3 +6,4 @@ class KnowledgeProjectConfig(AppConfig):
 
     def ready(self):
         import knowledge_project.models  # 确保 models.py 被导入
+        import knowledge_project.signals  # 导入信号处理器

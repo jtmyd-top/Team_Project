@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账户已锁定 - 安全保护</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* 背景动画 */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: 0;
+        }
+
+        .bg-animation::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(245, 108, 108, 0.1) 0%, transparent 50%);
+            animation: pulse-bg 8s ease-in-out infinite;
+        }
+
+        @keyframes pulse-bg {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+        }
+</style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    <div class="lock-container">
+        <!-- 锁定图标 -->
+        <div class="lock-icon-wrapper">
+            <div class="lock-icon">
+                <i class="fas fa-shield-halved"></i>
+            </div>
+            <div class="pulse-ring"></div>
+            <div class="pulse-ring delay"></div>
+        </div>
+
+        <!-- 标题 -->
+        <h1 class="lock-title">账户安全保护已启动</h1>
+
+        <!-- 副标题 -->
+        <p class="lock-subtitle">
+            <i class="fas fa-exclamation-triangle"></i>
+            检测到多次验证失败，账户已被临时锁定
+        </p>
+
+        <!-- 信息卡片 -->
+        <div class="info-card">
+            <div class="info-header">
+                <i class="fas fa-info-circle"></i>
+                <span>锁定详情</span>
+            </div>
+            <div class="info-content">
+                <div class="info-item">
+                    <i class="fas fa-clock"></i>
+                    <div class="info-text">
+                        <span class="info-label">锁定状态</span>
+                        <span class="info-value status-locked">全域锁定中</span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <i class="fas fa-ban"></i>
+                    <div class="info-text">
+                        <span class="info-label">访问限制</span>
+                        <span class="info-value">所有数据操作已禁用</span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <i class="fas fa-shield-alt"></i>
+                    <div class="info-text">
+                        <span class="info-label">保护措施</span>
+                        <span class="info-value">防止数据泄露与篡改</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 解锁说明 -->
+        <div class="unlock-section">
+            <h3 class="unlock-title">
+                <i class="fas fa-key"></i>
+                如何解除锁定？
+            </h3>
+            <p class="unlock-description">
+                为确保账户安全，请通过重置密码来验证您的身份并解除锁定状态。
+            </p>
+            <a href="/forgot-password/" class="unlock-btn">
+                <i class="fas fa-unlock-alt"></i>
+                <span>重置密码解除锁定</span>
+                <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+
+        <!-- 底部提示 -->
+        <div class="footer-hint">
+            <i class="fas fa-question-circle"></i>
+            <span>如果这不是您的操作，请立即联系管理员</span>
+        </div>
+    </div>
+
+    <style>
+        .lock-container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 480px;
+            padding: 48px 32px;
+            text-align: center;
+        }
+
+        /* 锁定图标 */
+        .lock-icon-wrapper {
+            position: relative;
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 32px;
+        }
+
+        .lock-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 40px rgba(245, 108, 108, 0.4);
+            z-index: 2;
+        }
+
+        .lock-icon i {
+            font-size: 42px;
+            color: white;
+        }
+
+        .pulse-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 2px solid rgba(245, 108, 108, 0.5);
+            animation: pulse-ring 2s ease-out infinite;
+        }
+
+        .pulse-ring.delay {
+            animation-delay: 1s;
+        }
+
+        @keyframes pulse-ring {
+            0% {
+                width: 100px;
+                height: 100px;
+                opacity: 1;
+            }
+            100% {
+                width: 160px;
+                height: 160px;
+                opacity: 0;
+            }
+        }
+
+        /* 标题 */
+        .lock-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .lock-subtitle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: rgba(245, 108, 108, 0.15);
+            border: 1px solid rgba(245, 108, 108, 0.3);
+            border-radius: 30px;
+            color: #f56c6c;
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+
+        .lock-subtitle i {
+            animation: shake 0.5s ease-in-out infinite;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: rotate(0deg); }
+            25% { transform: rotate(-10deg); }
+            75% { transform: rotate(10deg); }
+        }
+
+        /* 信息卡片 */
+        .info-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 32px;
+            backdrop-filter: blur(10px);
+        }
+
+        .info-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .info-header i {
+            color: #409eff;
+        }
+
+        .info-content {
+            padding: 8px 0;
+        }
+
+        .info-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 14px 20px;
+            transition: background 0.2s ease;
+        }
+
+        .info-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .info-item > i {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+        }
+
+        .info-text {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .info-value {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 500;
+        }
+
+        .status-locked {
+            color: #f56c6c;
+        }
+
+        /* 解锁部分 */
+        .unlock-section {
+            background: linear-gradient(135deg, rgba(64, 158, 255, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%);
+            border: 1px solid rgba(64, 158, 255, 0.2);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .unlock-title {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 12px;
+        }
+
+        .unlock-title i {
+            color: #409eff;
+        }
+
+        .unlock-description {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .unlock-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 24px rgba(64, 158, 255, 0.3);
+        }
+
+        .unlock-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 32px rgba(64, 158, 255, 0.4);
+        }
+
+        .unlock-btn i:last-child {
+            transition: transform 0.3s ease;
+        }
+
+        .unlock-btn:hover i:last-child {
+            transform: translateX(4px);
+        }
+
+        /* 底部提示 */
+        .footer-hint {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .footer-hint i {
+            font-size: 14px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 520px) {
+            .lock-container {
+                padding: 32px 20px;
+            }
+
+            .lock-title {
+                font-size: 22px;
+            }
+
+            .lock-subtitle {
+                font-size: 12px;
+                padding: 8px 16px;
+            }
+
+            .info-item {
+                padding: 12px 16px;
+            }
+
+            .unlock-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,209 @@
+{
+  "passed": [
+    {
+      "name": "GET /",
+      "description": "首页",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/",
+      "response_length": 9186
+    },
+    {
+      "name": "GET /api/vault/status/",
+      "description": "获取保密柜状态",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/vault/status/",
+      "response_length": 141
+    },
+    {
+      "name": "GET /api/vault/lock-status/",
+      "description": "获取保密柜锁定状态",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/vault/lock-status/",
+      "response_length": 64
+    },
+    {
+      "name": "GET /api/notification-preferences/",
+      "description": "获取通知设置",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/notification-preferences/",
+      "response_length": 186
+    },
+    {
+      "name": "GET /api/theme-settings/",
+      "description": "获取主题设置",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/theme-settings/",
+      "response_length": 170
+    },
+    {
+      "name": "GET /api/vault/notes/",
+      "description": "获取保密柜笔记",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/vault/notes/",
+      "response_length": 177
+    },
+    {
+      "name": "GET /api/vault/status/",
+      "description": "获取保密柜访问状态",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/vault/status/",
+      "response_length": 141
+    },
+    {
+      "name": "GET /api/vault/lock-status/",
+      "description": "检查保密柜锁定状态",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/vault/lock-status/",
+      "response_length": 64
+    },
+    {
+      "name": "GET /api/captcha/init/",
+      "description": "初始化验证码",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/captcha/init/",
+      "response_length": 88
+    },
+    {
+      "name": "GET /api/turnstile/config/",
+      "description": "获取Turnstile配置",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/turnstile/config/",
+      "response_length": 78
+    },
+    {
+      "name": "GET /api/public-notes/",
+      "description": "获取公开笔记列表",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/public-notes/",
+      "response_length": 2447
+    },
+    {
+      "name": "GET /api/public-notes/",
+      "description": "列表公开笔记",
+      "status_code": 200,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/public-notes/",
+      "response_length": 2447
+    }
+  ],
+  "failed": [
+    {
+      "name": "GET /home/",
+      "description": "主页",
+      "status_code": 404,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/home/",
+      "response_length": 14307
+    },
+    {
+      "name": "POST /check-username/",
+      "description": "检查用户名可用性",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/check-username/",
+      "response_length": 396
+    },
+    {
+      "name": "POST /check-email/",
+      "description": "检查邮箱可用性",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/check-email/",
+      "response_length": 396
+    },
+    {
+      "name": "GET /api/profile/",
+      "description": "获取用户资料",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/profile/",
+      "response_length": 455
+    },
+    {
+      "name": "GET /api/notes/all/",
+      "description": "获取所有笔记",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/notes/all/",
+      "response_length": 455
+    },
+    {
+      "name": "GET /api/notes/flat/",
+      "description": "获取平铺笔记列表",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/notes/flat/",
+      "response_length": 455
+    },
+    {
+      "name": "GET /api/notes/search/",
+      "description": "搜索笔记",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/notes/search/",
+      "response_length": 455
+    },
+    {
+      "name": "GET /api/folders/",
+      "description": "获取所有文件夹（树形结构）",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/folders/",
+      "response_length": 455
+    },
+    {
+      "name": "GET /api/folders/inbox/notes/",
+      "description": "获取收件箱笔记",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/folders/inbox/notes/",
+      "response_length": 455
+    },
+    {
+      "name": "POST /api/notification-preferences/",
+      "description": "更新通知设置",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/notification-preferences/",
+      "response_length": 396
+    },
+    {
+      "name": "POST /api/theme-settings/",
+      "description": "更新主题设置",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/theme-settings/",
+      "response_length": 396
+    },
+    {
+      "name": "POST /api/vault/lock/",
+      "description": "锁定保密柜",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/vault/lock/",
+      "response_length": 396
+    },
+    {
+      "name": "GET /api/captcha/",
+      "description": "获取验证码",
+      "status_code": 403,
+      "expected_status": 200,
+      "url": "http://192.168.1.6/api/captcha/",
+      "response_length": 55
+    }
+  ],
+  "warnings": [],
+  "total": 25,
+  "timestamp": "2026-01-25T17:12:51.596892"
+}

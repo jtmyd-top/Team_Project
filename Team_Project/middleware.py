@@ -1,0 +1,373 @@
+"""
+Django 中间件 - 用于设置安全响应头和保密柜锁定检查
+"""
+import logging
+import json
+from django.http import JsonResponse, HttpResponse
+from django.template.loader import render_to_string
+
+logger = logging.getLogger(__name__)
+
+
+class ContentSecurityPolicyMiddleware:
+    """
+    设置 Content-Security-Policy 响应头
+
+    注意：认证页面（使用 Turnstile）不设置 CSP，因为 Turnstile 对 CSP 有严格要求
+    """
+
+    # 需要跳过 CSP 的路径（认证相关页面使用 Turnstile）
+    AUTH_PATHS = ['/login', '/signup', '/forgot-password', '/reset-password', '/settings', '/knowledge']
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        logger.info("✅ ContentSecurityPolicyMiddleware initialized")
+
+    def __call__(self, request):
+        response = self.get_response(request)
+
+        # 检查是否是认证页面（需要 Turnstile）
+        path = request.path.rstrip('/')
+        is_auth_page = any(path == auth_path or path.startswith(auth_path + '/') for auth_path in self.AUTH_PATHS)
+
+        # 调试日志
+        logger.info(f"🔍 CSP Middleware: path={request.path}, is_auth_page={is_auth_page}")
+
+        if is_auth_page:
+            # 认证页面不设置 CSP，让 Turnstile 正常工作
+            logger.info(f"⏭️ Skipping CSP for auth page: {request.path}")
+            return response
+
+        # 其他页面设置标准 CSP（包含 Turnstile 域名）
+        csp_header = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: "
+            "https://cdn.jsdelivr.net "
+            "https://unpkg.com "
+            "https://static.cloudflareinsights.com "
+            "https://challenges.cloudflare.com; "
+            "frame-src 'self' https://challenges.cloudflare.com; "
+            "connect-src 'self' https://static.cloudflareinsights.com https://challenges.cloudflare.com; "
+            "worker-src 'self' blob:; "
+            "style-src 'self' 'unsafe-inline' https:; "
+            "img-src 'self' data: https: blob:; "
+            "font-src 'self' data: https:; "
+            "media-src 'self' https:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+
+        response['Content-Security-Policy'] = csp_header
+        return response
+
+
+class VaultLockMiddleware:
+    """
+    保密柜锁定中间件（增强版 v2.0）
+
+    当用户的保密柜被锁定时（验证失败次数过多），实施全面的访问限制：
+
+    安全策略：
+    1. 防篡改 (Integrity)：阻止所有写入操作（POST/PUT/PATCH/DELETE）
+    2. 防泄漏 (Confidentiality)：阻止读取敏感数据（笔记内容、个人信息等）
+    3. 防死锁 (Anti-Deadlock)：允许关键操作（登出、密码重置）穿透锁定
+
+    关键问题解决 - Zombie Session 防护：
+    当用户被锁定时，如果无法执行 POST /logout/ 请求，会导致以下安全隐患：
+    - 前端删除了 Cookie（用户以为已登出）
+    - 但后端会话 (Session) 未被销毁
+    - 攻击者盗取的 Token 仍然有效
+    -> 这被称为 "假性登出" (Fake Logout) 或 "殭屍会话" (Zombie Session)
+
+    解决方案：通过 WRITE_METHOD_WHITELIST 允许关键操作即使在锁定状态下也能执行：
+    - POST /logout/ -> 销毁服务器会话
+    - POST /api/password-reset/ -> 重置密码解除锁定
+
+    锁定状态下允许的操作：
+    - 认证相关：登录、登出、密码重置、2FA重发
+    - 保密柜相关：验证、状态查询
+    - 静态资源：CSS、JS、图片等
+    - 基础页面：首页（不含敏感数据）
+
+    ⚠️ 特殊：以下写入操作即使被锁定也允许（白名单）
+    - POST /logout/ -> 真正销毁会话，防止 Zombie Session
+    - POST /api/password-reset/ -> 重置密码以解除锁定
+    - POST /api/2fa/resend-email/ -> 重发2FA邮件
+
+    锁定状态下阻止的操作：
+    - 所有其他写入操作（创建、编辑、删除笔记等）
+    - 读取笔记内容和列表
+    - 读取用户设置和个人信息
+    - 读取文件夹内容
+    """
+
+    # 允许的路径（即使被锁定也可以访问）
+    ALLOWED_PATHS = [
+        '/',
+        '/login',
+        '/logout',
+        '/signup',
+        '/forgot-password',
+        '/reset-password',
+        '/api/vault/verify/',
+        '/api/vault/lock-status/',
+        '/api/vault/send-email-code/',
+        '/api/captcha/',
+        '/api/captcha/init/',
+        '/api/check-email/',
+        '/api/check-username/',
+        '/api/send-email-code/',
+        '/api/password-reset/',
+        '/api/turnstile/config/',
+    ]
+
+    # 白名单：允许的 POST/PUT/PATCH/DELETE 操作（即使被锁定也可以执行）
+    # 这是为了防止 "假性登出" (Zombie Session) 的安全隐患
+    # 用户被锁定时仍需能够：
+    #   1. 真正登出（销毁服务器会话）
+    #   2. 重置密码（解除锁定）
+    WRITE_METHOD_WHITELIST = [
+        ('POST', '/logout'),
+        ('POST', '/api/logout/'),
+        ('POST', '/forgot-password/'),
+        ('POST', '/api/password-reset/'),
+        ('POST', '/api/2fa/resend-email/'),
+        ('GET', '/api/password-reset/'),  # 获取重置状态
+    ]
+
+    # 允许的路径前缀（静态资源等）
+    # 注意：/admin/ 已移除，锁定用户也不能访问Django管理后台
+    ALLOWED_PATH_PREFIXES = [
+        '/static/',
+        '/uploads/',
+        '/ckeditor5/',
+    ]
+
+    # 敏感数据路径（即使是 GET 请求也要阻止）
+    SENSITIVE_DATA_PATHS = [
+        '/api/notes/',
+        '/api/folders/',
+        '/api/settings/',
+        '/api/profile/',
+        '/api/user/',
+        '/api/sidebar/',
+        '/knowledge/',
+        '/admin/',  # Django 管理后台也视为敏感数据
+    ]
+
+    # 敏感数据路径前缀
+    SENSITIVE_DATA_PREFIXES = [
+        '/api/notes/',
+        '/api/folders/',
+        '/api/settings/',
+        '/api/profile/',
+        '/api/user/',
+        '/protected_uploads/',
+        '/admin/',  # Django 管理后台
+    ]
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        logger.info("✅ VaultLockMiddleware initialized (Enhanced)")
+
+    def __call__(self, request):
+        # 只检查已登录用户
+        if not request.user.is_authenticated:
+            return self.get_response(request)
+
+        # 检查是否是允许的路径（优先级最高）
+        path = request.path
+        if self._is_allowed_path(path):
+            return self.get_response(request)
+
+        # 检查用户是否被锁定
+        if self._is_user_locked(request.user.id):
+            # 检查是否是写入操作白名单（允许登出、密码重置等即使在锁定状态）
+            if self._is_write_method_whitelisted(request.method, path):
+                logger.info(f"✅ VaultLockMiddleware: 用户 {request.user.id} 被锁定，但 {request.method} {path} 在白名单中，允许执行")
+                return self.get_response(request)
+
+            # 检查是否是敏感数据读取（即使是 GET 也要阻止）
+            if self._is_sensitive_data_path(path):
+                logger.warning(f"🔒 VaultLockMiddleware: 用户 {request.user.id} 被锁定，阻止敏感数据访问: {request.method} {path}")
+                return self._locked_response(request, is_read_blocked=True)
+
+            # 阻止所有写入操作
+            if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+                logger.warning(f"🔒 VaultLockMiddleware: 用户 {request.user.id} 被锁定，阻止写入操作: {request.method} {path}")
+                return self._locked_response(request, is_read_blocked=False)
+
+        return self.get_response(request)
+
+    def _is_allowed_path(self, path):
+        """检查路径是否在允许列表中"""
+        # 精确匹配
+        path_stripped = path.rstrip('/')
+        if path in self.ALLOWED_PATHS or path_stripped in self.ALLOWED_PATHS:
+            return True
+
+        # 前缀匹配
+        for prefix in self.ALLOWED_PATH_PREFIXES:
+            if path.startswith(prefix):
+                return True
+
+        return False
+
+    def _is_write_method_whitelisted(self, method, path):
+        """
+        检查是否是写入操作白名单中的方法
+        这是为了防止 Zombie Session 的安全隐患
+        """
+        path_stripped = path.rstrip('/')
+
+        for whitelisted_method, whitelisted_path in self.WRITE_METHOD_WHITELIST:
+            # 精确匹配
+            if (method == whitelisted_method and
+                (path == whitelisted_path or path_stripped == whitelisted_path)):
+                return True
+
+        return False
+
+    def _is_sensitive_data_path(self, path):
+        """检查是否是敏感数据路径"""
+        # 精确匹配
+        path_stripped = path.rstrip('/')
+        if path in self.SENSITIVE_DATA_PATHS or path_stripped in self.SENSITIVE_DATA_PATHS:
+            return True
+
+        # 前缀匹配
+        for prefix in self.SENSITIVE_DATA_PREFIXES:
+            if path.startswith(prefix):
+                return True
+
+        return False
+
+    def _is_user_locked(self, user_id):
+        """检查用户是否被锁定"""
+        from django.core.cache import cache
+        import time
+
+        lock_key = f'vault_lock:{user_id}'
+        lock_expire_time = cache.get(lock_key)
+
+        if lock_expire_time is None:
+            return False
+
+        # 检查锁定是否已过期
+        if lock_expire_time <= int(time.time()):
+            cache.delete(lock_key)
+            return False
+
+        return True
+
+    def _is_api_request(self, request):
+        """判断是否是 API 请求"""
+        # 检查路径是否以 /api/ 开头
+        if request.path.startswith('/api/'):
+            return True
+
+        # 检查 Accept 头是否请求 JSON
+        accept = request.headers.get('Accept', '')
+        if 'application/json' in accept:
+            return True
+
+        # 检查 X-Requested-With 头（AJAX 请求）
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return True
+
+        # 检查 Content-Type 是否是 JSON
+        content_type = request.headers.get('Content-Type', '')
+        if 'application/json' in content_type:
+            return True
+
+        return False
+
+    def _locked_response(self, request, is_read_blocked=False):
+        """返回锁定状态响应"""
+        if is_read_blocked:
+            message = '您的账户因多次验证失败已被临时锁定。为保护您的数据安全，当前无法访问笔记内容。请通过重置密码解除锁定。'
+        else:
+            message = '您的账户因多次验证失败已被临时锁定，当前只能进行只读操作。请通过重置密码解除锁定。'
+
+        # 如果是 API 请求，返回 JSON
+        if self._is_api_request(request):
+            return JsonResponse({
+                'status': 'vault_locked',
+                'code': 'vault_locked',
+                'message': message,
+                'action': 'reset_password',
+                'reset_url': '/forgot-password/',
+                'read_blocked': is_read_blocked
+            }, status=403)
+
+        # 如果是页面请求，返回美化的 HTML 页面
+        try:
+            html_content = render_to_string('vault_locked.html', {
+                'message': message,
+                'is_read_blocked': is_read_blocked,
+                'reset_url': '/forgot-password/',
+            })
+            return HttpResponse(html_content, status=403, content_type='text/html')
+        except Exception as e:
+            logger.error(f"渲染锁定页面失败: {e}")
+            # 如果模板渲染失败，返回简单的 HTML
+            return HttpResponse(self._get_fallback_html(message), status=403, content_type='text/html')
+
+    def _get_fallback_html(self, message):
+        """备用的简单 HTML 页面"""
+        return f'''
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账户已锁定</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+        }}
+        .container {{
+            text-align: center;
+            padding: 40px;
+            max-width: 500px;
+        }}
+        h1 {{
+            color: #f56c6c;
+            margin-bottom: 20px;
+        }}
+        p {{
+            color: rgba(255,255,255,0.8);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }}
+        a {{
+            display: inline-block;
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+        }}
+        a:hover {{
+            opacity: 0.9;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 账户已锁定</h1>
+        <p>{message}</p>
+        <a href="/forgot-password/">重置密码解除锁定</a>
+    </div>
+</body>
+</html>
+'''

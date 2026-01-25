@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/glassmorphism.css' %}">
 <link rel="stylesheet" href="{% static 'css/modern-inputs.css' %}">
 <!-- 强制刷新 api-service.js -->
-<script type="module" src="{% static 'JS/services/apiService.js' %}?v={{ timestamp|default:'20241214-007' }}"></script>
+<script type="module" src="{% static 'JS/src/services/apiService.js' %}?v={{ timestamp|default:'20241214-007' }}"></script>
 {% endblock %}
 
 {% block content %}
@@ -458,7 +458,7 @@ main {
 </style>
 
 <!-- 加载构建后的Vue应用 -->
-<script type="module" src="{% static 'JS/dist/signup.js' %}?v=20241217-001"></script>
+<script type="module" src="{% static 'dist/signup.js' %}?v=20241217-001"></script>
 
 <script>
 // 设置CSRF令牌供JavaScript使用

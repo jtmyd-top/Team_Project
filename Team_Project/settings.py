@@ -20,6 +20,11 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-for-dev') # �
 DEBUG = os.getenv('DEBUG', 'True').lower() in ['true', '1', 't']
 ALLOWED_HOSTS = ["*"] # 在生产环境中应配置为具体的域名
 
+# Vite 开发模式开关
+# 设置为 True 时，模板会从 Vite 开发服务器 (localhost:5173) 加载资源
+# 设置为 False 时，模板会从 static/dist/ 加载构建后的资源
+VITE_DEV_MODE = os.getenv('VITE_DEV_MODE', 'False').lower() in ['true', '1', 't']
+
 
 # --- 3. INSTALLED_APPS (只保留 django-ckeditor-5) ---
 INSTALLED_APPS = [
@@ -43,6 +48,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'Team_Project.middleware.ContentSecurityPolicyMiddleware',  # CSP 响应头中间件
+    'Team_Project.middleware.VaultLockMiddleware',  # 【新增】保密柜锁定中间件
 ]
 ROOT_URLCONF = 'Team_Project.urls'
 TEMPLATES = [
@@ -109,8 +116,8 @@ LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'home'
 
-# 密码重置配置 - 设置为24小时过期
-PASSWORD_RESET_TIMEOUT = 86400  # 24小时，以秒为单位
+# 密码重置配置 - 设置为12小时过期
+PASSWORD_RESET_TIMEOUT = 43200  # 12小时，以秒为单位
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -153,6 +160,8 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # --- Cloudflare Turnstile Configuration ---
 CLOUDFLARE_TURNSTILE_SITE_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SITE_KEY')
 CLOUDFLARE_TURNSTILE_SECRET_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SECRET_KEY')
+# 开发环境可设置 TURNSTILE_ENABLED=false 跳过验证（用于网络无法访问 Cloudflare 的情况）
+TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', 'true').lower() in ['true', '1', 't', 'yes']
 
 # --- 指定使用我们自己下载的、包含高级功能的 JS 文件 ---
 CKEDITOR_5_CUSTOM_JS_URL = 'ckeditor5/ckeditor.js'

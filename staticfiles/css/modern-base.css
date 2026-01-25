@@ -647,8 +647,9 @@ main {
   color: var(--text-primary) !important;
 }
 
-/* 全局修复：确保所有可能的容器都不会裁剪下拉菜单 */
-html, body, div, section, main, article, header, nav {
+/* 全局修复：确保下拉菜单相关容器不会裁剪菜单 */
+/* 注意：不要对所有 div 设置 overflow: visible，否则会破坏滚动功能 */
+header, nav, .user-menu, .nav-right {
   overflow: visible !important;
 }
 
@@ -672,10 +673,10 @@ body {
   overflow: visible !important;
 }
 
-/* 特别修复：防止页面容器限制溢出 */
+/* 特别修复：防止页面容器限制下拉菜单溢出 */
+/* 注意：移除了 .main-content，因为它需要支持内部滚动 */
 .page-container,
-.content-wrapper,
-.main-content {
+.content-wrapper {
   overflow: visible !important;
 }
 

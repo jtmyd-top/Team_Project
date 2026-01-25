@@ -8,6 +8,9 @@
     <meta charset="UTF-8">
     <title>{% block title %}知识协作平台{% endblock %}</title>
 
+    <!-- CSP 由 Django 中间件 ContentSecurityPolicyMiddleware 统一设置 -->
+    <!-- 不再使用 meta 标签，避免与 HTTP 头冲突 -->
+
     <!-- FontAwesome Web Fonts模式 - 只加载CSS,不加载JS -->
     <link href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}" rel="stylesheet">
 
@@ -28,16 +31,12 @@
 
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
 
-    <!-- API服务 - 为主题管理器提供API调用 -->
-    <script type="module" src="{% static 'JS/utils/request.js' %}"></script>
-    <script type="module" src="{% static 'JS/services/apiService.js' %}"></script>
-
     <!-- 主题管理器 - 尽早加载以避免闪烁 -->
-    <script type="module" src="{% static 'JS/dist/theme-manager.js' %}"></script>
+    <script type="module" src="{% static 'dist/theme-manager.js' %}"></script>
 
     <!-- 动画和交互效果 -->
-    <script src="{% static 'js/particles.js' %}"></script>
-    <script src="{% static 'js/scroll-animations.js' %}"></script>
+    <script src="{% static 'lib/particles.js' %}"></script>
+    <script src="{% static 'lib/scroll-animations.js' %}"></script>
 
     {% block head_extra %}{% endblock %}
 
@@ -242,8 +241,8 @@ document.addEventListener("DOMContentLoaded", function() {
             const pageLoader = document.getElementById('page-loader');
             if (pageLoader) {
                 pageLoader.style.display = 'none';
-                // 或者使用动画隐藏
-                // pageLoader.classList.add('hide');
+                //
+                // .add('hide');
                 // setTimeout(() => {
                 //     if (pageLoader.parentNode) {
                 //         pageLoader.parentNode.removeChild(pageLoader);

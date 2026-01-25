@@ -33,11 +33,72 @@ class Tag(models.Model):
         verbose_name_plural = "标签"
 
 
+# ---------------- 文件夹 ----------------
+class Folder(models.Model):
+    """文件夹模型，用于组织笔记"""
+    name = models.CharField(max_length=100, verbose_name="文件夹名称")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='folders', verbose_name="所有者")
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='children',
+        verbose_name="父文件夹"
+    )
+    order = models.IntegerField(default=0, verbose_name="排序顺序")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "文件夹"
+        verbose_name_plural = "文件夹"
+        ordering = ['order', 'name']
+        indexes = [
+            models.Index(fields=['owner', 'parent']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def get_ancestors(self):
+        """获取所有祖先文件夹（用于面包屑导航）"""
+        ancestors = []
+        current = self.parent
+        while current:
+            ancestors.insert(0, current)
+            current = current.parent
+        return ancestors
+
+    def get_descendants(self):
+        """获取所有后代文件夹"""
+        descendants = []
+        for child in self.children.all():
+            descendants.append(child)
+            descendants.extend(child.get_descendants())
+        return descendants
+
+    def get_notes_count(self):
+        """获取文件夹内的笔记数量（包括子文件夹）"""
+        count = self.notes_in_folder.filter(is_trashed=False).count()
+        for child in self.children.all():
+            count += child.get_notes_count()
+        return count
+
+
 # ---------------- 笔记 ----------------
 class Note(models.Model):
     title = models.CharField(max_length=255, verbose_name="笔记标题")
     content = CKEditor5Field(verbose_name="笔记内容", null=True, blank=True, config_name='full')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notes', verbose_name="作者")
+    folder = models.ForeignKey(
+        Folder,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notes_in_folder',
+        verbose_name="所属文件夹"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="最后修改时间")
@@ -56,6 +117,12 @@ class Note(models.Model):
 
     # 目录数据（JSON 格式存储）
     toc = models.JSONField(default=list, blank=True, verbose_name="目录结构")
+
+    # 状态标记
+    is_trashed = models.BooleanField(default=False, verbose_name="已删除")
+    is_favorited = models.BooleanField(default=False, verbose_name="已收藏")
+    is_secret = models.BooleanField(default=False, verbose_name="保密笔记", help_text="标记为保密的笔记需要2FA验证才能访问")
+    trashed_at = models.DateTimeField(null=True, blank=True, verbose_name="删除时间")
 
     def has_permission(self, user):
         if self.is_public:
@@ -102,7 +169,29 @@ class Note(models.Model):
         indexes = [
             models.Index(fields=['created_at']),
             models.Index(fields=['author']),
+            models.Index(fields=['folder']),
+            models.Index(fields=['is_trashed']),
+            models.Index(fields=['is_favorited']),
+            models.Index(fields=['is_secret']),
         ]
+
+    def move_to_trash(self):
+        """移动到回收站"""
+        from django.utils import timezone
+        self.is_trashed = True
+        self.trashed_at = timezone.now()
+        self.save(update_fields=['is_trashed', 'trashed_at'])
+
+    def restore_from_trash(self):
+        """从回收站恢复"""
+        self.is_trashed = False
+        self.trashed_at = None
+        self.save(update_fields=['is_trashed', 'trashed_at'])
+
+    def move_to_inbox(self):
+        """移动到收件箱（移除文件夹关联）"""
+        self.folder = None
+        self.save(update_fields=['folder'])
 
 
 # ---------------- 资源 ----------------
