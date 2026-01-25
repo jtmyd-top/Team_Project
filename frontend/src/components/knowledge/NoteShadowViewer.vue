@@ -141,6 +141,8 @@ async function decryptNoteContent() {
     })
 
     // 前端解密：在浏览器中使用 DEK 解密
+    // 新的 useClientCrypto 已经是 Python 兼容格式
+    // 可以解密旧的迁移数据和新的加密数据
     const plaintext = decryptContent(props.content, dek.value)
     decryptedContent.value = plaintext
 

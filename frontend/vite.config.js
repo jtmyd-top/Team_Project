@@ -5,6 +5,11 @@ import path from 'path'
 export default defineConfig({
   plugins: [vue()],
 
+  // 依赖优化：确保 crypto-js 被正确预构建
+  optimizeDeps: {
+    include: ['crypto-js']
+  },
+
   // 生产环境资源 URL 前缀
   base: '/static/dist/',
 

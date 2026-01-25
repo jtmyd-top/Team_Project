@@ -32,7 +32,7 @@
       <div v-else class="note-title-wrapper">
         <!-- 保密图标 -->
         <i v-if="note.is_secret" class="fas fa-lock vault-badge" title="保密笔记"></i>
-        <h4 class="note-title">{{ note.title || '无标题' }}</h4>
+        <h4 class="note-title">{{ displayTitle }}</h4>
       </div>
 
       <!-- 元信息 -->
@@ -99,7 +99,9 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
+import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 
 const props = defineProps({
   note: {
@@ -134,6 +136,59 @@ const isEditing = ref(false)
 const editingTitle = ref('')
 const titleInput = ref(null)
 
+// 解密状态
+const { isKeyValid, dek } = useVaultEncryption()
+const { decryptContent } = useClientCrypto()
+const decryptedTitle = ref('')
+
+// 计算属性：显示的标题（已解密或原标题）
+const displayTitle = computed(() => {
+  // 如果不是加密笔记，直接返回原标题
+  if (!props.note.is_secret) {
+    return props.note.title || '无标题'
+  }
+
+  // 如果已解密，返回解密后的标题
+  if (decryptedTitle.value) {
+    return decryptedTitle.value
+  }
+
+  // 如果还没解密，返回原标题（可能是密文）
+  return props.note.title || '无标题'
+})
+
+// 解密笔记标题
+function decryptNoteTitle() {
+  // 如果不是加密笔记，不需要解密
+  if (!props.note.is_secret) {
+    decryptedTitle.value = ''
+    return
+  }
+
+  // 如果没有标题，不需要解密
+  if (!props.note.title) {
+    decryptedTitle.value = ''
+    return
+  }
+
+  // 如果没有有效的 DEK，不能解密
+  if (!isKeyValid.value || !dek.value) {
+    decryptedTitle.value = ''
+    return
+  }
+
+  try {
+    // 尝试解密标题
+    const plainTitle = decryptContent(props.note.title, dek.value)
+    decryptedTitle.value = plainTitle
+    console.log('[Vault] Title decrypted successfully in NoteListItem:', props.note.id)
+  } catch (e) {
+    // 标题可能是明文（旧笔记），保留原值
+    console.warn('[Vault] Failed to decrypt title in NoteListItem:', e.message)
+    decryptedTitle.value = ''  // 让 displayTitle computed 显示原标题
+  }
+}
+
 // 监听 editingNoteId 的变化
 watch(() => props.editingNoteId, (newVal) => {
   if (newVal === props.note.id) {
@@ -143,10 +198,36 @@ watch(() => props.editingNoteId, (newVal) => {
   }
 })
 
+// 监听 note 对象变化（切换笔记时重新解密）
+watch(() => props.note.id, () => {
+  decryptedTitle.value = ''
+  if (isKeyValid.value) {
+    decryptNoteTitle()
+  }
+})
+
+// 监听 DEK 变化（保险柜解锁时自动解密标题）
+watch(() => isKeyValid.value, (valid) => {
+  if (valid && props.note.is_secret && props.note.title) {
+    decryptNoteTitle()
+  } else if (!valid && props.note.is_secret) {
+    // DEK 失效，清除解密的标题
+    decryptedTitle.value = ''
+  }
+})
+
+// 组件挂载时，如果已解锁，立即解密标题
+watch(() => props.note, (note) => {
+  if (note.is_secret && isKeyValid.value && note.title) {
+    decryptNoteTitle()
+  }
+}, { immediate: true })
+
 // 开始编辑
 function startEditing() {
   isEditing.value = true
-  editingTitle.value = props.note.title || ''
+  // 使用解密后的标题，如果没有解密则使用原标题
+  editingTitle.value = decryptedTitle.value || props.note.title || ''
   nextTick(() => {
     titleInput.value?.focus()
     titleInput.value?.select()

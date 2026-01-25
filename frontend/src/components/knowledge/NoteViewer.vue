@@ -35,6 +35,7 @@ import { ElAlert, ElSkeleton } from 'element-plus'
 import DOMPurify from 'dompurify'
 import { useCodeEnhancer } from '../composables/useCodeEnhancer'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 
 const props = defineProps({
   content: {
@@ -57,7 +58,8 @@ const decryptError = ref('')
 const decryptedContent = ref('')
 
 // 使用加密组合式
-const { isKeyValid, decryptNoteFromBackend } = useVaultEncryption()
+const { isKeyValid, dek } = useVaultEncryption()
+const { decryptContent: decryptClientContent } = useClientCrypto()
 
 // 使用代码块增强功能
 const { enhance: enhanceCodeBlocks } = useCodeEnhancer()
@@ -184,10 +186,15 @@ const renderContent = (content) => {
 
 /**
  * 解密加密笔记的内容
- * 调用后端 API 进行解密，并将结果存储在 decryptedContent.value
  */
 async function decryptContent() {
   if (!props.isSecret || !props.content || !props.noteId) {
+    return
+  }
+
+  // 检查是否有有效的 DEK
+  if (!isKeyValid.value || !dek.value) {
+    decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
     return
   }
 
@@ -195,12 +202,14 @@ async function decryptContent() {
   decryptError.value = ''
 
   try {
-    const plaintext = await decryptNoteFromBackend(props.content, props.noteId)
+    // 【改进】使用前端 useClientCrypto 进行解密
+    const plaintext = await decryptClientContent(props.content, dek.value)
     decryptedContent.value = plaintext
     renderContent(plaintext)
+    console.log('[Vault] Content decrypted successfully in viewer')
   } catch (e) {
-    console.error('Decryption error:', e)
-    decryptError.value = '解密失败，请重试'
+    console.error('[Vault] Decryption error in viewer:', e)
+    decryptError.value = '解密失败: ' + e.message
     decryptedContent.value = ''
   } finally {
     isDecrypting.value = false

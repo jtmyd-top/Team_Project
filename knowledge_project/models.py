@@ -684,8 +684,29 @@ def generate_initial_avatar(text, size=128):
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
-        Profile.objects.create(user=instance)
+        profile = Profile.objects.create(user=instance)
         fetch_avatar(instance)  # 自动拉取头像
+
+        # ==================== 【新增】自动初始化保密柜 ====================
+        try:
+            from knowledge_project.utils.vault_crypto import VaultEncryption
+
+            # 生成随机 DEK（数据加密密钥）
+            dek = VaultEncryption.generate_dek()
+
+            # 用 KEK（密钥加密密钥）加密 DEK
+            encrypted_dek_b64, iv_b64 = VaultEncryption.encrypt_dek(dek)
+
+            # 保存到 Profile
+            profile.encrypted_vault_key = encrypted_dek_b64
+            profile.vault_key_iv = iv_b64
+            profile.vault_initialized = True
+            profile.save(update_fields=['encrypted_vault_key', 'vault_key_iv', 'vault_initialized'])
+
+            logger.info(f"[Vault] Auto-initialized vault for new user: {instance.username}")
+        except Exception as e:
+            logger.error(f"[Vault] Failed to auto-initialize vault for user {instance.username}: {e}")
+            # 继续执行，vault 初始化失败不应该阻止用户创建
 
 
 @receiver(post_save, sender=Note)

@@ -1825,9 +1825,6 @@ def delete_note_api(request, note_id):
         logger.error(f"为用户 {user.id} 删除笔记 {note_id} 时出错: {e}", exc_info=True)
         return JsonResponse({'error': '删除笔记时发生内部错误'}, status=500)
 
-
-@login_required
-@require_http_methods(["POST"])
 def toggle_secret_api(request, note_id):
     """
     切换笔记的保密状态（is_secret 标记）。

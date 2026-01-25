@@ -43,7 +43,7 @@
               </button>
 
               <span class="note-info" v-if="currentNoteData.updated_at">
-                <span class="info-item title">{{ currentNoteData.title || '无标题' }}</span>
+                <span class="info-item title">{{ displayTitle }}</span>
                 <span v-if="hasUnsavedChanges && viewMode === 'edit'" class="unsaved-indicator" title="有未保存的更改">
                   <i class="fas fa-circle"></i> 未保存
                 </span>
@@ -122,7 +122,7 @@
             </div>
 
             <!-- 阅读模式 -->
-            <div v-show="!isLoadingNote && viewMode === 'read'" class="viewer-wrapper">
+            <div v-if="!isLoadingNote && viewMode === 'read'" class="viewer-wrapper">
 
               <NoteShadowViewer
                 :content="currentNoteData.content"
@@ -134,7 +134,7 @@
             </div>
 
             <!-- 编辑模式 -->
-            <div v-show="!isLoadingNote && viewMode === 'edit'" class="editor-wrapper">
+            <div v-if="!isLoadingNote && viewMode === 'edit'" class="editor-wrapper">
               <NoteEditor
                 :key="currentNoteId"
                 ref="noteEditorRef"
@@ -182,6 +182,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useSidebarStore } from '@/stores/sidebar'
+import { useVaultStore } from '@/stores/vault'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -196,9 +197,11 @@ import VaultSetupDialog from '@/components/common/VaultSetupDialog.vue'
 
 // Store
 const sidebarStore = useSidebarStore()
+const vaultStore = useVaultStore()
 
 // Vault encryption
-const { tryRecoverKeyFromSession } = useVaultEncryption()
+const { isKeyValid, dek, tryRecoverKeyFromSession } = useVaultEncryption()
+const { decryptContent } = useClientCrypto()
 
 // 状态
 const currentNoteId = ref(null)
@@ -207,6 +210,7 @@ const isSaving = ref(false)
 const hasUnsavedChanges = ref(false)
 const isLoadingNote = ref(false) // 笔记加载中标志，用于显示骨架屏
 const noteEditorRef = ref(null)
+const decryptedTitle = ref('') // 存储解密后的标题
 
 // 当前笔记数据
 const currentNoteData = ref({
@@ -229,6 +233,22 @@ const showBreadcrumb = computed(() => {
 const isDarkMode = computed(() => {
   // 这里可以从主题 store 获取，暂时根据系统偏好
   return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+})
+
+// 计算属性：显示的标题（已解密或原标题）
+const displayTitle = computed(() => {
+  if (!currentNoteData.value.is_secret) {
+    // 普通笔记，直接返回标题
+    return currentNoteData.value.title || '无标题'
+  }
+
+  // 加密笔记，返回解密后的标题
+  if (decryptedTitle.value) {
+    return decryptedTitle.value
+  }
+
+  // 如果还没解密，返回原标题（可能是密文）
+  return currentNoteData.value.title || '无标题'
 })
 
 // 方法
@@ -273,6 +293,39 @@ function formatDate(dateString) {
   })
 }
 
+// 解密笔记标题
+async function decryptNoteTitle() {
+  // 如果不是加密笔记，不需要解密
+  if (!currentNoteData.value.is_secret) {
+    decryptedTitle.value = ''
+    return
+  }
+
+  // 如果没有标题，不需要解密
+  if (!currentNoteData.value.title) {
+    decryptedTitle.value = ''
+    return
+  }
+
+  // 如果没有有效的 DEK，不能解密
+  if (!isKeyValid.value || !dek.value) {
+    console.warn('[Vault] Cannot decrypt title: no valid DEK')
+    decryptedTitle.value = ''
+    return
+  }
+
+  try {
+    // 尝试解密标题
+    const plainTitle = decryptContent(currentNoteData.value.title, dek.value)
+    decryptedTitle.value = plainTitle
+    console.log('[Vault] Title decrypted successfully in KnowledgeList')
+  } catch (e) {
+    // 标题可能是明文（旧笔记），保留原值
+    console.warn('[Vault] Failed to decrypt title (might be plaintext):', e.message)
+    decryptedTitle.value = ''  // 让 displayTitle computed 显示原标题
+  }
+}
+
 // 选中笔记
 async function handleNoteSelect(noteId) {
   // 如果有未保存的更改，提示保存
@@ -309,6 +362,13 @@ async function handleNoteSelect(noteId) {
     viewMode.value = 'edit'
   } else {
     viewMode.value = 'read'
+  }
+
+  // 如果是加密笔记且已解锁，解密标题
+  if (currentNoteData.value.is_secret && isKeyValid.value) {
+    await decryptNoteTitle()
+  } else {
+    decryptedTitle.value = ''
   }
 
   isLoadingNote.value = false
@@ -728,6 +788,17 @@ watch(() => currentNoteData.value.title, (newTitle, oldTitle) => {
   }
 })
 
+// 监听保险柜解锁状态：当 DEK 恢复或验证成功时，自动解密标题
+watch(() => isKeyValid.value, async (valid) => {
+  if (valid && currentNoteData.value.is_secret && currentNoteData.value.title && !decryptedTitle.value) {
+    // 密钥刚刚变有效，解密当前笔记的标题
+    await decryptNoteTitle()
+  } else if (!valid && currentNoteData.value.is_secret) {
+    // 密钥失效，清除解密的标题
+    decryptedTitle.value = ''
+  }
+})
+
 // 当笔记加载完成后，记录原始标题
 watch(() => currentNoteId.value, () => {
   // 使用 nextTick 确保数据已更新
@@ -738,6 +809,9 @@ watch(() => currentNoteId.value, () => {
 
 // 初始化
 onMounted(async () => {
+  // 懒加载初始化保密柜（如果未初始化的话）
+  await vaultStore.checkAndInitVault()
+
   // 添加页面离开前的防呆提醒
   window.addEventListener('beforeunload', handleBeforeUnload)
 

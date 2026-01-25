@@ -286,10 +286,21 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSidebarStore } from '@/stores/sidebar'
+import { useVaultStore } from '@/stores/vault'
+import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 import FolderTreeItem from '@/components/common/FolderTreeItem.vue'
 import NoteListItem from '@/components/common/NoteListItem.vue'
 import NoteContextMenu from '@/components/common/NoteContextMenu.vue'
 import MoveToDialog from '@/components/common/MoveToDialog.vue'
+
+// ==================== Stores & Composables ====================
+const sidebarStore = useSidebarStore()
+const vaultStore = useVaultStore()
+
+// 【关键】在组件顶部统一调用一次，确保整个组件使用同一个实例
+const { dek, isKeyValid, verify2FAAndGetKey } = useVaultEncryption()
+const { encryptContent } = useClientCrypto()
 
 const props = defineProps({
   activeNoteId: {
@@ -299,8 +310,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['note-select', 'note-create'])
-
-const sidebarStore = useSidebarStore()
 
 // 响应式检测
 const isMobile = ref(false)
@@ -501,10 +510,286 @@ async function handleNoteRename(note, newTitle) {
   }
 }
 
+/**
+ * 加密笔记内容并保存
+ * @param {Object} note - 笔记对象
+ * @param {string} dekValue - DEK（数据加密密钥，Base64编码）
+ */
+async function performEncryption(note, dekValue) {
+  if (!note || !note.id) {
+    throw new Error('笔记对象无效')
+  }
+
+  if (!dekValue || typeof dekValue !== 'string' || dekValue.trim() === '') {
+    throw new Error('DEK 不可用或格式无效: ' + (dekValue ? '格式错误' : '为空'))
+  }
+
+  try {
+    // 【关键】获取笔记的完整数据
+    let noteData = note
+
+    // 如果缺少 content 或 title，需要先加载完整的笔记数据
+    if (!noteData.content || !noteData.title) {
+      console.log(`[Vault] Loading complete note data for ID: ${note.id}`)
+      const fetchResp = await fetch(`/api/notes/${note.id}/`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!fetchResp.ok) {
+        throw new Error('加载笔记数据失败')
+      }
+
+      noteData = await fetchResp.json()
+    }
+
+    let plainTitle = noteData.title || ''
+    let plainContent = noteData.content || ''
+
+    // 验证内容
+    if (!plainContent || plainContent.trim() === '') {
+      throw new Error('笔记内容为空，无法加密')
+    }
+
+    if (!plainTitle || plainTitle.trim() === '') {
+      throw new Error('笔记标题为空，无法加密')
+    }
+
+    console.log('[Vault] Ready to encrypt', {
+      noteId: note.id,
+      plainTitleLength: plainTitle.length,
+      plainContentLength: plainContent.length,
+      dekLength: dekValue.length
+    })
+
+    // 【新增】同时加密 title 和 content
+    const encryptedTitle = encryptContent(plainTitle, dekValue)
+    const encryptedContent = encryptContent(plainContent, dekValue)
+
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+
+    // 保存加密后的 title 和 content
+    const updateResponse = await fetch(`/api/notes/${note.id}/`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken
+      },
+      body: JSON.stringify({
+        title: encryptedTitle,      // 【新增】也加密 title
+        content: encryptedContent
+      })
+    })
+
+    if (!updateResponse.ok) {
+      const errorData = await updateResponse.json()
+      throw new Error('保存加密内容失败: ' + (errorData.message || '后端错误'))
+    }
+
+    console.log('[Vault] Both title and content encrypted successfully', {
+      plainTitleLength: plainTitle.length,
+      encryptedTitleLength: encryptedTitle.length,
+      plainContentLength: plainContent.length,
+      encryptedContentLength: encryptedContent.length
+    })
+  } catch (e) {
+    console.error('[Vault] performEncryption error:', e)
+    throw e
+  }
+}
+
+/**
+ * 获取可用的 DEK
+ * 优先从 vaultStore 获取，然后从 useVaultEncryption 获取
+ */
+function getAvailableDEK() {
+  // 优先使用 vaultStore 中的 DEK（因为验证成功后会更新这里）
+  if (vaultStore.dek && vaultStore.keyExpireTime && vaultStore.keyExpireTime > Date.now()) {
+    console.log('[Vault] Using DEK from vaultStore')
+    return vaultStore.dek
+  }
+
+  // 其次使用 composable 中的 DEK
+  if (dek.value && isKeyValid.value) {
+    console.log('[Vault] Using DEK from useVaultEncryption')
+    return dek.value
+  }
+
+  return null
+}
+
+/**
+ * 等待 DEK 被更新
+ * 验证成功后，DEK 会被更新，这个函数会等待其更新
+ * @returns {Promise<string>} DEK 值或 null
+ */
+async function waitForDEK(timeout = 5000) {
+  return new Promise((resolve) => {
+    // 检查 vaultStore 中的 DEK（优先）
+    if (vaultStore.dek && vaultStore.keyExpireTime && vaultStore.keyExpireTime > Date.now()) {
+      resolve(vaultStore.dek)
+      return
+    }
+
+    // 检查 useVaultEncryption 中的 DEK
+    if (dek.value && isKeyValid.value) {
+      resolve(dek.value)
+      return
+    }
+
+    // 定期检查，直到 DEK 被更新
+    const checkInterval = setInterval(() => {
+      const availableDEK = getAvailableDEK()
+      if (availableDEK) {
+        clearInterval(checkInterval)
+        clearTimeout(timeoutHandle)
+        resolve(availableDEK)
+      }
+    }, 100)
+
+    // 超时保护
+    const timeoutHandle = setTimeout(() => {
+      clearInterval(checkInterval)
+      resolve(null) // 超时，返回 null
+    }, timeout)
+  })
+}
+
+/**
+ * 撤销 is_secret 标志
+ */
+async function revertSecretFlag(note) {
+  try {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+    await fetch(`/api/notes/${note.id}/toggle-secret/`, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': csrfToken,
+        'Content-Type': 'application/json'
+      }
+    })
+  } catch (e) {
+    console.warn('[Vault] Failed to revert is_secret flag:', e)
+  }
+}
+
+/**
+ * 刷新保密柜数据
+ */
+async function refreshVaultData(note) {
+  if (sidebarStore.activeModule === 'all-notes') {
+    // 从全部笔记列表中移除
+    const index = sidebarStore.currentNotes.findIndex(n => n.id === note.id)
+    if (index > -1) {
+      sidebarStore.currentNotes.splice(index, 1)
+    }
+  } else if (sidebarStore.activeModule === 'vault') {
+    // 在保密柜中，刷新列表
+    await sidebarStore.loadModuleData()
+  } else {
+    // 其他情况，重新加载数据
+    await sidebarStore.loadModuleData()
+  }
+}
+
+/**
+ * 执行加密并保存
+ * 包含两个分支的智能逻辑
+ */
+async function executeEncryptAndSave(note) {
+  const availableDEK = getAvailableDEK()
+
+  if (availableDEK) {
+    // ========== 分支 A: Smart Pass（已解锁）==========
+    // DEK 已有效，直接加密，无需弹窗
+    console.log('[Vault] Branch A: Smart Pass - Using existing key')
+    try {
+      await performEncryption(note, availableDEK)
+      ElMessage.success('加入保密柜成功！内容已加密')
+      // 刷新数据显示
+      await refreshVaultData(note)
+    } catch (e) {
+      console.error('[Vault] Smart Pass encryption failed:', e)
+      ElMessage.error('加密失败: ' + e.message)
+      // 撤销 is_secret 标志
+      await revertSecretFlag(note)
+    }
+  } else {
+    // ========== 分支 B: Require Auth（未解锁）==========
+    // 没有有效 DEK，需要弹窗验证
+    console.log('[Vault] Branch B: Require Auth - Need 2FA verification')
+
+    // 撤销 is_secret 标志，因为加密还未完成
+    await revertSecretFlag(note)
+
+    // 定义待处理的加密操作
+    const encryptOperation = async () => {
+      // 等待 vaultStore 或 useVaultEncryption 中的 DEK 被更新
+      // （验证成功后会触发 'vault-verification-success' 事件）
+      const dekForEncryption = await waitForDEK()
+
+      if (!dekForEncryption) {
+        throw new Error('未能获取有效的加密密钥')
+      }
+
+      // 再次切换 is_secret（因为刚才撤销了）
+      const retoggleResp = await fetch(`/api/notes/${note.id}/toggle-secret/`, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!retoggleResp.ok) {
+        throw new Error('重新标记为保密笔记失败')
+      }
+
+      // 执行加密
+      await performEncryption(note, dekForEncryption)
+    }
+
+    // 保存待处理操作到 vaultStore
+    vaultStore.setPendingOperation(note.id, note.content, encryptOperation)
+
+    // 弹出 2FA 验证对话框
+    sidebarStore.vaultVerifyDialogVisible = true
+
+    // 监听验证成功事件
+    const handleVerifySuccess = async () => {
+      try {
+        await vaultStore.executePendingOperation()
+        ElMessage.success('加入保密柜成功！内容已加密')
+        // 刷新数据
+        await refreshVaultData(note)
+      } catch (e) {
+        console.error('[Vault] Failed to execute pending operation:', e)
+        ElMessage.error('加密失败: ' + e.message)
+        vaultStore.clearPendingOperation()
+        // 尝试撤销 is_secret 标志
+        await revertSecretFlag(note)
+      }
+      // 移除监听
+      window.removeEventListener('vault-verification-success', handleVerifySuccess)
+    }
+
+    window.addEventListener('vault-verification-success', handleVerifySuccess, { once: true })
+  }
+}
+
+/**
+ * 处理笔记保密状态切换
+ * 智能逻辑：
+ * - 分支 A（Smart Pass）：如果已有有效的 DEK，直接加密，无需弹窗
+ * - 分支 B（Require Auth）：如果没有有效 DEK，先弹窗验证，验证后自动继续加密
+ */
 async function handleToggleSecret(note) {
   try {
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
+    // 1. 先切换 is_secret 标记
     const response = await fetch(`/api/notes/${note.id}/toggle-secret/`, {
       method: 'POST',
       headers: {
@@ -513,60 +798,55 @@ async function handleToggleSecret(note) {
       }
     })
 
-    if (!response.ok) throw new Error('切换失败')
+    if (!response.ok) {
+      throw new Error('切换失败')
+    }
 
     const data = await response.json()
-    if (data.status === 'success') {
-      const actionText = data.is_secret ? '加入保密柜' : '移出保密柜'
 
-      // 如果笔记是公开的且被加入保险柜，自动取消分享
-      if (data.is_secret && !data.is_public) {
-        ElMessage.success(`${actionText}成功！已自动取消分享`)
+    if (!data.is_secret) {
+      // ========== 移出保密柜 ==========
+      // 移出保密柜时，直接显示成功消息
+      if (data.is_secret === false && !data.is_public) {
+        ElMessage.success('移出保密柜成功！已自动取消分享')
       } else {
-        ElMessage.success(`${actionText}成功`)
+        ElMessage.success('移出保密柜成功')
       }
 
-      // 刷新不同模块的数据
-      if (sidebarStore.activeModule === 'all-notes' && data.is_secret) {
-        // 如果加入保险柜，从全部笔记列表中移除
-        const index = sidebarStore.currentNotes.findIndex(n => n.id === note.id)
-        if (index > -1) {
-          sidebarStore.currentNotes.splice(index, 1)
-        }
-      } else if (sidebarStore.activeModule === 'vault' && !data.is_secret) {
-        // 如果移出保险柜，从保险柜列表中移除
+      // 刷新数据
+      if (sidebarStore.activeModule === 'vault') {
+        // 从保密柜列表中移除
         const index = sidebarStore.currentNotes.findIndex(n => n.id === note.id)
         if (index > -1) {
           sidebarStore.currentNotes.splice(index, 1)
         }
       } else {
-        // 其他情况，重新加载数据
         await sidebarStore.loadModuleData()
       }
-
-      // 如果当前正在编辑该笔记，更新其状态
-      if (activeNoteId === note.id) {
-        try {
-          // 派发事件通知 KnowledgeList 更新笔记状态
-          // 添加 try-catch 保护，防止组件卸载导致的错误
-          window.dispatchEvent(new CustomEvent('note-secret-toggled', {
-            detail: {
-              noteId: note.id,
-              isSecret: data.is_secret,
-              isPublic: data.is_public
-            }
-          }))
-        } catch (e) {
-          console.warn('Failed to dispatch note-secret-toggled event:', e)
-          // 即使事件派发失败，也不影响主流程
-        }
-      }
     } else {
-      throw new Error(data.message || '操作失败')
+      // ========== 加入保密柜 ==========
+      // 需要加密内容，执行智能流程
+      await executeEncryptAndSave(note)
     }
-  } catch (e) {
-    console.error('切换保险柜失败:', e)
-    ElMessage.error('操作失败，请重试')
+
+    // 如果当前正在编辑该笔记，更新其状态
+    if (props.activeNoteId === note.id) {
+      try {
+        // 派发事件通知 KnowledgeList 更新笔记状态
+        window.dispatchEvent(new CustomEvent('note-secret-toggled', {
+          detail: {
+            noteId: note.id,
+            isSecret: data.is_secret,
+            isPublic: data.is_public
+          }
+        }))
+      } catch (e) {
+        console.warn('Failed to dispatch note-secret-toggled event:', e)
+      }
+    }
+  } catch (error) {
+    console.error('[Vault] Toggle secret failed:', error)
+    ElMessage.error(`操作失败: ${error.message}`)
   }
 }
 

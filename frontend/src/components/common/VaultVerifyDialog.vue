@@ -376,6 +376,15 @@ const handleVerify = async () => {
         expireTime: data.expire_time,
         remainingSeconds: data.remaining_seconds
       })
+
+      // 【新增】触发自定义事件，用于通知 SecondaryPanel 待处理的加密操作可以进行了
+      window.dispatchEvent(new CustomEvent('vault-verification-success', {
+        detail: {
+          dek: data.dek,  // 返回的 DEK
+          expireTime: data.expire_time
+        }
+      }))
+
       dialogVisible.value = false
     } else if (data.status === 'locked') {
       // 账户被锁定

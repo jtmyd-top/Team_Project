@@ -66,6 +66,7 @@ import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
 import { ElTag, ElIcon } from 'element-plus'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 
 const props = defineProps({
   modelValue: {
@@ -93,49 +94,64 @@ const editorElRef = ref(null)
 let editorInstance = null
 let isEditorReady = false
 
-// 获取加密状态
-const { isKeyValid, decryptNoteFromBackend } = useVaultEncryption()
+// 获取加密状态和解密工具
+const { isKeyValid, dek } = useVaultEncryption()
+const { decryptContent } = useClientCrypto()
 
 // 是否正在解密
 const isDecrypting = ref(false)
 const decryptError = ref('')
 
-/**
- * 计算属性：响应式解密后的内容
- *
- * 逻辑：
- * 1. 如果不是保密笔记，返回原内容
- * 2. 如果是保密笔记且已解锁，返回解密后的内容
- * 3. 如果是保密笔记且未解锁，返回原始加密内容（稍后会显示错误提示）
- */
-const displayTitle = computed(() => {
-  return props.modelValue.title || ''
-})
-
-const displayContent = computed(() => {
-  if (!props.isSecret) {
-    // 普通笔记，返回原内容
-    return props.modelValue.content || ''
-  }
-
-  if (isKeyValid.value) {
-    // 加密笔记已解锁，返回解密后的内容
-    // 这个值会被 watch 监听并设置到编辑器
-    return decryptedContent.value || props.modelValue.content
-  }
-
-  // 加密笔记未解锁，返回原内容（但模板会显示错误提示）
-  return props.modelValue.content || ''
-})
-
-// 存储解密后的内容
+// 存储解密后的标题和内容
+const decryptedTitle = ref('')
 const decryptedContent = ref('')
 
 /**
- * 解密加密笔记的内容
+ * 计算属性：响应式解密后的标题
+ */
+const displayTitle = computed(() => {
+  if (!props.isSecret) {
+    return props.modelValue.title || ''
+  }
+
+  if (isKeyValid.value && decryptedTitle.value) {
+    return decryptedTitle.value
+  }
+
+  return props.modelValue.title || ''
+})
+
+/**
+ * 计算属性：响应式解密后的内容
+ */
+const displayContent = computed(() => {
+  if (!props.isSecret) {
+    return props.modelValue.content || ''
+  }
+
+  if (isKeyValid.value && decryptedContent.value) {
+    return decryptedContent.value
+  }
+
+  return props.modelValue.content || ''
+})
+
+/**
+ * 解密加密笔记的标题和内容
  */
 async function decryptNoteContent() {
-  if (!props.isSecret || !props.modelValue.content || !props.modelValue.id) {
+  if (!props.isSecret) {
+    return
+  }
+
+  // 检查是否有必要的信息
+  if (!props.modelValue.id || (!props.modelValue.title && !props.modelValue.content)) {
+    return
+  }
+
+  // 如果没有有效的 DEK，不能解密
+  if (!isKeyValid.value || !dek.value) {
+    decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
     return
   }
 
@@ -143,11 +159,31 @@ async function decryptNoteContent() {
   decryptError.value = ''
 
   try {
-    const plaintext = await decryptNoteFromBackend(props.modelValue.content, props.modelValue.id)
-    decryptedContent.value = plaintext
+    // 【新增】同时解密 title 和 content
+    if (props.modelValue.title) {
+      try {
+        decryptedTitle.value = await decryptContent(props.modelValue.title, dek.value)
+        console.log('[Vault] Title decrypted successfully')
+      } catch (e) {
+        console.warn('[Vault] Failed to decrypt title (might be plaintext):', e)
+        // title 可能是明文，不是错误
+        decryptedTitle.value = props.modelValue.title
+      }
+    }
+
+    if (props.modelValue.content) {
+      try {
+        decryptedContent.value = await decryptContent(props.modelValue.content, dek.value)
+        console.log('[Vault] Content decrypted successfully')
+      } catch (e) {
+        console.error('[Vault] Failed to decrypt content:', e)
+        decryptError.value = '解密失败，无法编辑此加密笔记'
+        throw e
+      }
+    }
   } catch (e) {
-    console.error('Decryption error in editor:', e)
-    decryptError.value = '解密失败，无法编辑此加密笔记'
+    console.error('[Vault] Decryption error in editor:', e)
+    decryptError.value = '解密失败: ' + e.message
   } finally {
     isDecrypting.value = false
   }

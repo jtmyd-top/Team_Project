@@ -9,6 +9,7 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
+import { useVaultStore } from '@/stores/vault'
 
 export function useVaultEncryption() {
   // ==================== State ====================
@@ -22,6 +23,9 @@ export function useVaultEncryption() {
   // 2FA 验证状态
   const verificationPending = ref(false)
   const verificationError = ref(null)
+
+  // 获取 vaultStore 实例
+  const vaultStore = useVaultStore()
 
   // ==================== 密钥管理 ====================
 
@@ -44,6 +48,9 @@ export function useVaultEncryption() {
         if (data.dek) {
           dek.value = data.dek
           keyExpireTime.value = Date.now() + (data.expire_time * 1000)
+          // 【新增】同时更新 vaultStore
+          vaultStore.setDEK(data.dek, keyExpireTime.value)
+          console.log('[Vault] Key recovered from session')
           return true
         }
       }
@@ -89,8 +96,12 @@ export function useVaultEncryption() {
 
       // 验证成功，保存 DEK
       if (data.dek) {
+        const expireTime = Date.now() + (data.expire_time * 1000)
         dek.value = data.dek
-        keyExpireTime.value = Date.now() + (data.expire_time * 1000)
+        keyExpireTime.value = expireTime
+        // 【新增】同时更新 vaultStore，确保跨组件数据一致
+        vaultStore.setDEK(data.dek, expireTime)
+        console.log('[Vault] 2FA verified, DEK updated in both composable and store')
       }
 
       return {
@@ -121,7 +132,6 @@ export function useVaultEncryption() {
 
   // 所有加密解密现在在前端进行，使用 useClientCrypto.js
   // encryptNoteForStorage 和 decryptNoteFromBackend 已废弃
-  }
 
   /**
    * Base64 转 Uint8Array
