@@ -546,14 +546,20 @@ async function handleToggleSecret(note) {
 
       // 如果当前正在编辑该笔记，更新其状态
       if (activeNoteId.value === note.id) {
-        // 发射事件通知 KnowledgeList 更新笔记状态
-        window.dispatchEvent(new CustomEvent('note-secret-toggled', {
-          detail: {
-            noteId: note.id,
-            isSecret: data.is_secret,
-            isPublic: data.is_public
-          }
-        }))
+        try {
+          // 派发事件通知 KnowledgeList 更新笔记状态
+          // 添加 try-catch 保护，防止组件卸载导致的错误
+          window.dispatchEvent(new CustomEvent('note-secret-toggled', {
+            detail: {
+              noteId: note.id,
+              isSecret: data.is_secret,
+              isPublic: data.is_public
+            }
+          }))
+        } catch (e) {
+          console.warn('Failed to dispatch note-secret-toggled event:', e)
+          // 即使事件派发失败，也不影响主流程
+        }
       }
     } else {
       throw new Error(data.message || '操作失败')

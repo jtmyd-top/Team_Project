@@ -740,17 +740,36 @@ function handleBeforeUnload(e) {
 
 // 处理笔记保密状态变化事件
 function handleNoteSecretToggled(event) {
-  const { noteId, isSecret, isPublic } = event.detail
+  try {
+    // 检查组件是否仍然存在
+    if (!event || !event.detail) {
+      console.warn('Event detail is missing')
+      return
+    }
 
-  // 如果当前编辑的笔记被切换了保密状态，更新其状态
-  if (currentNoteId.value === noteId) {
+    const { noteId, isSecret, isPublic } = event.detail
+
+    // 安全检查：确保当前笔记 ID 存在
+    if (!currentNoteId.value || currentNoteId.value !== noteId) {
+      return
+    }
+
+    // 安全检查：确保 currentNoteData 存在
+    if (!currentNoteData.value) {
+      return
+    }
+
+    // 更新笔记状态
     currentNoteData.value.is_secret = isSecret
     currentNoteData.value.is_public = isPublic
 
-    // 如果笔记被加入保险柜且被取消分享，显示提示
+    // 显示提示信息
     if (isSecret) {
       ElMessage.info('笔记已加入保密柜')
     }
+  } catch (e) {
+    // 组件卸载时，静默处理错误
+    console.warn('Error handling note secret toggle:', e)
   }
 }
 </script>
