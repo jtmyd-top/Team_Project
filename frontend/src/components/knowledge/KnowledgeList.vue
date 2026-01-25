@@ -128,6 +128,8 @@
                 :content="currentNoteData.content"
                 :toc="currentNoteData.toc"
                 :is-dark="isDarkMode"
+                :is-secret="currentNoteData.is_secret"
+                :note-id="currentNoteData.id"
               />
             </div>
 
@@ -138,6 +140,7 @@
                 ref="noteEditorRef"
                 v-model="currentNoteData"
                 :is-light-theme="!isDarkMode"
+                :is-secret="currentNoteData.is_secret"
                 @change="handleEditorChange"
                 @save="handleSave"
               />
@@ -179,6 +182,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useSidebarStore } from '@/stores/sidebar'
+import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PrimarySidebar from '@/components/layout/PrimarySidebar.vue'
 import SecondaryPanel from '@/components/layout/SecondaryPanel.vue'
@@ -191,6 +196,9 @@ import VaultSetupDialog from '@/components/common/VaultSetupDialog.vue'
 
 // Store
 const sidebarStore = useSidebarStore()
+
+// Vault encryption
+const { tryRecoverKeyFromSession } = useVaultEncryption()
 
 // 状态
 const currentNoteId = ref(null)
@@ -502,6 +510,46 @@ async function handleSave() {
       contentToSave = noteEditorRef.value.getContent()
     }
 
+    // 如果是加密笔记，在前端进行加密
+    if (currentNoteData.value.is_secret) {
+      try {
+        // 获取加密使用的 composables
+        const { dek } = useVaultEncryption()
+
+        // 检查是否有加密密钥（需要完成2FA验证）
+        console.log('[Vault] Checking DEK for encryption...', {
+          hasDek: !!dek.value,
+          dekLength: dek.value ? dek.value.length : 0,
+          dekSample: dek.value ? dek.value.substring(0, 20) : 'N/A'
+        })
+
+        if (!dek.value) {
+          console.error('[Vault] DEK is empty, 2FA verification may have failed')
+          ElMessage.error('请先完成 2FA 验证以启用加密')
+          isSaving.value = false
+          return
+        }
+
+        // 前端加密：使用 crypto-js 在浏览器中加密
+        const { encryptContent } = useClientCrypto()
+
+        console.log('[Vault] Starting encryption with DEK...')
+        contentToSave = encryptContent(contentToSave, dek.value)
+
+        console.log('[Vault] Content encrypted in browser for secure note', {
+          originalLength: currentNoteData.value.content.length,
+          encryptedLength: contentToSave.length,
+          encryptedSample: contentToSave.substring(0, 30)
+        })
+      } catch (e) {
+        console.error('[Vault] 前端加密失败:', e)
+        ElMessage.error('加密失败: ' + e.message)
+        isSaving.value = false
+        return
+      }
+    }
+
+    // 发送笔记到后端
     const response = await fetch(`/api/notes/${currentNoteId.value}/`, {
       method: 'PATCH',
       headers: {
@@ -695,6 +743,12 @@ onMounted(async () => {
 
   // 监听笔记保密状态变化事件
   window.addEventListener('note-secret-toggled', handleNoteSecretToggled)
+
+  // 尝试从 Redis 恢复加密密钥（如果用户已验证过）
+  const keyRecovered = await tryRecoverKeyFromSession()
+  if (keyRecovered) {
+    console.log('Vault key recovered from session')
+  }
 
   // 从 URL 恢复状态
   // initFromUrl 会在 my-space 的收件箱/文件夹视图时自动加载笔记数据

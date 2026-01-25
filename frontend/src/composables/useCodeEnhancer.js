@@ -79,16 +79,23 @@ async function copyToClipboard(text) {
  * @returns {number} - 行数
  */
 function countLines(codeEl) {
-  const textContent = codeEl.textContent
-  const actualNewLines = textContent.split('\n')
+  if (!codeEl) return 0
 
-  if (actualNewLines.length > 1) {
-    return actualNewLines.length
+  try {
+    const textContent = codeEl.textContent
+    const actualNewLines = textContent.split('\n')
+
+    if (actualNewLines.length > 1) {
+      return actualNewLines.length
+    }
+
+    // TinyMCE 使用 <br> 标签的情况
+    const brCount = (codeEl.innerHTML && codeEl.innerHTML.match(/<br\s*\/?>/gi) || []).length
+    return brCount + 1
+  } catch (e) {
+    console.warn('Error counting lines:', e)
+    return 0
   }
-
-  // TinyMCE 使用 <br> 标签的情况
-  const brCount = (codeEl.innerHTML.match(/<br\s*\/?>/gi) || []).length
-  return brCount + 1
 }
 
 /**
@@ -98,9 +105,18 @@ function countLines(codeEl) {
  * @returns {HTMLButtonElement}
  */
 function createCopyButton(codeEl, options) {
+  if (!codeEl) return null
+
   const copyBtn = document.createElement('button')
   copyBtn.className = 'copy-btn'
-  copyBtn.innerHTML = ICONS.copy
+
+  try {
+    copyBtn.innerHTML = ICONS.copy
+  } catch (e) {
+    console.warn('Error setting copy button innerHTML:', e)
+    return null
+  }
+
   copyBtn.setAttribute('aria-label', '复制代码')
 
   copyBtn.addEventListener('click', async (e) => {
@@ -112,11 +128,21 @@ function createCopyButton(codeEl, options) {
 
     if (success) {
       copyBtn.classList.add('copied')
-      copyBtn.innerHTML = ICONS.copied
+      try {
+        copyBtn.innerHTML = ICONS.copied
+      } catch (err) {
+        console.warn('Error updating copy button:', err)
+      }
 
       setTimeout(() => {
-        copyBtn.classList.remove('copied')
-        copyBtn.innerHTML = ICONS.copy
+        try {
+          if (copyBtn && copyBtn.classList) {
+            copyBtn.classList.remove('copied')
+            copyBtn.innerHTML = ICONS.copy
+          }
+        } catch (err) {
+          console.warn('Error resetting copy button:', err)
+        }
       }, options.copiedDuration)
     }
   })
@@ -131,14 +157,29 @@ function createCopyButton(codeEl, options) {
  * @returns {HTMLButtonElement}
  */
 function createCollapseButton(pre, options) {
+  if (!pre) return null
+
   const collapseBtn = document.createElement('button')
   collapseBtn.className = 'collapse-btn'
-  collapseBtn.innerHTML = ICONS.expand
+
+  try {
+    collapseBtn.innerHTML = ICONS.expand
+  } catch (e) {
+    console.warn('Error setting collapse button innerHTML:', e)
+    return null
+  }
+
   collapseBtn.setAttribute('aria-label', '展开代码')
 
   collapseBtn.addEventListener('click', (e) => {
     e.preventDefault()
     e.stopPropagation()
+
+    // 确保 pre 仍在 DOM 中
+    if (!pre || !pre.parentNode) {
+      console.warn('pre element is no longer in DOM')
+      return
+    }
 
     const isCollapsed = pre.classList.contains(options.collapsedClass)
     if (isCollapsed) {
@@ -159,42 +200,54 @@ function createCollapseButton(pre, options) {
  * @param {Object} options - 配置选项
  */
 function enhanceCodeBlock(pre, options) {
+  // 基础检查
+  if (!pre) return
+  if (!pre.parentNode) return  // 检查元素是否仍在 DOM 中
+
   // 跳过已经处理过的代码块
   if (pre.classList.contains(options.enhancedClass)) return
 
-  // 获取代码元素或使用 pre 本身
-  let codeEl = pre.querySelector('code')
-  if (!codeEl) {
-    // 如果没有 code 标签，创建一个包裹 pre 的内容
-    const originalContent = pre.innerHTML
-    pre.innerHTML = `<code>${originalContent}</code>`
-    codeEl = pre.querySelector('code')
-  }
-
-  if (!codeEl) return
-
-  // 添加增强标记类名
-  pre.classList.add(options.enhancedClass)
-
-  // 计算行数
-  const lineCount = countLines(codeEl)
-
-  // 超过阈值添加折叠功能
-  if (lineCount > options.collapseThreshold) {
-    pre.classList.add(options.longCodeClass)
-    if (options.defaultCollapsed) {
-      pre.classList.add(options.collapsedClass)
+  try {
+    // 获取代码元素或使用 pre 本身
+    let codeEl = pre.querySelector('code')
+    if (!codeEl) {
+      // 如果没有 code 标签，创建一个包裹 pre 的内容
+      const originalContent = pre.innerHTML
+      pre.innerHTML = `<code>${originalContent}</code>`
+      codeEl = pre.querySelector('code')
     }
-  }
 
-  // 添加复制按钮
-  const copyBtn = createCopyButton(codeEl, options)
-  pre.appendChild(copyBtn)
+    if (!codeEl) return
 
-  // 添加折叠按钮（超过阈值的代码块）
-  if (lineCount > options.collapseThreshold) {
-    const collapseBtn = createCollapseButton(pre, options)
-    pre.appendChild(collapseBtn)
+    // 添加增强标记类名
+    pre.classList.add(options.enhancedClass)
+
+    // 计算行数
+    const lineCount = countLines(codeEl)
+
+    // 超过阈值添加折叠功能
+    if (lineCount > options.collapseThreshold) {
+      pre.classList.add(options.longCodeClass)
+      if (options.defaultCollapsed) {
+        pre.classList.add(options.collapsedClass)
+      }
+    }
+
+    // 添加复制按钮
+    const copyBtn = createCopyButton(codeEl, options)
+    if (copyBtn && pre.parentNode) {  // 确保按钮有效且 pre 仍在 DOM 中
+      pre.appendChild(copyBtn)
+    }
+
+    // 添加折叠按钮（超过阈值的代码块）
+    if (lineCount > options.collapseThreshold) {
+      const collapseBtn = createCollapseButton(pre, options)
+      if (collapseBtn && pre.parentNode) {  // 确保按钮有效且 pre 仍在 DOM 中
+        pre.appendChild(collapseBtn)
+      }
+    }
+  } catch (e) {
+    console.warn('Error enhancing code block:', e)
   }
 }
 
@@ -208,9 +261,22 @@ export function enhanceCodeBlocks(container, userOptions = {}) {
 
   const options = { ...DEFAULT_OPTIONS, ...userOptions }
 
-  // 支持普通 DOM 和 Shadow DOM
-  const codeBlocks = container.querySelectorAll('pre')
-  codeBlocks.forEach(pre => enhanceCodeBlock(pre, options))
+  try {
+    // 支持普通 DOM 和 Shadow DOM
+    const codeBlocks = container.querySelectorAll('pre')
+    if (!codeBlocks) return
+
+    codeBlocks.forEach(pre => {
+      try {
+        enhanceCodeBlock(pre, options)
+      } catch (e) {
+        console.warn('Error processing individual code block:', e)
+        // 继续处理其他代码块
+      }
+    })
+  } catch (e) {
+    console.warn('Error enhancing code blocks:', e)
+  }
 }
 
 /**

@@ -24,7 +24,7 @@ def build_folder_tree(folders, parent_id=None):
                 'parent_id': folder.parent_id,
                 'order': folder.order,
                 'children': children,
-                'notes_count': folder.notes_in_folder.filter(is_trashed=False).count()
+                'notes_count': folder.notes_in_folder.filter(is_trashed=False, is_secret=False).count()
             })
     return tree
 
@@ -44,9 +44,10 @@ def folder_list_api(request):
         
         # 获取收件箱笔记数量
         inbox_count = Note.objects.filter(
-            author=user, 
-            folder__isnull=True, 
-            is_trashed=False
+            author=user,
+            folder__isnull=True,
+            is_trashed=False,
+            is_secret=False  # 排除保密柜笔记
         ).count()
         
         return JsonResponse({
@@ -107,7 +108,7 @@ def folder_detail_api(request, folder_id):
             'name': folder.name,
             'parent_id': folder.parent_id,
             'order': folder.order,
-            'notes_count': folder.notes_in_folder.filter(is_trashed=False).count()
+            'notes_count': folder.notes_in_folder.filter(is_trashed=False, is_secret=False).count()
         })
 
     elif request.method == 'PUT':
@@ -164,7 +165,7 @@ def folder_notes_api(request, folder_id):
     folder = get_object_or_404(Folder, id=folder_id, owner=user)
 
     # 获取该文件夹下的直接笔记
-    notes = folder.notes_in_folder.filter(is_trashed=False).order_by('-updated_at')
+    notes = folder.notes_in_folder.filter(is_trashed=False, is_secret=False).order_by('-updated_at')
 
     # 获取该文件夹的直接子文件夹
     subfolders = Folder.objects.filter(
@@ -181,7 +182,7 @@ def folder_notes_api(request, folder_id):
         'subfolders': [{
             'id': sf.id,
             'name': sf.name,
-            'notes_count': sf.notes_in_folder.filter(is_trashed=False).count(),
+            'notes_count': sf.notes_in_folder.filter(is_trashed=False, is_secret=False).count(),
             'has_children': sf.children.exists()
         } for sf in subfolders],
         'notes': [{
@@ -268,18 +269,20 @@ def all_notes_flat_api(request):
     """获取所有笔记的扁平列表（用于全部笔记视图）"""
     try:
         user = request.user
-        
+
         notes = Note.objects.filter(
-            author=user, 
-            is_trashed=False
+            author=user,
+            is_trashed=False,
+            is_secret=False  # 排除保密柜笔记
         ).order_by('-created_at').select_related('folder')
-        
+
         return JsonResponse({
             'notes': [{
                 'id': note.id,
                 'title': note.title,
                 'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
                 'is_favorited': note.is_favorited,
+                'is_secret': note.is_secret,  # 添加 is_secret 字段
                 'folder': {
                     'id': note.folder.id,
                     'name': note.folder.name
@@ -299,9 +302,10 @@ def favorited_notes_api(request):
     user = request.user
     
     notes = Note.objects.filter(
-        author=user, 
+        author=user,
         is_favorited=True,
-        is_trashed=False
+        is_trashed=False,
+        is_secret=False  # 排除保密笔记
     ).order_by('-updated_at').select_related('folder')
     
     return JsonResponse({

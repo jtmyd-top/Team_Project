@@ -545,7 +545,7 @@ async function handleToggleSecret(note) {
       }
 
       // 如果当前正在编辑该笔记，更新其状态
-      if (activeNoteId.value === note.id) {
+      if (activeNoteId === note.id) {
         try {
           // 派发事件通知 KnowledgeList 更新笔记状态
           // 添加 try-catch 保护，防止组件卸载导致的错误

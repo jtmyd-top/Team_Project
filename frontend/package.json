@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "crypto-js": "^4.2.0",
     "dompurify": "^3.3.1",
     "element-plus": "^2.5.0",
     "pinia": "^2.1.7",

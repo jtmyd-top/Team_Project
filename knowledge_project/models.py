@@ -354,6 +354,25 @@ class Profile(models.Model):
         help_text="个人空间或作品被点赞时发送邮件通知"
     )
 
+    # ==================== 保险柜加密相关字段 ====================
+    encrypted_vault_key = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name="加密保险柜密钥",
+        help_text="Base64编码的AES加密DEK，用KEK加密"
+    )
+    vault_key_iv = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name="保险柜密钥IV",
+        help_text="加密DEK时的初始化向量（Base64编码）"
+    )
+    vault_initialized = models.BooleanField(
+        default=False,
+        verbose_name="保险柜已初始化",
+        help_text="用户是否已初始化保险柜"
+    )
+
     def clean_bio(self):
         """净化用户输入的富文本内容"""
         from nh3 import clean

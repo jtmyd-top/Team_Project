@@ -1,19 +1,71 @@
 <template>
   <div class="note-editor">
-    <input
-      :value="modelValue.title"
-      @input="updateTitle"
-      class="title-input"
-      placeholder="笔记标题"
-    />
-    <div class="editor-wrapper">
-      <textarea ref="editorElRef"></textarea>
+    <!-- 加密状态指示器 -->
+    <div v-if="isSecret" class="encryption-indicator">
+      <el-tag type="success">
+        <el-icon>
+          <Lock />
+        </el-icon>
+        加密笔记
+      </el-tag>
+      <span class="indicator-text">
+        {{ isKeyValid ? '已解锁，可编辑' : '未解锁，请先进行 2FA 验证' }}
+      </span>
+    </div>
+
+    <!-- 解密错误提示 -->
+    <div v-if="decryptError" class="decrypt-error">
+      <el-alert
+        :title="decryptError"
+        type="error"
+        closable
+        @close="decryptError = ''"
+        style="margin-bottom: 15px;"
+      />
+    </div>
+
+    <!-- 解密中的加载状态 -->
+    <div v-if="isSecret && isDecrypting" class="decrypting-prompt">
+      <el-alert
+        title="解密中"
+        type="info"
+        description="正在解密笔记内容，请稍候..."
+        :closable="false"
+        style="margin-bottom: 15px;"
+      />
+    </div>
+
+    <!-- 编辑器（已解密或非加密笔记时显示） -->
+    <div v-if="!isSecret || isKeyValid" class="editor-content">
+      <input
+        :value="displayTitle"
+        @input="updateTitle"
+        class="title-input"
+        placeholder="笔记标题"
+        :disabled="isSecret && isDecrypting"
+      />
+      <div class="editor-wrapper">
+        <textarea ref="editorElRef"></textarea>
+      </div>
+    </div>
+
+    <!-- 加密笔记未解锁提示 -->
+    <div v-else class="locked-prompt">
+      <el-alert
+        title="笔记已加密"
+        type="warning"
+        description="此笔记已加密。请完成 2FA 验证后编辑内容。"
+        :closable="false"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
+import { Lock } from '@element-plus/icons-vue'
+import { ElTag, ElIcon } from 'element-plus'
+import { useVaultEncryption } from '@/composables/useVaultEncryption'
 
 const props = defineProps({
   modelValue: {
@@ -28,6 +80,10 @@ const props = defineProps({
   csrfToken: {
     type: String,
     default: ''
+  },
+  isSecret: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -35,7 +91,67 @@ const emit = defineEmits(['update:modelValue', 'ready', 'change'])
 
 const editorElRef = ref(null)
 let editorInstance = null
-let isEditorReady = false  // 标记编辑器是否已完成初始化并设置了内容
+let isEditorReady = false
+
+// 获取加密状态
+const { isKeyValid, decryptNoteFromBackend } = useVaultEncryption()
+
+// 是否正在解密
+const isDecrypting = ref(false)
+const decryptError = ref('')
+
+/**
+ * 计算属性：响应式解密后的内容
+ *
+ * 逻辑：
+ * 1. 如果不是保密笔记，返回原内容
+ * 2. 如果是保密笔记且已解锁，返回解密后的内容
+ * 3. 如果是保密笔记且未解锁，返回原始加密内容（稍后会显示错误提示）
+ */
+const displayTitle = computed(() => {
+  return props.modelValue.title || ''
+})
+
+const displayContent = computed(() => {
+  if (!props.isSecret) {
+    // 普通笔记，返回原内容
+    return props.modelValue.content || ''
+  }
+
+  if (isKeyValid.value) {
+    // 加密笔记已解锁，返回解密后的内容
+    // 这个值会被 watch 监听并设置到编辑器
+    return decryptedContent.value || props.modelValue.content
+  }
+
+  // 加密笔记未解锁，返回原内容（但模板会显示错误提示）
+  return props.modelValue.content || ''
+})
+
+// 存储解密后的内容
+const decryptedContent = ref('')
+
+/**
+ * 解密加密笔记的内容
+ */
+async function decryptNoteContent() {
+  if (!props.isSecret || !props.modelValue.content || !props.modelValue.id) {
+    return
+  }
+
+  isDecrypting.value = true
+  decryptError.value = ''
+
+  try {
+    const plaintext = await decryptNoteFromBackend(props.modelValue.content, props.modelValue.id)
+    decryptedContent.value = plaintext
+  } catch (e) {
+    console.error('Decryption error in editor:', e)
+    decryptError.value = '解密失败，无法编辑此加密笔记'
+  } finally {
+    isDecrypting.value = false
+  }
+}
 
 // 获取 TinyMCE 配置
 const getTinyMCEConfig = () => ({
@@ -361,15 +477,47 @@ const updateTitle = (e) => {
 // 监听笔记 ID 变化，当切换笔记时更新编辑器内容
 watch(() => props.modelValue.id, (newId, oldId) => {
   if (newId !== oldId && editorInstance) {
-    // 笔记切换，更新编辑器内容
-    const content = props.modelValue.content || ''
-    console.log('笔记切换，更新编辑器内容，新笔记 ID:', newId, '内容长度:', content.length)
-    editorInstance.setContent(content)
-    // 强制刷新 DOM
-    if (editorInstance.getBody()) {
-      editorInstance.getBody().innerHTML = content || '<p><br></p>'
+    // 笔记切换，重置解密状态
+    decryptedContent.value = ''
+    decryptError.value = ''
+
+    // 如果新笔记是加密的，需要重新解密
+    if (props.isSecret && isKeyValid.value) {
+      decryptNoteContent()
+    } else {
+      // 普通笔记或未解锁的加密笔记
+      const content = props.modelValue.content || ''
+      console.log('笔记切换，更新编辑器内容，新笔记 ID:', newId, '内容长度:', content.length)
+      editorInstance.setContent(content)
+      editorInstance.setDirty(false)
     }
-    editorInstance.setDirty(false)
+  }
+})
+
+/**
+ * 监听 isKeyValid 变化：
+ * 当保险柜解锁时（从 false 变为 true），
+ * 如果当前编辑的是加密笔记，立即解密
+ */
+watch(() => isKeyValid.value, (valid) => {
+  if (valid && props.isSecret && props.modelValue.content && !decryptedContent.value) {
+    // 密钥刚刚变有效，解密当前笔记
+    decryptNoteContent()
+  }
+})
+
+/**
+ * 监听 displayContent 变化，当解密完成时更新编辑器
+ */
+watch(() => displayContent.value, (newContent) => {
+  if (newContent && editorInstance && isEditorReady) {
+    const currentContent = editorInstance.getContent()
+    // 只在编辑器内容为空或与原加密内容相同时更新
+    if (!currentContent || currentContent === props.modelValue.content) {
+      console.log('解密完成，更新编辑器内容，长度:', newContent.length)
+      editorInstance.setContent(newContent)
+      editorInstance.setDirty(false)
+    }
   }
 })
 
@@ -421,6 +569,12 @@ onMounted(() => {
   const checkTinyMCE = () => {
     if (window.tinymce) {
       initEditor()
+      // 编辑器初始化完成后，如果是加密笔记且已解锁，立即解密
+      setTimeout(() => {
+        if (props.isSecret && isKeyValid.value && props.modelValue.content) {
+          decryptNoteContent()
+        }
+      }, 500)
     } else {
       setTimeout(checkTinyMCE, 100)
     }
@@ -446,6 +600,55 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.encryption-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  background-color: #f0f9ff;
+  border: 1px solid #b3d8ff;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 13px;
+  color: #0084f4;
+}
+
+.encryption-indicator :deep(.el-tag) {
+  background-color: transparent;
+  border-color: #b3d8ff;
+  color: #0084f4;
+}
+
+.encryption-indicator :deep(.el-icon) {
+  margin-right: 5px;
+}
+
+.indicator-text {
+  color: #0084f4;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.decrypt-error {
+  margin-bottom: 15px;
+}
+
+.decrypting-prompt {
+  margin-bottom: 15px;
+}
+
+.locked-prompt {
+  padding: 20px;
+  text-align: center;
+}
+
+.editor-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 600px;
 }
 
 .title-input {

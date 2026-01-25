@@ -21,6 +21,7 @@ urlpatterns = [
     path('api/notes/create/', views.create_note_api, name='create_note_api'),
     path('api/notes/<int:note_id>/update/', views.update_note_api, name='update_note_api'),
     path('api/notes/<int:note_id>/delete/', views.delete_note_api, name='delete_note_api'),
+    path('api/notes/<int:note_id>/toggle-secret/', views.toggle_secret_api, name='toggle_secret_api'),
     path('notes/public/<uuid:public_id>/', views.public_note_view, name='public_note_view'),
     # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
     path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),
@@ -83,12 +84,14 @@ urlpatterns = [
 
     # ==================== 保密柜（Vault）API ====================
     path('api/vault/status/', views.vault_status, name='vault_status'),
+    path('api/vault/init/', views.vault_init, name='vault_init'),
     path('api/vault/verify/', views.vault_verify, name='vault_verify'),
+    path('api/vault/key/', views.vault_get_key, name='vault_get_key'),
+    path('api/vault/export/', views.vault_export, name='vault_export'),
     path('api/vault/lock/', views.vault_lock, name='vault_lock'),
     path('api/vault/lock-status/', views.vault_lock_status, name='vault_lock_status'),
     path('api/vault/send-email-code/', views.vault_send_email_code, name='vault_send_email_code'),
     path('api/vault/notes/', views.vault_notes_list, name='vault_notes_list'),
-    path('api/notes/<int:note_id>/toggle-secret/', views.note_toggle_secret, name='note_toggle_secret'),
 
     #path("logout/", views.logout_view, name="logout"),
 ]

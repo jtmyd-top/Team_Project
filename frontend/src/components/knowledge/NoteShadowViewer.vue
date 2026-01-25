@@ -31,6 +31,8 @@
 import { ref, onMounted, watch, nextTick, onUnmounted, computed } from 'vue'
 import DOMPurify from 'dompurify'
 import { useCodeEnhancer, getCodeEnhancerStyles } from '@composables/useCodeEnhancer'
+import { useVaultEncryption } from '@composables/useVaultEncryption'
+import { useClientCrypto } from '@composables/useClientCrypto'
 
 const props = defineProps({
   content: {
@@ -44,6 +46,14 @@ const props = defineProps({
   isDark: {
     type: Boolean,
     default: false
+  },
+  isSecret: {
+    type: Boolean,
+    default: false
+  },
+  noteId: {
+    type: Number,
+    default: null
   }
 })
 
@@ -52,6 +62,103 @@ const shadowRoot = ref(null)
 
 // 使用代码块增强功能
 const { enhance: enhanceCodeBlocks } = useCodeEnhancer()
+
+// 获取加密/解密相关
+const { isKeyValid, dek } = useVaultEncryption()
+const { decryptContent, looksLikeEncrypted } = useClientCrypto()
+
+// 加密相关状态
+const isDecrypting = ref(false)
+const decryptError = ref('')
+const decryptedContent = ref('')
+
+// 计算属性：响应式解密内容
+const displayContent = computed(() => {
+  if (!props.isSecret) {
+    // 普通笔记，直接返回原内容
+    return props.content
+  }
+
+  if (!isKeyValid.value) {
+    // 加密笔记未解锁
+    return ''
+  }
+
+  // 如果已解密，返回解密内容；否则返回密文（稍后会被解密）
+  if (decryptedContent.value) {
+    return decryptedContent.value
+  }
+
+  // 如果正在解密，显示占位符
+  if (isDecrypting.value) {
+    return ''
+  }
+
+  // 如果解密失败，返回错误提示
+  if (decryptError.value) {
+    return ''
+  }
+
+  // 返回原始内容（可能是密文，等待解密）
+  return props.content
+})
+
+// 前端解密加密笔记
+async function decryptNoteContent() {
+  if (!props.isSecret || !props.content) {
+    return
+  }
+
+  console.log('[Vault] Starting decryption process...', {
+    isSecret: props.isSecret,
+    contentLength: props.content?.length || 0,
+    contentSample: props.content?.substring(0, 30),
+    hasKeyValid: !!isKeyValid.value,
+    hasDek: !!dek.value
+  })
+
+  // 如果内容看起来不像密文，跳过解密
+  if (!looksLikeEncrypted(props.content)) {
+    console.warn('[Vault] Content does not look like encrypted data, treating as plaintext')
+    decryptedContent.value = props.content
+    return
+  }
+
+  isDecrypting.value = true
+  decryptError.value = ''
+
+  try {
+    // 获取用户的 DEK（Data Encryption Key，来自 2FA 验证）
+    if (!dek.value) {
+      console.error('[Vault] No DEK available for decryption, user needs to verify 2FA')
+      decryptError.value = '缺少加密密钥，请重新验证'
+      return
+    }
+
+    console.log('[Vault] DEK available, decrypting...', {
+      dekLength: dek.value?.length || 0,
+      dekSample: dek.value?.substring(0, 20)
+    })
+
+    // 前端解密：在浏览器中使用 DEK 解密
+    const plaintext = decryptContent(props.content, dek.value)
+    decryptedContent.value = plaintext
+
+    console.log('[Vault] Content decrypted successfully in browser', {
+      decryptedLength: plaintext?.length || 0,
+      decryptedSample: plaintext?.substring(0, 50)
+    })
+  } catch (e) {
+    console.error('[Vault] 前端解密失败:', e, {
+      message: e.message,
+      contentLength: props.content?.length,
+      dekLength: dek.value?.length
+    })
+    decryptError.value = '解密失败：' + e.message
+  } finally {
+    isDecrypting.value = false
+  }
+}
 
 // 目录相关状态
 const tocItems = ref([])
@@ -281,19 +388,37 @@ let cachedCleanHtml = ''
 const renderContent = (forceStyleUpdate = false) => {
   if (!shadowRoot.value) return
 
-  const rawHtml = props.content || ''
+  // 使用 displayContent 而不是 props.content，这样可以自动处理解密
+  const rawHtml = displayContent.value || ''
 
   if (rawHtml !== cachedRawHtml) {
     cachedRawHtml = rawHtml
 
-    // 使用后端生成的目录数据
-    cachedCleanHtml = DOMPurify.sanitize(rawHtml, purifyConfig)
+    // 如果是加密笔记但未解锁，显示提示而不是密文
+    if (props.isSecret && !isKeyValid.value) {
+      cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">保密笔记，请完成 2FA 验证后查看内容。</div>'
+      tocItems.value = []
+      showToc.value = false
+    } else if (props.isSecret && isDecrypting.value) {
+      // 解密中的状态
+      cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">解密中，请稍候...</div>'
+      tocItems.value = []
+      showToc.value = false
+    } else if (decryptError.value) {
+      // 解密错误
+      cachedCleanHtml = `<div style="padding: 20px; color: #ff0000;">${decryptError.value}</div>`
+      tocItems.value = []
+      showToc.value = false
+    } else {
+      // 正常内容渲染
+      cachedCleanHtml = DOMPurify.sanitize(rawHtml, purifyConfig)
 
-    // 使用后端提供的 TOC 数据
-    tocItems.value = props.toc || []
+      // 使用后端提供的 TOC 数据
+      tocItems.value = props.toc || []
 
-    // 阈值判断：至少3个标题才显示目录
-    showToc.value = tocItems.value.length >= TOC_THRESHOLD
+      // 阈值判断：至少3个标题才显示目录
+      showToc.value = tocItems.value.length >= TOC_THRESHOLD
+    }
   }
 
   const styleEl = shadowRoot.value.querySelector('style')
@@ -310,12 +435,24 @@ const renderContent = (forceStyleUpdate = false) => {
 
 // 渲染后设置滚动监听和代码块增强功能
   nextTick(() => {
-    // 确保内容元素存在后再增强
-    const contentEl = shadowRoot.value?.querySelector('.note-content')
-    if (contentEl) {
+    // 双重检查：确保 shadowRoot 和 contentEl 都存在后再操作
+    if (!shadowRoot.value) {
+      console.warn('shadowRoot has been cleared')
+      return
+    }
+
+    const contentEl = shadowRoot.value.querySelector('.note-content')
+    if (!contentEl) {
+      console.warn('content element not found in shadow DOM')
+      return
+    }
+
+    try {
       setupScrollSpy()
       // 使用 composable 增强代码块（支持 Shadow DOM）
-      enhanceCodeBlocks(shadowRoot.value.querySelector('.note-content'))
+      enhanceCodeBlocks(contentEl)  // 直接传 contentEl，而不是重新查询
+    } catch (e) {
+      console.warn('Error enhancing code blocks:', e)
     }
   })
 }
@@ -455,13 +592,52 @@ const scrollToHeading = (id) => {
 
 onMounted(() => {
   initShadowRoot()
+  // 如果是加密笔记且已解锁，立即解密
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+    decryptNoteContent()
+  }
 })
 
 // 监听内容变化
 watch(() => props.content, () => {
   if (!shadowRoot.value && hostRef.value) {
     initShadowRoot()
+  }
+
+  // 如果是加密笔记且已解锁，重新解密
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+    decryptNoteContent()
   } else {
+    renderContent(false)
+  }
+})
+
+// 监听笔记 ID 变化（切换笔记时重置解密状态）
+watch(() => props.noteId, () => {
+  decryptedContent.value = ''
+  decryptError.value = ''
+
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+    decryptNoteContent()
+  } else {
+    renderContent(false)
+  }
+})
+
+// 监听密钥状态：保险柜解锁时自动解密
+watch(() => isKeyValid.value, (valid) => {
+  if (valid && props.isSecret && props.content && props.noteId && !decryptedContent.value) {
+    decryptNoteContent()
+  } else if (!valid && props.isSecret) {
+    // 密钥失效，清除解密内容
+    decryptedContent.value = ''
+    renderContent(false)
+  }
+})
+
+// 监听解密结果：内容解密完成后重新渲染
+watch(() => decryptedContent.value, () => {
+  if (props.isSecret && !isDecrypting.value) {
     renderContent(false)
   }
 })

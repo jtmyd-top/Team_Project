@@ -169,6 +169,7 @@ const requireCaptcha = ref(false)
 const captchaLoadError = ref(false)
 const codeInputRef = ref(null)
 const captchaWidgetRef = ref(null)
+const isVerificationSuccess = ref(false)  // 标记验证是否成功
 
 // CAPTCHA 参数
 const captchaParams = ref({
@@ -370,6 +371,7 @@ const handleVerify = async () => {
 
     if (data.status === 'success') {
       ElMessage.success('验证成功')
+      isVerificationSuccess.value = true  // 标记验证成功
       emit('verified', {
         expireTime: data.expire_time,
         remainingSeconds: data.remaining_seconds
@@ -437,7 +439,15 @@ const handleClose = () => {
     image_captcha: ''
   }
   dialogVisible.value = false
-  emit('cancel')
+
+  // 只在验证失败时派发 cancel 事件，验证成功时不派发
+  // 这样可以防止在验证成功后用户被拉回到全部笔记
+  if (!isVerificationSuccess.value) {
+    emit('cancel')
+  }
+
+  // 重置验证成功标志，用于下次验证
+  isVerificationSuccess.value = false
 }
 
 // 对话框打开时聚焦输入框

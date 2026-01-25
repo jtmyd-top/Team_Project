@@ -1316,6 +1316,7 @@ def note_detail_api(request, note_id):
                 'title': note.title,
                 'content': note.content or "",
                 'is_public': note.is_public,
+                'is_secret': note.is_secret,
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
                 'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
                 'author': {'id': note.author.id, 'username': note.author.username},
@@ -1332,6 +1333,7 @@ def note_detail_api(request, note_id):
             'title': note.title,
             'content': paginated_content,
             'is_public': note.is_public,
+            'is_secret': note.is_secret,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             # 【已移除】不再返回 project 信息
             #'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
@@ -1379,6 +1381,7 @@ def note_detail_api(request, note_id):
             'title': note.title,
             'content': paginated_content,
             'is_public': note.is_public,
+            'is_secret': note.is_secret,
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             'updated_at': put_local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
             'last_modified_by': {'username': note.last_modified_by.username},
@@ -1433,6 +1436,7 @@ def note_detail_api(request, note_id):
                 'id': note.id,
                 'title': note.title,
                 'is_public': note.is_public,
+                'is_secret': note.is_secret,
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
                 'updated_at': patch_local_updated_at.strftime('%Y-%m-%d %H:%M'),
                 'toc': note.toc or [],
@@ -1474,7 +1478,7 @@ def search_notes_api(request):
     user = request.user
     # 【修改点】查询条件简化：标题或内容包含查询字符串，并且作者是当前用户
     search_condition = Q(title__icontains=query) | Q(content__icontains=query)
-    results = Note.objects.filter(search_condition, author=user).order_by('-updated_at').values('id', 'title')
+    results = Note.objects.filter(search_condition, author=user, is_secret=False).order_by('-updated_at').values('id', 'title')
 
     return JsonResponse(list(results), safe=False)
 
@@ -1734,6 +1738,9 @@ def create_note_api(request):
 def update_note_api(request, note_id):
     """
     更新指定笔记的标题和内容。
+
+    如果笔记标记为 is_secret，前端已经加密了内容。
+    后端不进行任何加密操作，直接存储接收到的内容。
     """
     user = request.user
 
@@ -1749,7 +1756,7 @@ def update_note_api(request, note_id):
         title = data.get('title')
         content = data.get('content')
 
-        # 更新笔记
+        # 更新笔记（前端已处理加密，后端直接存储）
         if title is not None:
             note.title = title
         if content is not None:
@@ -1819,6 +1826,47 @@ def delete_note_api(request, note_id):
         return JsonResponse({'error': '删除笔记时发生内部错误'}, status=500)
 
 
+@login_required
+@require_http_methods(["POST"])
+def toggle_secret_api(request, note_id):
+    """
+    切换笔记的保密状态（is_secret 标记）。
+
+    前端E2E加密流程：
+    - 当 is_secret=true 时，前端在保存时使用 crypto-js 加密内容
+    - 当 is_secret=false 时，前端保存明文内容
+    - 后端仅更新标记，不进行任何加密/解密操作
+    """
+    user = request.user
+
+    try:
+        # 获取笔记并验证权限
+        try:
+            note = Note.objects.get(id=note_id, author=user)
+        except Note.DoesNotExist:
+            return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
+
+        # 切换 is_secret 标记
+        note.is_secret = not note.is_secret
+        note.save()
+
+        # 清除侧边栏缓存
+        try:
+            cache.delete(get_sidebar_cache_key(user.id))
+        except Exception:
+            pass
+
+        return JsonResponse({
+            'status': 'success',
+            'is_secret': note.is_secret,
+            'is_public': note.is_public,
+            'message': '保密状态已更新'
+        })
+    except Exception as e:
+        logger.error(f"为用户 {user.id} 切换笔记 {note_id} 的保密状态时出错: {e}", exc_info=True)
+        return JsonResponse({'error': '更新保密状态时发生内部错误'}, status=500)
+
+
 # 【新增】公开笔记列表视图
 def public_notes_api(request):
     """
@@ -1885,7 +1933,7 @@ def settings_view(request):
         logger.info(f"Created profile for user {user.id} in settings_view")
 
     # 获取当前用户的笔记数量
-    notes_count = Note.objects.filter(author=user).count()
+    notes_count = Note.objects.filter(author=user, is_secret=False, is_trashed=False).count()
 
     # 检查当前用户是否已经点赞过自己的资料
     is_liked = ProfileLike.objects.filter(liker=user, profile=profile).exists()
@@ -3895,6 +3943,7 @@ def vault_verify(request):
     验证保密柜2FA
     成功后授予时间窗口内的访问权限
     支持速率限制、指数退避和CAPTCHA验证
+    成功后返回 DEK 用于解密笔记
     """
     try:
         data = json.loads(request.body)
@@ -3921,6 +3970,36 @@ def vault_verify(request):
     result = verify_vault_2fa(request, code, use_backup, captcha_params)
 
     if result['success']:
+        # ==================== 加密集成 ====================
+        # 1. 存储 vault session 到 Redis（30分钟 TTL）
+        vault_session_key = f"vault_session:{request.user.id}"
+        cache.set(vault_session_key, {'verified_at': timezone.now().isoformat()}, timeout=1800)
+
+        # 2. 尝试返回 DEK 用于前端解密
+        try:
+            from knowledge_project.utils.vault_crypto import VaultEncryption
+            import base64
+
+            profile = request.user.profile
+            if profile.vault_initialized and profile.encrypted_vault_key and profile.vault_key_iv:
+                # 用 KEK 解密 DEK
+                dek = VaultEncryption.decrypt_dek(
+                    profile.encrypted_vault_key,
+                    profile.vault_key_iv
+                )
+                dek_b64 = base64.b64encode(dek).decode('utf-8')
+
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '验证成功',
+                    'dek': dek_b64,
+                    'expire_time': result['expire_time'],
+                    'remaining_seconds': result['remaining_seconds']
+                })
+        except Exception as e:
+            logger.warning(f"Failed to decrypt DEK during vault verify: {e}")
+            # 继续返回基本成功响应（DEK 可稍后通过 vault/key 获取）
+
         return JsonResponse({
             'status': 'success',
             'message': '验证成功',
@@ -4054,37 +4133,188 @@ def vault_notes_list(request):
     })
 
 
+# ==================== 保险柜加密 API ====================
+
 @login_required
 @require_http_methods(["POST"])
-def note_toggle_secret(request, note_id):
+def vault_init(request):
     """
-    切换笔记的保密状态
-    如果笔记被标记为保密（is_secret=True），自动取消分享
+    初始化保险柜
+    生成用户的 DEK（Data Encryption Key）并用 KEK 加密后存入数据库
     """
+    from knowledge_project.utils.vault_crypto import VaultEncryption
+
     try:
-        note = Note.objects.get(id=note_id, author=request.user)
-    except Note.DoesNotExist:
+        profile = request.user.profile
+
+        # 检查是否已初始化
+        if profile.vault_initialized:
+            return JsonResponse({
+                'status': 'error',
+                'message': '保险柜已初始化'
+            }, status=400)
+
+        # 生成 DEK
+        dek = VaultEncryption.generate_dek()
+
+        # 用 KEK 加密 DEK
+        encrypted_dek_b64, iv_b64 = VaultEncryption.encrypt_dek(dek)
+
+        # 存入数据库
+        profile.encrypted_vault_key = encrypted_dek_b64
+        profile.vault_key_iv = iv_b64
+        profile.vault_initialized = True
+        profile.save(update_fields=['encrypted_vault_key', 'vault_key_iv', 'vault_initialized'])
+
+        return JsonResponse({
+            'status': 'success',
+            'message': '保险柜初始化成功',
+            'vault_initialized': True
+        })
+
+    except Exception as e:
+        logger.error(f"Vault init error: {e}")
         return JsonResponse({
             'status': 'error',
-            'message': '笔记不存在'
-        }, status=404)
+            'message': f'保险柜初始化失败: {str(e)}'
+        }, status=500)
 
-    # 切换保密状态
-    note.is_secret = not note.is_secret
 
-    # 如果加入保险柜（is_secret=True），自动取消分享
-    if note.is_secret and note.is_public:
-        note.is_public = False
+@login_required
+@require_http_methods(["GET"])
+def vault_get_key(request):
+    """
+    获取保险柜 DEK（Data Encryption Key）用于解密
 
-    note.save(update_fields=['is_secret', 'is_public'])
+    逻辑：
+    1. 检查 Redis 中是否有有效的 vault_session:{user_id}
+    2. 如果有且未过期：返回 DEK，刷新 TTL
+    3. 如果无或已过期：返回 403，提示需要 2FA 验证
 
-    # 清除缓存 - 这很重要！
-    sidebar_notes_key = f"sidebar_notes_user_{request.user.id}"
-    cache.delete(sidebar_notes_key)
+    返回：
+    {
+        "status": "success",
+        "dek": "base64_encoded_dek",
+        "expire_time": 1800
+    }
+    """
+    from knowledge_project.utils.vault_crypto import VaultEncryption
 
-    return JsonResponse({
-        'status': 'success',
-        'is_secret': note.is_secret,
-        'is_public': note.is_public,
-        'message': '已加入保密柜' if note.is_secret else '已移出保密柜'
-    })
+    try:
+        user = request.user
+        vault_session_key = f"vault_session:{user.id}"
+
+        # 检查 Redis 中的 vault session
+        session_data = cache.get(vault_session_key)
+
+        if not session_data:
+            # Session 过期，需要重新验证
+            return JsonResponse({
+                'status': 'error',
+                'message': '需要重新验证'
+            }, status=403)
+
+        # Session 有效，返回 DEK
+        try:
+            profile = user.profile
+            if not profile.vault_initialized:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': '保险柜未初始化'
+                }, status=400)
+
+            # 用 KEK 解密 DEK
+            dek = VaultEncryption.decrypt_dek(
+                profile.encrypted_vault_key,
+                profile.vault_key_iv
+            )
+            dek_b64 = __import__('base64').b64encode(dek).decode('utf-8')
+
+            # 刷新 Redis TTL（30分钟）
+            cache.set(vault_session_key, session_data, timeout=1800)
+
+            return JsonResponse({
+                'status': 'success',
+                'dek': dek_b64,
+                'expire_time': 1800
+            })
+
+        except Exception as e:
+            logger.error(f"Vault key decryption error: {e}")
+            return JsonResponse({
+                'status': 'error',
+                'message': '解密密钥失败'
+            }, status=500)
+
+    except Exception as e:
+        logger.error(f"Vault get_key error: {e}")
+        return JsonResponse({
+            'status': 'error',
+            'message': '获取密钥失败'
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def vault_export(request):
+    """
+    导出保险柜备份（加密的笔记数据）
+
+    逻辑：
+    1. 获取用户所有 is_secret=True 的笔记
+    2. 导出为 JSON 文件（包含加密的内容）
+    3. 返回下载链接
+    """
+    try:
+        import json
+        from django.http import FileResponse
+        from io import BytesIO
+
+        user = request.user
+
+        # 获取用户的所有保密笔记
+        secret_notes = Note.objects.filter(
+            author=user,
+            is_secret=True,
+            is_trashed=False
+        ).values('id', 'title', 'content', 'created_at', 'updated_at', 'folder_id')
+
+        # 转换为列表
+        notes_data = list(secret_notes)
+
+        # 创建备份数据
+        backup_data = {
+            'user_id': user.id,
+            'username': user.username,
+            'exported_at': timezone.now().isoformat(),
+            'notes_count': len(notes_data),
+            'notes': notes_data
+        }
+
+        # 序列化为 JSON
+        json_bytes = json.dumps(
+            backup_data,
+            ensure_ascii=False,
+            indent=2,
+            default=str
+        ).encode('utf-8')
+
+        # 创建文件响应
+        file_obj = BytesIO(json_bytes)
+        filename = f"vault_export_{user.username}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+        return FileResponse(
+            file_obj,
+            as_attachment=True,
+            filename=filename,
+            content_type='application/json'
+        )
+
+    except Exception as e:
+        logger.error(f"Vault export error: {e}")
+        return JsonResponse({
+            'status': 'error',
+            'message': f'导出失败: {str(e)}'
+        }, status=500)
+
+

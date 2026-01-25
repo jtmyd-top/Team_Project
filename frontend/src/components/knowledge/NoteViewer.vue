@@ -1,70 +1,122 @@
 <template>
-  <div ref="contentRef" class="note-viewer note-prose"></div>
+  <!-- 加密笔记未解锁提示 -->
+  <div v-if="props.isSecret && !isKeyValid" class="encrypted-prompt">
+    <el-alert
+      title="保密笔记"
+      type="warning"
+      description="此笔记已加密。请完成 2FA 验证后查看内容。"
+      :closable="false"
+    />
+  </div>
+
+  <!-- 加密笔记解密中 -->
+  <div v-else-if="isDecrypting" class="decrypting-state">
+    <el-skeleton :rows="5" animated />
+    <p style="text-align: center; color: #999; margin-top: 10px;">解密中...</p>
+  </div>
+
+  <!-- 解密错误提示 -->
+  <div v-else-if="decryptError" class="decrypt-error">
+    <el-alert
+      :title="decryptError"
+      type="error"
+      closable
+      @close="decryptError = ''"
+    />
+  </div>
+
+  <!-- 已解密或非加密笔记 -->
+  <div v-else ref="contentRef" class="note-viewer note-prose"></div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick, computed } from 'vue'
+import { ElAlert, ElSkeleton } from 'element-plus'
 import DOMPurify from 'dompurify'
 import { useCodeEnhancer } from '../composables/useCodeEnhancer'
+import { useVaultEncryption } from '@/composables/useVaultEncryption'
 
 const props = defineProps({
   content: {
     type: String,
     default: ''
+  },
+  isSecret: {
+    type: Boolean,
+    default: false
+  },
+  noteId: {
+    type: Number,
+    default: null
   }
 })
 
 const contentRef = ref(null)
+const isDecrypting = ref(false)
+const decryptError = ref('')
+const decryptedContent = ref('')
+
+// 使用加密组合式
+const { isKeyValid, decryptNoteFromBackend } = useVaultEncryption()
 
 // 使用代码块增强功能
 const { enhance: enhanceCodeBlocks } = useCodeEnhancer()
 
 // 配置 DOMPurify
 const purifyConfig = {
-  // 禁止的标签
   FORBID_TAGS: ['script', 'style', 'link', 'meta', 'iframe', 'object', 'embed', 'frame', 'frameset'],
-  // 禁止的属性（所有事件处理器会自动被移除）
   FORBID_ATTR: ['onerror', 'onclick', 'onmouseover', 'onload', 'onmouseenter', 'onfocus', 'onblur'],
-  // 允许的 URI 协议
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 }
 
 /**
+ * 计算属性：响应式解密内容
+ *
+ * 逻辑判断：
+ * 1. 如果 !isSecret: 返回原内容
+ * 2. 如果 isSecret && isKeyValid: 返回已解密的内容
+ * 3. 如果 isSecret && !isKeyValid: 返回空字符串（模板显示加密提示）
+ */
+const displayContent = computed(() => {
+  if (!props.isSecret) {
+    // 普通笔记，直接返回内容
+    return props.content
+  }
+
+  if (isKeyValid.value) {
+    // 已解锁的加密笔记，返回解密后的内容
+    return decryptedContent.value
+  }
+
+  // 未解锁的加密笔记，返回空字符串（模板显示加密提示）
+  return ''
+})
+
+/**
  * 移除所有 class 和 id 属性，防止外部样式影响布局
- * 保留内容结构，只清理可能造成样式冲突的属性
- * 同时修复相对路径的图片 URL
  */
 const stripClassAndId = (html) => {
   const parser = new DOMParser()
   const doc = parser.parseFromString(html, 'text/html')
-
-  // 获取网站根 URL
   const baseUrl = window.location.origin + '/'
 
-  // 移除所有元素的 class 和 id 属性
   doc.querySelectorAll('*').forEach(el => {
     el.removeAttribute('class')
     el.removeAttribute('id')
 
-    // 修复图片的 src 属性：将相对路径转换为绝对路径
     if (el.tagName === 'IMG') {
       const src = el.getAttribute('src')
       if (src && !src.match(/^https?:\/\//) && !src.match(/^\/\//)) {
-        // 相对路径，转换为绝对路径
         if (src.startsWith('./') || src.startsWith('../')) {
-          // 处理 ./ 或 ../ 开头的路径
           el.setAttribute('src', new URL(src, baseUrl).href)
         } else if (!src.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:/)) {
-          // 不是绝对路径也不是协议，视为根相对路径
           el.setAttribute('src', baseUrl + src.replace(/^\//, ''))
         }
       }
     }
 
-    // 移除可能影响布局的 style 属性中的危险部分
     const style = el.getAttribute('style')
     if (style) {
-      // 只保留安全的样式属性（颜色、字体等），移除布局相关的
       const dangerousPatterns = [
         /position\s*:/gi,
         /display\s*:\s*(flex|grid|none)/gi,
@@ -84,7 +136,6 @@ const stripClassAndId = (html) => {
       dangerousPatterns.forEach(pattern => {
         cleanStyle = cleanStyle.replace(pattern, '')
       })
-      // 清理空的样式声明
       cleanStyle = cleanStyle.replace(/;\s*;/g, ';').replace(/^\s*;|;\s*$/g, '').trim()
       if (cleanStyle) {
         el.setAttribute('style', cleanStyle)
@@ -97,42 +148,124 @@ const stripClassAndId = (html) => {
   return doc.body.innerHTML
 }
 
-// 获取清洗后的内容
-const getSanitizedContent = () => {
-  if (!props.content) return ''
-
-  // 1. 使用 DOMPurify 进行安全清洗
-  const cleanHTML = DOMPurify.sanitize(props.content, purifyConfig)
-
-  // 2. 移除所有 class 和 id 属性，防止外部样式影响，同时修复图片路径
+const getSanitizedContent = (content) => {
+  if (!content) return ''
+  const cleanHTML = DOMPurify.sanitize(content, purifyConfig)
   const strippedHTML = stripClassAndId(cleanHTML)
-
   return strippedHTML
 }
 
-// 渲染内容
-const renderContent = () => {
-  if (!contentRef.value) return
+const renderContent = (content) => {
+  if (!contentRef.value) {
+    console.warn('contentRef is not available')
+    return
+  }
 
-  contentRef.value.innerHTML = getSanitizedContent()
+  try {
+    contentRef.value.innerHTML = getSanitizedContent(content)
+  } catch (e) {
+    console.warn('Error setting innerHTML:', e)
+    return
+  }
 
-  // 渲染后增强代码块
   nextTick(() => {
-    enhanceCodeBlocks(contentRef.value)
+    if (!contentRef.value) {
+      console.warn('contentRef has been cleared before code enhancement')
+      return
+    }
+
+    try {
+      enhanceCodeBlocks(contentRef.value)
+    } catch (e) {
+      console.warn('Error enhancing code blocks:', e)
+    }
   })
 }
 
+/**
+ * 解密加密笔记的内容
+ * 调用后端 API 进行解密，并将结果存储在 decryptedContent.value
+ */
+async function decryptContent() {
+  if (!props.isSecret || !props.content || !props.noteId) {
+    return
+  }
+
+  isDecrypting.value = true
+  decryptError.value = ''
+
+  try {
+    const plaintext = await decryptNoteFromBackend(props.content, props.noteId)
+    decryptedContent.value = plaintext
+    renderContent(plaintext)
+  } catch (e) {
+    console.error('Decryption error:', e)
+    decryptError.value = '解密失败，请重试'
+    decryptedContent.value = ''
+  } finally {
+    isDecrypting.value = false
+  }
+}
+
 onMounted(() => {
-  renderContent()
+  // 如果是非加密笔记，直接渲染
+  if (!props.isSecret) {
+    renderContent(props.content)
+  } else if (isKeyValid.value) {
+    // 加密笔记且已解锁，立即解密
+    decryptContent()
+  }
+  // 如果加密且未解锁，等待 watch isKeyValid 的变化
 })
 
-// 监听内容变化
-watch(() => props.content, () => {
-  renderContent()
+/**
+ * 监听 displayContent 变化，重新渲染内容
+ * 当 displayContent computed 变化时（由 isKeyValid 或 content 触发），
+ * 自动更新视图
+ */
+watch(() => displayContent.value, (newContent) => {
+  if (newContent) {
+    renderContent(newContent)
+  }
+})
+
+/**
+ * 监听 isKeyValid 变化：
+ * 当保险柜解锁时（isKeyValid 从 false 变为 true），
+ * 立即触发解密，无需用户操作
+ */
+watch(() => isKeyValid.value, (valid) => {
+  if (valid && props.isSecret && props.content && !decryptedContent.value) {
+    // 密钥刚刚变有效，且还没有解密内容，立即解密
+    decryptContent()
+  }
+})
+
+/**
+ * 监听 content 变化，如果是加密笔记且已有解密密钥，重新解密
+ */
+watch(() => props.content, (newContent) => {
+  if (newContent && props.isSecret && isKeyValid.value) {
+    // 笔记内容变化且已解锁，重新解密
+    decryptContent()
+  }
 })
 </script>
 
 <style scoped>
+.encrypted-prompt {
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.decrypting-state {
+  padding: 20px;
+}
+
+.decrypt-error {
+  padding: 20px;
+}
+
 /* NoteViewer 容器基础样式 */
 .note-viewer {
   width: 100%;
@@ -142,17 +275,12 @@ watch(() => props.content, () => {
   overflow-wrap: anywhere;
 }
 
-/* ========================================
-   Prose 排版样式 - 强制覆盖外部样式
-   ======================================== */
-
-/* 全局重置 */
+/* Prose 排版样式 */
 .note-prose :deep(*) {
   box-sizing: border-box;
   max-width: 100%;
 }
 
-/* 块级元素 */
 .note-prose :deep(div) {
   display: block;
   margin: 0.5em 0;
@@ -180,7 +308,7 @@ watch(() => props.content, () => {
 .note-prose :deep(h3) {
   font-size: 1.25em;
   font-weight: 600;
-  margin: 1em 0 0.5em;
+  margin: 0.8em 0 0.4em;
   line-height: 1.4;
   display: block;
   color: var(--text-primary, #1a1a1a);
@@ -197,7 +325,6 @@ watch(() => props.content, () => {
   color: var(--text-primary, #1a1a1a);
 }
 
-/* 段落 */
 .note-prose :deep(p) {
   margin: 1em 0;
   line-height: 1.8;
@@ -366,7 +493,7 @@ watch(() => props.content, () => {
   vertical-align: super;
 }
 
-/* 表单元素（按钮等） */
+/* 表单元素 */
 .note-prose :deep(button) {
   display: inline-block;
   padding: 0.5em 1em;
@@ -448,105 +575,5 @@ watch(() => props.content, () => {
 .note-prose :deep(*) {
   max-width: 100%;
   overflow-wrap: break-word;
-}
-
-/* ========================================
-   代码块增强：复制和折叠按钮
-   ======================================== */
-
-.note-prose :deep(pre.code-block-enhanced) {
-  position: relative;
-  padding-right: 40px;
-}
-
-/* 复制按钮 */
-.note-prose :deep(pre .copy-btn) {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: var(--bg-tertiary, rgba(0, 0, 0, 0.1));
-  color: var(--text-secondary, #666);
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 10;
-  overflow: hidden;
-  padding: 0;
-}
-
-.note-prose :deep(pre .copy-btn:hover) {
-  background: rgba(64, 158, 255, 0.2);
-  color: #409eff;
-}
-
-.note-prose :deep(pre .copy-btn.copied) {
-  background: #67c23a;
-  color: white;
-}
-
-.note-prose :deep(pre .copy-btn svg) {
-  width: 18px;
-  height: 18px;
-  display: block;
-  flex-shrink: 0;
-}
-
-/* 折叠按钮 */
-.note-prose :deep(pre .collapse-btn) {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: var(--bg-tertiary, rgba(0, 0, 0, 0.1));
-  color: var(--text-secondary, #666);
-  border-radius: 4px;
-  cursor: pointer;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 10;
-  overflow: hidden;
-  padding: 0;
-}
-
-.note-prose :deep(pre .collapse-btn:hover) {
-  background: rgba(64, 158, 255, 0.2);
-  color: #409eff;
-}
-
-.note-prose :deep(pre .collapse-btn svg) {
-  width: 18px;
-  height: 18px;
-  display: block;
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
-}
-
-/* 折叠状态：箭头旋转 */
-.note-prose :deep(pre.collapsed .collapse-btn svg) {
-  transform: rotate(180deg);
-}
-
-/* 折叠状态：代码块显示渐变遮罩 */
-.note-prose :deep(pre.collapsed code) {
-  display: block;
-  max-height: 5.4em;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent);
-  mask-image: linear-gradient(180deg, #000 60%, transparent);
-}
-
-/* 长代码块（超过5行）显示折叠按钮 */
-.note-prose :deep(pre.long-code .collapse-btn) {
-  display: flex;
 }
 </style>
