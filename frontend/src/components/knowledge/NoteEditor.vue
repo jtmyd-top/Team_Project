@@ -35,8 +35,19 @@
       />
     </div>
 
+    <!-- 编辑器初始化中 -->
+    <div v-if="isInitializing" class="decrypting-prompt">
+      <el-alert
+        title="编辑器初始化中"
+        type="info"
+        description="正在加载编辑器，请稍候..."
+        :closable="false"
+        style="margin-bottom: 15px;"
+      />
+    </div>
+
     <!-- 编辑器（已解密或非加密笔记时显示） -->
-    <div v-if="!isSecret || isKeyValid" class="editor-content">
+    <div v-if="!isInitializing && (!isSecret || isKeyValid)" class="editor-content">
       <input
         :value="displayTitle"
         @input="updateTitle"
@@ -50,7 +61,7 @@
     </div>
 
     <!-- 加密笔记未解锁提示 -->
-    <div v-else class="locked-prompt">
+    <div v-else-if="isSecret && !isKeyValid && !isInitializing" class="locked-prompt">
       <el-alert
         title="笔记已加密"
         type="warning"
@@ -95,12 +106,11 @@ let editorInstance = null
 let isEditorReady = false
 
 // 获取加密状态和解密工具
-const { isKeyValid, dek } = useVaultEncryption()
+const { isKeyValid, dek, tryRecoverKeyFromSession } = useVaultEncryption()
 const { decryptContent } = useClientCrypto()
 
-// 是否正在解密
-const isDecrypting = ref(false)
-const decryptError = ref('')
+// 是否正在初始化
+const isInitializing = ref(false)
 
 // 存储解密后的标题和内容
 const decryptedTitle = ref('')
@@ -536,6 +546,11 @@ watch(() => props.modelValue.id, (newId, oldId) => {
  * 如果当前编辑的是加密笔记，立即解密
  */
 watch(() => isKeyValid.value, (valid) => {
+  // 如果密钥刚刚变有效，停止初始化加载
+  if (valid && isInitializing.value) {
+    isInitializing.value = false
+  }
+
   if (valid && props.isSecret && props.modelValue.content && !decryptedContent.value) {
     // 密钥刚刚变有效，解密当前笔记
     decryptNoteContent()
@@ -600,10 +615,24 @@ watch(() => props.isLightTheme, (isLight) => {
   })
 })
 
-onMounted(() => {
+onMounted(async () => {
+  isInitializing.value = true
+
+  // 如果是加密笔记但 DEK 不可用，尝试从 session 恢复
+  if (props.isSecret && !isKeyValid.value && !dek.value) {
+    console.log('[Vault] NoteEditor: DEK not available, attempting to recover from session')
+    const recovered = await tryRecoverKeyFromSession()
+    if (recovered) {
+      console.log('[Vault] NoteEditor: DEK recovered from session')
+    } else {
+      console.warn('[Vault] NoteEditor: Failed to recover DEK from session')
+    }
+  }
+
   // 等待 TinyMCE 加载完成
   const checkTinyMCE = () => {
     if (window.tinymce) {
+      isInitializing.value = false
       initEditor()
       // 编辑器初始化完成后，如果是加密笔记且已解锁，立即解密
       setTimeout(() => {
@@ -621,6 +650,7 @@ onMounted(() => {
 onUnmounted(() => {
   // 重置标志，确保下次挂载时正确初始化
   isEditorReady = false
+  isInitializing.value = false
   destroyEditor()
 })
 

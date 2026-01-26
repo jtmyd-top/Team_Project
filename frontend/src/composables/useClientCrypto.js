@@ -222,7 +222,7 @@ export function useClientCrypto() {
 
   /**
    * 检查字符串是否看起来像密文
-   * （简单启发式：检查是否是有效的Base64格式）
+   * （简单启发式：检查是否是有效的Base64格式且长度足够）
    *
    * @param {string} text - 要检查的文本
    * @returns {boolean} 是否可能是密文
@@ -233,9 +233,12 @@ export function useClientCrypto() {
     // Base64 格式检查
     const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/
 
-    // 注：系统中已无遗留的后端/Python加密数据，所有数据都是前端加密或明文
-    // 因此只需检查Base64格式，不需要长度限制
-    return base64Regex.test(text)
+    // 长度检查：加密数据包含 IV(16字节) + ciphertext(至少16字节) = 至少32字节
+    // Base64 编码会增加约33%，所以至少需要约 43-44 字符
+    // 设置阈值为 40 是相对安全的边界
+    // - 允许较短的加密数据（如短标题）
+    // - 防止普通短文本被当作密文
+    return text.length >= 40 && base64Regex.test(text)
   }
 
   return {

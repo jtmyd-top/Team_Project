@@ -200,8 +200,8 @@ const sidebarStore = useSidebarStore()
 const vaultStore = useVaultStore()
 
 // Vault encryption
-const { isKeyValid, dek, tryRecoverKeyFromSession } = useVaultEncryption()
-const { decryptContent } = useClientCrypto()
+const { isKeyValid, dek, keyExpireTime, tryRecoverKeyFromSession } = useVaultEncryption()
+const { decryptContent, encryptContent } = useClientCrypto()
 
 // 状态
 const currentNoteId = ref(null)
@@ -564,45 +564,80 @@ async function handleSave() {
   try {
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
-    // 从编辑器实例获取最新内容
-    let contentToSave = currentNoteData.value.content
+    // 【关键】从编辑器实例获取最新内容
+    // 这是用户编辑后的明文内容，而不是数据库中已加密的密文
+    let contentToSave = ''
+    let titleToSave = currentNoteData.value.title
+
+    // 优先从编辑器获取内容（必须是编辑器中的明文）
     if (noteEditorRef.value && noteEditorRef.value.getContent) {
       contentToSave = noteEditorRef.value.getContent()
+    } else {
+      // 备选：使用状态中的内容
+      contentToSave = currentNoteData.value.content
     }
 
     // 如果是加密笔记，在前端进行加密
     if (currentNoteData.value.is_secret) {
       try {
-        // 获取加密使用的 composables
-        const { dek } = useVaultEncryption()
-
-        // 检查是否有加密密钥（需要完成2FA验证）
-        console.log('[Vault] Checking DEK for encryption...', {
+        // 【关键修复】检查 isKeyValid 而不仅仅是 dek.value
+        // 因为 keyExpireTime 可能已过期，即使 dek.value 还有值
+        console.log('[Vault] Checking encryption key validity...', {
+          isKeyValid: isKeyValid.value,
           hasDek: !!dek.value,
-          dekLength: dek.value ? dek.value.length : 0,
-          dekSample: dek.value ? dek.value.substring(0, 20) : 'N/A'
+          hasKeyExpireTime: !!keyExpireTime ? keyExpireTime.value > Date.now() : false
         })
 
+        if (!isKeyValid.value) {
+          console.warn('[Vault] Key has expired or is invalid, attempting to recover from session...')
+          // 尝试从 session 恢复 DEK
+          const recovered = await tryRecoverKeyFromSession()
+          if (!recovered || !isKeyValid.value) {
+            console.error('[Vault] Failed to recover DEK, 2FA verification required')
+            ElMessage.error('加密密钥已失效，请重新进行 2FA 验证')
+            isSaving.value = false
+            return
+          }
+        }
+
         if (!dek.value) {
-          console.error('[Vault] DEK is empty, 2FA verification may have failed')
-          ElMessage.error('请先完成 2FA 验证以启用加密')
+          console.error('[Vault] DEK is empty after validation')
+          ElMessage.error('无法获取加密密钥')
           isSaving.value = false
           return
         }
 
-        // 前端加密：使用 crypto-js 在浏览器中加密
-        const { encryptContent } = useClientCrypto()
+        // 【重要】确认 contentToSave 是编辑器中的明文，而不是数据库中的密文
+        // 判断方法：编辑器内容长度通常与原明文长度相同，如果与原密文长度相同则可能是错误
+        console.log('[Vault] Preparing to encrypt...', {
+          contentLength: contentToSave.length,
+          originalContentLength: currentNoteData.value.content.length,
+          isDifferent: contentToSave !== currentNoteData.value.content
+        })
 
+        // 前端加密：使用 crypto-js 在浏览器中加密解密后的内容
         console.log('[Vault] Starting encryption with DEK...')
+
+        // 加密标题
+        if (titleToSave) {
+          try {
+            titleToSave = encryptContent(titleToSave, dek.value)
+            console.log('[Vault] Title encrypted successfully')
+          } catch (e) {
+            console.warn('[Vault] Failed to encrypt title:', e.message)
+            // 如果标题加密失败，继续（可能标题不需要加密或为明文）
+          }
+        }
+
+        // 加密内容 - 【关键】确保加密的是明文，不是密文
         contentToSave = encryptContent(contentToSave, dek.value)
 
-        console.log('[Vault] Content encrypted in browser for secure note', {
-          originalLength: currentNoteData.value.content.length,
+        console.log('[Vault] Content encrypted successfully', {
           encryptedLength: contentToSave.length,
-          encryptedSample: contentToSave.substring(0, 30)
+          sample: contentToSave.substring(0, 50)
         })
       } catch (e) {
-        console.error('[Vault] 前端加密失败:', e)
+        console.error('[Vault] Encryption failed:', e)
         ElMessage.error('加密失败: ' + e.message)
         isSaving.value = false
         return
@@ -617,7 +652,7 @@ async function handleSave() {
         'X-CSRFToken': csrfToken
       },
       body: JSON.stringify({
-        title: currentNoteData.value.title,
+        title: titleToSave,
         content: contentToSave
       })
     })
