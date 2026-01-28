@@ -223,6 +223,18 @@ watch(() => props.note, (note) => {
   }
 }, { immediate: true })
 
+// 【新增】监听笔记标题更新事件，实时同步列表中的显示标题
+watch(() => {
+  // 监听全局标题更新事件
+  // 这里只是为了触发重新计算，实际更新通过 props.note 传入
+  return props.note.title
+}, (newTitle) => {
+  // 如果笔记被重命名或编辑器中的标题改变，重新解密显示
+  if (props.note.is_secret) {
+    decryptNoteTitle()
+  }
+})
+
 // 开始编辑
 function startEditing() {
   isEditing.value = true
@@ -261,7 +273,8 @@ function handleDragStart(event) {
     type: 'NOTE_ITEM',
     id: props.note.id,
     title: props.note.title,
-    currentFolderId: props.note.folder?.id || null
+    currentFolderId: props.note.folder?.id || null,
+    isSecret: props.note.is_secret || false
   }
 
   // 设置拖拽数据
@@ -273,7 +286,8 @@ function handleDragStart(event) {
     detail: {
       noteId: props.note.id,
       noteTitle: props.note.title,
-      currentFolderId: props.note.folder?.id || null
+      currentFolderId: props.note.folder?.id || null,
+      isSecret: props.note.is_secret || false
     }
   }))
 }

@@ -51,6 +51,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  isTrashed: {
+    type: Boolean,
+    default: false
+  },
   noteId: {
     type: Number,
     default: null
@@ -74,6 +78,18 @@ const decryptedContent = ref('')
 
 // 计算属性：响应式解密内容
 const displayContent = computed(() => {
+  // 【P0 - 安全加固】检查是否是回收站中的保密笔记
+  // 如果是，禁止解密内容以保护隐私
+  if (props.isSecret && props.isTrashed) {
+    console.log('[Security] Blocking decryption for secret note in trash:', {
+      noteId: props.noteId,
+      isSecret: props.isSecret,
+      isTrashed: props.isTrashed
+    })
+    // 返回特殊的提示信息，而不是密文或解密内容
+    return '<div class="vault-trash-notice">🔒 内容已锁定</div>'
+  }
+
   if (!props.isSecret) {
     // 普通笔记，直接返回原内容
     return props.content
@@ -105,12 +121,20 @@ const displayContent = computed(() => {
 
 // 前端解密加密笔记
 async function decryptNoteContent() {
+  // 【P0 - 安全加固】如果是回收站中的保密笔记，不执行解密
+  if (props.isSecret && props.isTrashed) {
+    console.log('[Security] Skipping decryption for secret note in trash')
+    // 不解密，直接返回
+    return
+  }
+
   if (!props.isSecret || !props.content) {
     return
   }
 
   console.log('[Vault] Starting decryption process...', {
     isSecret: props.isSecret,
+    isTrashed: props.isTrashed,
     contentLength: props.content?.length || 0,
     contentSample: props.content?.substring(0, 30),
     hasKeyValid: !!isKeyValid.value,
@@ -193,6 +217,52 @@ const getShadowStyles = (isDark) => `
     box-sizing: border-box;
     scroll-behavior: smooth;
     overflow-x: hidden; /* 防止内容溢出容器 */
+  }
+
+  /* 【新增】回收站中保密笔记的锁定提示样式 */
+  .vault-trash-locked-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 40px;
+    text-align: center;
+    background: ${isDark ? 'rgba(255,255,255,0.02)' : 'rgba(240, 112, 112, 0.05)'};
+    border-radius: 8px;
+    border: 1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(240, 112, 112, 0.2)'};
+    min-height: 300px;
+  }
+
+  .vault-trash-locked-notice .notice-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+    animation: bounce 2s infinite;
+  }
+
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+
+  .vault-trash-locked-notice .notice-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: ${isDark ? '#e0e0e0' : '#333'};
+    margin-bottom: 12px;
+  }
+
+  .vault-trash-locked-notice .notice-message {
+    font-size: 16px;
+    color: ${isDark ? '#999' : '#666'};
+    margin-bottom: 8px;
+    line-height: 1.6;
+  }
+
+  .vault-trash-locked-notice .notice-hint {
+    font-size: 14px;
+    color: ${isDark ? '#777' : '#999'};
+    font-style: italic;
+    margin-top: 16px;
   }
 
   /* 标题 - 添加 scroll-margin-top 使锚点跳转时不被顶部遮挡 */
@@ -396,8 +466,19 @@ const renderContent = (forceStyleUpdate = false) => {
   if (rawHtml !== cachedRawHtml) {
     cachedRawHtml = rawHtml
 
-    // 如果是加密笔记但未解锁，显示提示而不是密文
-    if (props.isSecret && !isKeyValid.value) {
+    // 【P0】回收站中的保密笔记：显示安全提示
+    if (props.isSecret && props.isTrashed) {
+      cachedCleanHtml = `
+        <div class="vault-trash-locked-notice">
+          <div class="notice-icon">🔒</div>
+          <div class="notice-title">内容已锁定</div>
+          <div class="notice-message">此笔记位于回收站中，出于安全考虑，内容暂不显示。</div>
+          <div class="notice-hint">请将其还原后在保密柜中查看。</div>
+        </div>
+      `
+      tocItems.value = []
+      showToc.value = false
+    } else if (props.isSecret && !isKeyValid.value) {
       cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">保密笔记，请完成 2FA 验证后查看内容。</div>'
       tocItems.value = []
       showToc.value = false
@@ -594,8 +675,8 @@ const scrollToHeading = (id) => {
 
 onMounted(() => {
   initShadowRoot()
-  // 如果是加密笔记且已解锁，立即解密
-  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+  // 如果是加密笔记且已解锁（且不在回收站），立即解密
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId && !props.isTrashed) {
     decryptNoteContent()
   }
 })
@@ -606,8 +687,8 @@ watch(() => props.content, () => {
     initShadowRoot()
   }
 
-  // 如果是加密笔记且已解锁，重新解密
-  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+  // 如果是加密笔记且已解锁（且不在回收站），重新解密
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId && !props.isTrashed) {
     decryptNoteContent()
   } else {
     renderContent(false)
@@ -619,7 +700,7 @@ watch(() => props.noteId, () => {
   decryptedContent.value = ''
   decryptError.value = ''
 
-  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId && !props.isTrashed) {
     decryptNoteContent()
   } else {
     renderContent(false)
@@ -628,13 +709,21 @@ watch(() => props.noteId, () => {
 
 // 监听密钥状态：保险柜解锁时自动解密
 watch(() => isKeyValid.value, (valid) => {
-  if (valid && props.isSecret && props.content && props.noteId && !decryptedContent.value) {
+  if (valid && props.isSecret && props.content && props.noteId && !props.isTrashed && !decryptedContent.value) {
     decryptNoteContent()
   } else if (!valid && props.isSecret) {
     // 密钥失效，清除解密内容
     decryptedContent.value = ''
     renderContent(false)
   }
+})
+
+// 【新增】监听回收站状态变化
+watch(() => props.isTrashed, () => {
+  // 如果笔记被移入/移出回收站，重新渲染
+  decryptedContent.value = ''
+  decryptError.value = ''
+  renderContent(false)
 })
 
 // 监听解密结果：内容解密完成后重新渲染

@@ -57,10 +57,16 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useSidebarStore } from '@/stores/sidebar'
+import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 import { ElMessage } from 'element-plus'
 import DropFolderItem from './DropFolderItem.vue'
 
 const sidebarStore = useSidebarStore()
+
+// 加密相关
+const { isKeyValid, dek, tryRecoverKeyFromSession, getCsrfToken } = useVaultEncryption()
+const { decryptContent, looksLikeEncrypted } = useClientCrypto()
 
 // 状态
 const isVisible = ref(false)
@@ -94,8 +100,8 @@ function handleGlobalDragStart(event) {
 
 // 自定义事件：笔记开始拖拽
 function handleNoteDragStart(event) {
-  const { noteId, noteTitle, currentFolderId: noteFolderId } = event.detail
-  draggedNoteData.value = { noteId, noteTitle }
+  const { noteId, noteTitle, currentFolderId: noteFolderId, isSecret } = event.detail
+  draggedNoteData.value = { noteId, noteTitle, isSecret }
   currentFolderId.value = noteFolderId
   isVisible.value = true
   loadFolders()
@@ -133,8 +139,99 @@ async function handleDrop(folderId, folderName, event) {
   }
 
   try {
-    await sidebarStore.moveNoteToFolder(draggedNoteData.value.noteId, folderId)
-    ElMessage.success(`已移动到「${folderName}」`)
+    const noteId = draggedNoteData.value.noteId
+    const isSecret = draggedNoteData.value.isSecret
+
+    // 如果是保密柜笔记，需要先解密再移动
+    if (isSecret) {
+      console.log('[Vault] Moving secret note out of vault, need to decrypt first')
+
+      // 检查 DEK 是否有效
+      if (!isKeyValid.value) {
+        // 尝试从 session 恢复
+        const recovered = await tryRecoverKeyFromSession()
+        if (!recovered || !isKeyValid.value) {
+          ElMessage.error('保密柜已锁定，请先解锁保密柜后再移动笔记')
+          return
+        }
+      }
+
+      // 获取笔记完整内容
+      const noteResponse = await fetch(`/api/notes/${noteId}/?full_content=true`)
+      if (!noteResponse.ok) {
+        throw new Error('获取笔记内容失败')
+      }
+      const noteData = await noteResponse.json()
+
+      // 解密标题和内容
+      let decryptedTitle = noteData.title
+      let decryptedContent = noteData.content
+
+      try {
+        if (noteData.title && looksLikeEncrypted(noteData.title)) {
+          decryptedTitle = decryptContent(noteData.title, dek.value)
+          console.log('[Vault] Title decrypted for move')
+        }
+      } catch (e) {
+        console.warn('[Vault] Failed to decrypt title, using original:', e.message)
+      }
+
+      try {
+        if (noteData.content && looksLikeEncrypted(noteData.content)) {
+          decryptedContent = decryptContent(noteData.content, dek.value)
+          console.log('[Vault] Content decrypted for move')
+        }
+      } catch (e) {
+        console.warn('[Vault] Failed to decrypt content, using original:', e.message)
+      }
+
+      // 更新笔记：解密后的内容 + is_secret = false + 新的 folder_id
+      const csrfToken = getCsrfToken()
+      const updateResponse = await fetch(`/api/notes/${noteId}/`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+          title: decryptedTitle,
+          content: decryptedContent,
+          is_secret: false,
+          folder_id: folderId
+        })
+      })
+
+      if (!updateResponse.ok) {
+        throw new Error('更新笔记失败')
+      }
+
+      console.log('[Vault] Note decrypted and moved out of vault successfully')
+
+      // 【P0】触发事件：笔记从保密柜移出
+      window.dispatchEvent(new CustomEvent('note-moved-from-vault', {
+        detail: { noteId }
+      }))
+
+      // 【P1】触发事件：笔记文件夹已变更
+      window.dispatchEvent(new CustomEvent('note-folder-changed', {
+        detail: { noteId, oldFolderId: currentFolderId.value, newFolderId: folderId }
+      }))
+
+      ElMessage.success(`已从保密柜移出到「${folderName}」`)
+
+      // 刷新当前视图
+      await sidebarStore.loadModuleData()
+    } else {
+      // 普通笔记，直接移动
+      await sidebarStore.moveNoteToFolder(noteId, folderId)
+
+      // 【P1】触发事件：笔记文件夹已变更
+      window.dispatchEvent(new CustomEvent('note-folder-changed', {
+        detail: { noteId, oldFolderId: currentFolderId.value, newFolderId: folderId }
+      }))
+
+      ElMessage.success(`已移动到「${folderName}」`)
+    }
   } catch (e) {
     console.error('移动笔记失败:', e)
     ElMessage.error('移动失败，请重试')

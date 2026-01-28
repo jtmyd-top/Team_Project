@@ -127,6 +127,86 @@ def get_paginated_html(html_content, page_number=1, chars_per_page=3000):
     return pages[page_number - 1], total_pages
 
 
+# === 【新增】後端安全加固 - 輔助函數 ===
+
+def check_note_edit_permission(note):
+    """
+    檢查筆記是否允許編輯操作。
+
+    Return: (allowed: bool, error_message: str or None)
+    - 回收站筆記不允許編輯
+    """
+    if note.is_trashed:
+        return False, '回收站中的筆記無法編輯。請先還原筆記。'
+    return True, None
+
+
+def check_note_secret_operation_permission(note, operation):
+    """
+    檢查筆記是否允許特定操作（針對保密柜）。
+
+    Args:
+        note: Note 模型實例
+        operation: 'share', 'favorite', 'publish' 等操作名稱
+
+    Return: (allowed: bool, error_message: str or None)
+    - 保密柜筆記不允許分享、收藏和發布
+    """
+    if note.is_secret:
+        messages = {
+            'share': '保密柜的筆記無法分享。請先移出保密柜。',
+            'favorite': '保密柜的筆記無法收藏。請先移出保密柜。',
+            'publish': '保密柜的筆記無法發布為公開。請先移出保密柜。'
+        }
+        return False, messages.get(operation, f'保密柜的筆記無法執行 {operation} 操作。')
+    return True, None
+
+
+def build_note_response_data(note, include_content=True, include_all_fields=True):
+    """
+    構建筆記 API 響應數據，支持字段過濾。
+
+    Args:
+        note: Note 模型實例
+        include_content: 是否包含 content 字段
+        include_all_fields: 是否包含所有字段（True），或僅包含必要字段（False）
+
+    Return: dict - 完整的應答數據結構
+
+    說明：
+    - 當 is_secret=True AND is_trashed=True 時，自動不包含 content
+    - 前端可根據需要傳遞 include_content 參數
+    """
+    # 數據最小化：不傳輸敏感組合的加密內容
+    if note.is_secret and note.is_trashed:
+        include_content = False
+
+    local_updated_at = timezone.localtime(note.updated_at)
+    local_created_at = timezone.localtime(note.created_at)
+
+    data = {
+        'id': note.id,
+        'title': note.title,
+        'is_public': note.is_public,
+        'is_secret': note.is_secret,
+        'is_trashed': note.is_trashed,
+        'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
+        'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),
+        'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),
+    }
+
+    if include_content:
+        data['content'] = note.content or ""
+
+    if include_all_fields:
+        data['author'] = {'id': note.author.id, 'username': note.author.username}
+        data['last_modified_by'] = {'username': note.last_modified_by.username} if note.last_modified_by else None
+        data['tags'] = [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()]
+        data['toc'] = note.toc or []
+
+    return data
+
+
 class CustomUserCreationForm(UserCreationForm):
     email = forms.EmailField(required=True, help_text='必填项。')
 
@@ -1317,6 +1397,7 @@ def note_detail_api(request, note_id):
                 'content': note.content or "",
                 'is_public': note.is_public,
                 'is_secret': note.is_secret,
+                'is_trashed': note.is_trashed,  # 【新增】返回回收站状态
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
                 'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
                 'author': {'id': note.author.id, 'username': note.author.username},
@@ -1334,6 +1415,7 @@ def note_detail_api(request, note_id):
             'content': paginated_content,
             'is_public': note.is_public,
             'is_secret': note.is_secret,
+            'is_trashed': note.is_trashed,  # 【新增】返回回收站状态
             'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
             # 【已移除】不再返回 project 信息
             #'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
@@ -1410,6 +1492,19 @@ def note_detail_api(request, note_id):
                 note.is_public = data['is_public']
             if 'content' in data:
                 note.content = data['content']
+            if 'is_secret' in data:
+                note.is_secret = data['is_secret']
+                # 如果移出保密柜，确保笔记不是公开的（安全考虑）
+                if not data['is_secret'] and note.is_public:
+                    note.is_public = False
+            if 'folder_id' in data:
+                folder_id = data['folder_id']
+                if folder_id is None:
+                    note.folder = None
+                else:
+                    from knowledge_project.models import Folder
+                    folder = get_object_or_404(Folder, id=folder_id, owner=request.user)
+                    note.folder = folder
 
             note.last_modified_by = request.user
 

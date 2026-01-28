@@ -129,6 +129,7 @@
                 :toc="currentNoteData.toc"
                 :is-dark="isDarkMode"
                 :is-secret="currentNoteData.is_secret"
+                :is-trashed="currentNoteData.is_trashed"
                 :note-id="currentNoteData.id"
               />
             </div>
@@ -222,6 +223,7 @@ const currentNoteData = ref({
   author: null,
   is_public: false,
   is_secret: false,
+  is_trashed: false,  // 【新增】回收站状态
   public_url: ''
 })
 
@@ -379,9 +381,9 @@ async function fetchNoteDetail(noteId) {
   try {
     const response = await fetch(`/api/notes/${noteId}/?full_content=true`)
     if (!response.ok) throw new Error('Failed to fetch note')
-    
+
     const data = await response.json()
-    
+
     currentNoteData.value = {
       id: data.id,
       title: data.title,
@@ -391,9 +393,10 @@ async function fetchNoteDetail(noteId) {
       author: data.author,
       is_public: data.is_public || false,
       is_secret: data.is_secret || false,
+      is_trashed: data.is_trashed || false,  // 【新增】保存回收站状态
       public_url: data.public_url || ''
     }
-    
+
     hasUnsavedChanges.value = false
   } catch (e) {
     console.error('获取笔记详情失败:', e)
@@ -568,14 +571,17 @@ async function handleSave() {
     // 这是用户编辑后的明文内容，而不是数据库中已加密的密文
     let contentToSave = ''
     let titleToSave = ''
+    let plainTextTitle = ''  // 【新增】保存明文标题，用于后续列表更新
 
     // 【修复】优先从编辑器获取标题（必须是编辑器中的明文，避免 double encryption）
     if (noteEditorRef.value && noteEditorRef.value.getCurrentTitle) {
       titleToSave = noteEditorRef.value.getCurrentTitle()
+      plainTextTitle = titleToSave  // 【新增】保存明文标题
       console.log('[Vault] Got title from editor:', { titleLength: titleToSave.length })
     } else {
       // 备选：使用当前笔记数据中的标题
       titleToSave = currentNoteData.value.title
+      plainTextTitle = titleToSave  // 【新增】保存明文标题
       console.log('[Vault] Using title from currentNoteData:', { titleLength: titleToSave.length })
     }
 
@@ -689,16 +695,35 @@ async function handleSave() {
       currentNoteData.value.updated_at = data.updated_at
     }
 
-    // 更新列表中的标题
+    // 【关键】更新列表中的标题
     const note = sidebarStore.currentNotes.find(n => n.id === currentNoteId.value)
     if (note) {
-      note.title = currentNoteData.value.title
+      // 【修复】使用保存前的明文标题更新列表，而不是已加密的 currentNoteData.value.title
+      // plainTextTitle 是从编辑器获取的明文，不会被加密污染
+      note.title = plainTextTitle
+
+      console.log('[Vault] Updated list item title:', {
+        noteId: currentNoteId.value,
+        newTitle: plainTextTitle,
+        isSecret: currentNoteData.value.is_secret
+      })
     }
+
+    // 【新增】同时更新解密标题状态，这样工具栏也会显示最新的标题
+    decryptedTitle.value = plainTextTitle
 
     // 更新 TOC (如果后端返回了新的 TOC)
     if (data.toc) {
       currentNoteData.value.toc = data.toc
     }
+
+    // 【新增】触发事件：笔记标题已更新（用于其他组件同步）
+    window.dispatchEvent(new CustomEvent('note-title-updated', {
+      detail: {
+        noteId: currentNoteId.value,
+        newTitle: plainTextTitle
+      }
+    }))
 
     // 保存成功后切换到阅读模式
     viewMode.value = 'read'
@@ -830,10 +855,17 @@ function handleFolderSwitch(folderId) {
 // 原始标题，用于检测标题是否被修改
 let originalTitle = ''
 
-// 监听标题变化，用于标记未保存状态
+// 监听标题变化，用于标记未保存状态和同步解密标题
 watch(() => currentNoteData.value.title, (newTitle, oldTitle) => {
   // 只在编辑模式下且有当前笔记时检测
   if (viewMode.value !== 'edit' || !currentNoteId.value) return
+
+  // 如果是保密柜笔记，编辑器中显示的是明文标题
+  // 需要同时更新 decryptedTitle 以确保工具栏标题即时更新
+  if (currentNoteData.value.is_secret) {
+    decryptedTitle.value = newTitle
+    console.log('[Vault] Title in edit mode updated, decryptedTitle synced:', { newTitle })
+  }
 
   // 如果标题确实被用户修改了（与原始标题不同）
   if (newTitle !== oldTitle && originalTitle !== '' && newTitle !== originalTitle) {
@@ -870,6 +902,92 @@ onMounted(async () => {
 
   // 监听笔记保密状态变化事件
   window.addEventListener('note-secret-toggled', handleNoteSecretToggled)
+
+  // 【新增】监听笔记权限变更事件 - 移入保密柜
+  window.addEventListener('note-moved-to-vault', async (event) => {
+    const { noteId } = event.detail
+    // P0: 如果当前笔记被移入保密柜，立即清空内容（安全风险）
+    if (currentNoteId.value === noteId) {
+      currentNoteId.value = null
+      currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+      ElMessage.warning('笔记已移入保密柜，预览已清空')
+    }
+  })
+
+  // 【新增】监听笔记从保密柜移出事件
+  window.addEventListener('note-moved-from-vault', async (event) => {
+    const { noteId } = event.detail
+    // P0: 如果当前笔记从保密柜移出，重新加载并解密
+    if (currentNoteId.value === noteId) {
+      try {
+        await fetchNoteDetail(noteId)
+        ElMessage.success('笔记已从保密柜移出')
+      } catch (e) {
+        console.error('重新加载笔记失败:', e)
+        ElMessage.error('重新加载笔记失败')
+      }
+    }
+  })
+
+  // 【新增】监听笔记移入回收站事件
+  window.addEventListener('note-moved-to-trash', (event) => {
+    const { noteId } = event.detail
+    // P1: 如果当前笔记被移入回收站，立即清空内容
+    if (currentNoteId.value === noteId) {
+      currentNoteId.value = null
+      currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+      ElMessage.info('笔记已移入回收站')
+    }
+  })
+
+  // 【新增】监听文件夹变更事件
+  window.addEventListener('note-folder-changed', async (event) => {
+    const { noteId, oldFolderId, newFolderId } = event.detail
+    // P1: 如果当前笔记被移动到其他文件夹
+    if (currentNoteId.value === noteId) {
+      // 如果当前只显示原文件夹内容，需要清空预览并更新面包屑
+      if (sidebarStore.secondaryView === 'notes' && sidebarStore.currentFolderId === oldFolderId) {
+        // 当前显示的是原文件夹内容，但笔记已被移出
+        currentNoteId.value = null
+        currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+        ElMessage.info('笔记已移动到其他文件夹')
+      } else {
+        // 重新加载笔记以更新其文件夹信息
+        try {
+          await fetchNoteDetail(noteId)
+        } catch (e) {
+          console.error('重新加载笔记失败:', e)
+        }
+      }
+    }
+  })
+
+  // 【新增】监听笔记重命名事件
+  window.addEventListener('note-renamed', (event) => {
+    const { noteId, newTitle } = event.detail
+    // P2: 更新预览区的大标题
+    if (currentNoteId.value === noteId) {
+      currentNoteData.value.title = newTitle
+    }
+  })
+
+  // 【新增】监听搜索结果点击事件
+  window.addEventListener('search-result-clicked', async (event) => {
+    const { noteId, highlightKeyword } = event.detail
+    // P3: 加载笔记并高亮搜索词
+    try {
+      await handleNoteSelect(noteId)
+      // 触发高亮显示
+      if (highlightKeyword) {
+        window.dispatchEvent(new CustomEvent('highlight-search-text', {
+          detail: { keyword: highlightKeyword }
+        }))
+      }
+    } catch (e) {
+      console.error('加载搜索结果失败:', e)
+      ElMessage.error('加载笔记失败')
+    }
+  })
 
   // 【新增】全局监听 vault-verification-success 事件
   // 确保任何时候 DEK 都被正确保存到 vaultStore

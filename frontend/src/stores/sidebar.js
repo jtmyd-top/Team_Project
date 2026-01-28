@@ -615,6 +615,11 @@ export const useSidebarStore = defineStore('sidebar', () => {
       if (note) {
         note.title = newTitle
       }
+
+      // 【P2】触发事件：笔记已重命名
+      window.dispatchEvent(new CustomEvent('note-renamed', {
+        detail: { noteId, newTitle }
+      }))
     } catch (e) {
       error.value = e.message
       throw e
@@ -646,8 +651,17 @@ export const useSidebarStore = defineStore('sidebar', () => {
    */
   async function moveNoteToFolder(noteId, folderId) {
     try {
+      // 获取移动前的文件夹信息
+      const note = currentNotes.value.find(n => n.id === noteId)
+      const oldFolderId = note?.folder?.id || null
+
       await folderApi.moveNote(noteId, folderId)
-      
+
+      // 【P1】触发事件：笔记文件夹已变更
+      window.dispatchEvent(new CustomEvent('note-folder-changed', {
+        detail: { noteId, oldFolderId, newFolderId: folderId }
+      }))
+
       // 刷新当前视图
       await loadModuleData()
     } catch (e) {
@@ -695,7 +709,12 @@ export const useSidebarStore = defineStore('sidebar', () => {
           'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
         }
       })
-      
+
+      // 【P1】触发事件：笔记已移入回收站
+      window.dispatchEvent(new CustomEvent('note-moved-to-trash', {
+        detail: { noteId }
+      }))
+
       // 从当前列表移除
       currentNotes.value = currentNotes.value.filter(n => n.id !== noteId)
     } catch (e) {

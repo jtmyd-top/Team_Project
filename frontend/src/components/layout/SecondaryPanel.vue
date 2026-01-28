@@ -951,6 +951,11 @@ async function handleToggleSecret(note) {
         ElMessage.success('移出保密柜成功')
       }
 
+      // 【P0】触发事件：笔记已从保密柜移出
+      window.dispatchEvent(new CustomEvent('note-moved-from-vault', {
+        detail: { noteId: note.id }
+      }))
+
       // 刷新数据
       if (sidebarStore.activeModule === 'vault') {
         // 从保密柜列表中移除
@@ -965,6 +970,13 @@ async function handleToggleSecret(note) {
       // ========== 加入保密柜 ==========
       // 需要加密内容，执行智能流程
       await executeEncryptAndSave(note)
+
+      // 【P0】触发事件：笔记已移入保密柜
+      window.dispatchEvent(new CustomEvent('note-moved-to-vault', {
+        detail: { noteId: note.id }
+      }))
+
+      ElMessage.success('加入保密柜成功')
     }
 
     // 如果当前正在编辑该笔记，更新其状态
