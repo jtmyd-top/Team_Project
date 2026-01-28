@@ -49,7 +49,7 @@
     <!-- 编辑器（已解密或非加密笔记时显示） -->
     <div v-if="!isInitializing && (!isSecret || isKeyValid)" class="editor-content">
       <input
-        :value="displayTitle"
+        v-model="localTitle"
         @input="updateTitle"
         class="title-input"
         placeholder="笔记标题"
@@ -112,9 +112,19 @@ const { decryptContent } = useClientCrypto()
 // 是否正在初始化
 const isInitializing = ref(false)
 
+// 解密状态
+const isDecrypting = ref(false)
+const decryptError = ref('')
+
 // 存储解密后的标题和内容
 const decryptedTitle = ref('')
 const decryptedContent = ref('')
+
+// 本地标题状态（避免光标跳转）
+const localTitle = ref('')
+
+// 标记是否正在用户编辑中（防止 watch 重置内容）
+let isUserEditing = false
 
 /**
  * 计算属性：响应式解密后的标题
@@ -191,6 +201,9 @@ async function decryptNoteContent() {
         throw e
       }
     }
+
+    // 解密完成后更新本地标题
+    localTitle.value = decryptedTitle.value || props.modelValue.title || ''
   } catch (e) {
     console.error('[Vault] Decryption error in editor:', e)
     decryptError.value = '解密失败: ' + e.message
@@ -403,9 +416,10 @@ const getTinyMCEConfig = () => ({
         const maxRetries = 5
 
         try {
-          // 在回调中重新读取 props.modelValue.content，确保获取最新值
-          const content = props.modelValue.content || ''
-          console.log('正在设置内容到编辑器，内容长度:', content.length)
+          // 【修复】使用解密后的内容而非加密的原始内容
+          // displayContent 是 computed property，会自动选择解密后的内容或原内容
+          const content = displayContent.value || ''
+          console.log('正在设置内容到编辑器，内容长度:', content.length, '(isSecret:', props.isSecret, ', hasDecrypted:', !!decryptedContent.value, ')')
 
           // 使用 setContent 设置内容
           editor.setContent(content)
@@ -455,6 +469,7 @@ const getTinyMCEConfig = () => ({
         console.log('编辑器尚未准备好，忽略内容变化事件')
         return
       }
+      isUserEditing = true
       emit('change', editor.getContent())
       clearTimeout(autoSaveTimer)
       autoSaveTimer = setTimeout(() => {
@@ -509,10 +524,10 @@ const setContent = (content) => {
 }
 
 // 更新标题
-const updateTitle = (e) => {
+const updateTitle = () => {
   emit('update:modelValue', {
     ...props.modelValue,
-    title: e.target.value
+    title: localTitle.value
   })
   // 标题变化也触发 change 事件，但需要检查编辑器是否准备好
   if (isEditorReady && editorInstance) {
@@ -523,8 +538,10 @@ const updateTitle = (e) => {
 // 监听笔记 ID 变化，当切换笔记时更新编辑器内容
 watch(() => props.modelValue.id, (newId, oldId) => {
   if (newId !== oldId && editorInstance) {
-    // 笔记切换，重置解密状态
+    // 笔记切换，重置状态
+    isUserEditing = false
     decryptedContent.value = ''
+    decryptedTitle.value = ''
     decryptError.value = ''
 
     // 如果新笔记是加密的，需要重新解密
@@ -533,6 +550,7 @@ watch(() => props.modelValue.id, (newId, oldId) => {
     } else {
       // 普通笔记或未解锁的加密笔记
       const content = props.modelValue.content || ''
+      localTitle.value = props.modelValue.title || ''
       console.log('笔记切换，更新编辑器内容，新笔记 ID:', newId, '内容长度:', content.length)
       editorInstance.setContent(content)
       editorInstance.setDirty(false)
@@ -558,14 +576,22 @@ watch(() => isKeyValid.value, (valid) => {
 })
 
 /**
- * 监听 displayContent 变化，当解密完成时更新编辑器
+ * 【重要】监听 displayContent 变化，当解密完成时立即更新编辑器
+ * 这确保了即使 TinyMCE 在解密前初始化，也会在解密完成后显示正确的明文
  */
 watch(() => displayContent.value, (newContent) => {
+  // 用户正在编辑时不要重置内容
+  if (isUserEditing) {
+    return
+  }
   if (newContent && editorInstance && isEditorReady) {
     const currentContent = editorInstance.getContent()
     // 只在编辑器内容为空或与原加密内容相同时更新
     if (!currentContent || currentContent === props.modelValue.content) {
-      console.log('解密完成，更新编辑器内容，长度:', newContent.length)
+      console.log('[Vault] displayContent updated, setting decrypted content to editor', {
+        newLength: newContent.length,
+        currentLength: currentContent.length
+      })
       editorInstance.setContent(newContent)
       editorInstance.setDirty(false)
     }
@@ -618,28 +644,53 @@ watch(() => props.isLightTheme, (isLight) => {
 onMounted(async () => {
   isInitializing.value = true
 
-  // 如果是加密笔记但 DEK 不可用，尝试从 session 恢复
-  if (props.isSecret && !isKeyValid.value && !dek.value) {
-    console.log('[Vault] NoteEditor: DEK not available, attempting to recover from session')
-    const recovered = await tryRecoverKeyFromSession()
-    if (recovered) {
-      console.log('[Vault] NoteEditor: DEK recovered from session')
-    } else {
-      console.warn('[Vault] NoteEditor: Failed to recover DEK from session')
+  // 初始化本地标题
+  localTitle.value = props.modelValue.title || ''
+
+  try {
+    // 【关键】如果是加密笔记，先确保有 DEK（从 session 恢复或已有）
+    if (props.isSecret) {
+      console.log('[Vault] NoteEditor: Secret note detected, checking DEK...', {
+        isKeyValid: isKeyValid.value,
+        hasDek: !!dek.value
+      })
+
+      // 如果 DEK 不可用，尝试从 session 恢复
+      if (!isKeyValid.value || !dek.value) {
+        console.log('[Vault] NoteEditor: DEK not available, attempting to recover from session')
+        const recovered = await tryRecoverKeyFromSession()
+        console.log('[Vault] NoteEditor: Recovery attempt completed', {
+          recovered,
+          isKeyValidAfter: isKeyValid.value,
+          hasDekAfter: !!dek.value
+        })
+      }
+
+      // 【关键】在 DEK 可用时立即解密（无需等待 TinyMCE 初始化）
+      if (isKeyValid.value && dek.value && props.modelValue.content) {
+        console.log('[Vault] NoteEditor: Starting decryption...')
+        await decryptNoteContent()
+        console.log('[Vault] NoteEditor: Decryption completed', {
+          decryptedTitleLength: decryptedTitle.value.length,
+          decryptedContentLength: decryptedContent.value.length
+        })
+      } else {
+        console.warn('[Vault] NoteEditor: Cannot decrypt - missing DEK or content', {
+          isKeyValid: isKeyValid.value,
+          hasDek: !!dek.value,
+          hasContent: !!props.modelValue.content
+        })
+      }
     }
+  } catch (e) {
+    console.error('[Vault] NoteEditor onMounted error:', e)
   }
 
-  // 等待 TinyMCE 加载完成
+  // 等待 TinyMCE 加载完成（解密可以并行进行）
   const checkTinyMCE = () => {
     if (window.tinymce) {
       isInitializing.value = false
       initEditor()
-      // 编辑器初始化完成后，如果是加密笔记且已解锁，立即解密
-      setTimeout(() => {
-        if (props.isSecret && isKeyValid.value && props.modelValue.content) {
-          decryptNoteContent()
-        }
-      }, 500)
     } else {
       setTimeout(checkTinyMCE, 100)
     }
@@ -654,10 +705,19 @@ onUnmounted(() => {
   destroyEditor()
 })
 
+/**
+ * 获取当前标题（已解密的明文版本）
+ * 这个方法用于 handleSave() 中，确保保存的始终是明文标题，避免 double encryption
+ */
+const getCurrentTitle = () => {
+  return localTitle.value
+}
+
 defineExpose({
   getContent,
   setContent,
-  getEditor: () => editorInstance
+  getEditor: () => editorInstance,
+  getCurrentTitle
 })
 </script>
 

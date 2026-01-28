@@ -299,8 +299,8 @@ const sidebarStore = useSidebarStore()
 const vaultStore = useVaultStore()
 
 // 【关键】在组件顶部统一调用一次，确保整个组件使用同一个实例
-const { dek, isKeyValid, verify2FAAndGetKey } = useVaultEncryption()
-const { encryptContent } = useClientCrypto()
+const { dek, isKeyValid, verify2FAAndGetKey, tryRecoverKeyFromSession } = useVaultEncryption()
+const { encryptContent, decryptContent } = useClientCrypto()
 
 const props = defineProps({
   activeNoteId: {
@@ -525,26 +525,20 @@ async function performEncryption(note, dekValue) {
   }
 
   try {
-    // 【关键】获取笔记的完整数据
-    let noteData = note
-
-    // 如果缺少 content 或 title，需要先加载完整的笔记数据
-    if (!noteData.content || !noteData.title) {
-      console.log(`[Vault] Loading complete note data for ID: ${note.id}`)
-      const fetchResp = await fetch(`/api/notes/${note.id}/`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!fetchResp.ok) {
-        throw new Error('加载笔记数据失败')
+    // 【关键】始终从数据库加载最新的笔记数据，确保获取的是最新内容
+    console.log(`[Vault] Loading latest note data for ID: ${note.id}`)
+    const fetchResp = await fetch(`/api/notes/${note.id}/`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
       }
+    })
 
-      noteData = await fetchResp.json()
+    if (!fetchResp.ok) {
+      throw new Error('加载笔记数据失败')
     }
 
+    const noteData = await fetchResp.json()
     let plainTitle = noteData.title || ''
     let plainContent = noteData.content || ''
 
@@ -557,20 +551,25 @@ async function performEncryption(note, dekValue) {
       throw new Error('笔记标题为空，无法加密')
     }
 
-    console.log('[Vault] Ready to encrypt', {
+    console.log('[Vault] performEncryption: Ready to encrypt', {
       noteId: note.id,
       plainTitleLength: plainTitle.length,
       plainContentLength: plainContent.length,
       dekLength: dekValue.length
     })
 
-    // 【新增】同时加密 title 和 content
+    // 【关键】同时加密 title 和 content
     const encryptedTitle = encryptContent(plainTitle, dekValue)
     const encryptedContent = encryptContent(plainContent, dekValue)
 
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
-    // 保存加密后的 title 和 content
+    console.log('[Vault] performEncryption: Saving encrypted data...', {
+      encryptedTitleLength: encryptedTitle.length,
+      encryptedContentLength: encryptedContent.length
+    })
+
+    // 【关键】保存加密后的 title 和 content 到数据库
     const updateResponse = await fetch(`/api/notes/${note.id}/`, {
       method: 'PATCH',
       headers: {
@@ -578,7 +577,7 @@ async function performEncryption(note, dekValue) {
         'X-CSRFToken': csrfToken
       },
       body: JSON.stringify({
-        title: encryptedTitle,      // 【新增】也加密 title
+        title: encryptedTitle,
         content: encryptedContent
       })
     })
@@ -588,11 +587,13 @@ async function performEncryption(note, dekValue) {
       throw new Error('保存加密内容失败: ' + (errorData.message || '后端错误'))
     }
 
-    console.log('[Vault] Both title and content encrypted successfully', {
+    const updateResult = await updateResponse.json()
+    console.log('[Vault] performEncryption: Encrypted data saved successfully', {
       plainTitleLength: plainTitle.length,
       encryptedTitleLength: encryptedTitle.length,
       plainContentLength: plainContent.length,
-      encryptedContentLength: encryptedContent.length
+      encryptedContentLength: encryptedContent.length,
+      serverResponse: updateResult
     })
   } catch (e) {
     console.error('[Vault] performEncryption error:', e)
@@ -758,8 +759,22 @@ async function executeEncryptAndSave(note) {
     sidebarStore.vaultVerifyDialogVisible = true
 
     // 监听验证成功事件
-    const handleVerifySuccess = async () => {
+    const handleVerifySuccess = async (event) => {
       try {
+        // 【关键修复】从事件中提取 DEK 和 expireTime
+        const { dek: dekFromEvent, expireTime } = event.detail || {}
+
+        if (dekFromEvent && expireTime) {
+          console.log('[Vault] Received DEK from verification event, saving to store...', {
+            dekLength: dekFromEvent.length,
+            expireTime
+          })
+          // 保存 DEK 到 vaultStore（这样后续的解密和加密都能使用）
+          vaultStore.setDEK(dekFromEvent, expireTime)
+        } else {
+          console.warn('[Vault] Event missing DEK or expireTime:', { dek: !!dekFromEvent, expireTime })
+        }
+
         await vaultStore.executePendingOperation()
         ElMessage.success('加入保密柜成功！内容已加密')
         // 刷新数据
@@ -789,7 +804,30 @@ async function handleToggleSecret(note) {
   try {
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
-    // 1. 先切换 is_secret 标记
+    // 【关键修复】移出保密柜时需要调整顺序：
+    // 先获取笔记数据和 is_secret 状态，再切换标记
+
+    // 1. 先获取笔记的当前状态
+    const currentNoteResp = await fetch(`/api/notes/${note.id}/`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    })
+
+    if (!currentNoteResp.ok) {
+      throw new Error('获取笔记数据失败')
+    }
+
+    const currentNote = await currentNoteResp.json()
+    const wasSecret = currentNote.is_secret  // 切换前的状态
+
+    console.log('[Vault] Current note status:', {
+      noteId: note.id,
+      isSecret: currentNote.is_secret,
+      titleLength: currentNote.title?.length || 0,
+      contentLength: currentNote.content?.length || 0
+    })
+
+    // 2. 切换 is_secret 标记
     const response = await fetch(`/api/notes/${note.id}/toggle-secret/`, {
       method: 'POST',
       headers: {
@@ -804,9 +842,109 @@ async function handleToggleSecret(note) {
 
     const data = await response.json()
 
+    // 3. 根据切换后的状态处理
     if (!data.is_secret) {
       // ========== 移出保密柜 ==========
-      // 移出保密柜时，直接显示成功消息
+      // 【关键】如果笔记之前是加密的，需要解密并保存明文
+
+      if (wasSecret) {
+        console.log('[Vault] Moving note out of vault, will decrypt and save plaintext...')
+
+        // 确保 DEK 可用
+        let dekToUse = dek.value
+        if (!dekToUse || !isKeyValid.value) {
+          console.log('[Vault] DEK not available, attempting to recover...')
+          const recovered = await tryRecoverKeyFromSession()
+          dekToUse = dek.value
+
+          if (!dekToUse || !isKeyValid.value) {
+            console.error('[Vault] Cannot get DEK for decryption')
+            ElMessage.error('无法获取解密密钥，请先进行 2FA 验证')
+            // 恢复 is_secret 标记
+            await fetch(`/api/notes/${note.id}/toggle-secret/`, {
+              method: 'POST',
+              headers: { 'X-CSRFToken': csrfToken }
+            })
+            return
+          }
+        }
+
+        // 解密 title 和 content
+        let decryptedTitle = currentNote.title || ''
+        let decryptedContent = currentNote.content || ''
+
+        console.log('[Vault] Attempting to decrypt...', {
+          titleLength: decryptedTitle.length,
+          contentLength: decryptedContent.length,
+          dekLength: dekToUse.length
+        })
+
+        try {
+          // 尝试解密 title
+          if (decryptedTitle) {
+            try {
+              const result = await decryptContent(decryptedTitle, dekToUse)
+              console.log('[Vault] Title decrypted successfully, length:', result.length)
+              decryptedTitle = result
+            } catch (e) {
+              console.warn('[Vault] Title decryption failed, treating as plaintext:', e.message)
+              // title 可能本身就是明文（加入保密柜时没有加密成功）
+              decryptedTitle = currentNote.title || ''
+            }
+          }
+
+          // 尝试解密 content
+          if (decryptedContent) {
+            try {
+              const result = await decryptContent(decryptedContent, dekToUse)
+              console.log('[Vault] Content decrypted successfully, length:', result.length)
+              decryptedContent = result
+            } catch (e) {
+              console.warn('[Vault] Content decryption failed, treating as plaintext:', e.message)
+              // content 可能本身就是明文（加入保密柜时没有加密成功）
+              decryptedContent = currentNote.content || ''
+            }
+          }
+
+          // 保存明文内容到数据库
+          console.log('[Vault] Saving plaintext to database...', {
+            titleLength: decryptedTitle.length,
+            contentLength: decryptedContent.length
+          })
+
+          const saveResponse = await fetch(`/api/notes/${note.id}/`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+              title: decryptedTitle,
+              content: decryptedContent
+            })
+          })
+
+          if (!saveResponse.ok) {
+            const errorData = await saveResponse.json()
+            throw new Error('保存明文内容失败: ' + (errorData.error || '后端错误'))
+          }
+
+          console.log('[Vault] Plaintext saved successfully to database')
+        } catch (e) {
+          console.error('[Vault] Error during decrypt and save:', e)
+          ElMessage.error('处理笔记内容时出错: ' + e.message)
+          // 恢复 is_secret 标记
+          await fetch(`/api/notes/${note.id}/toggle-secret/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
+          })
+          return
+        }
+      } else {
+        console.log('[Vault] Note was not encrypted, no decryption needed')
+      }
+
+      // 显示成功消息
       if (data.is_secret === false && !data.is_public) {
         ElMessage.success('移出保密柜成功！已自动取消分享')
       } else {

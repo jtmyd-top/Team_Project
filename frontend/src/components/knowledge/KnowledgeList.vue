@@ -201,7 +201,7 @@ const vaultStore = useVaultStore()
 
 // Vault encryption
 const { isKeyValid, dek, keyExpireTime, tryRecoverKeyFromSession } = useVaultEncryption()
-const { decryptContent, encryptContent } = useClientCrypto()
+const { decryptContent, encryptContent, looksLikeEncrypted } = useClientCrypto()
 
 // 状态
 const currentNoteId = ref(null)
@@ -564,10 +564,20 @@ async function handleSave() {
   try {
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
-    // 【关键】从编辑器实例获取最新内容
+    // 【关键】从编辑器实例获取最新的明文标题和内容
     // 这是用户编辑后的明文内容，而不是数据库中已加密的密文
     let contentToSave = ''
-    let titleToSave = currentNoteData.value.title
+    let titleToSave = ''
+
+    // 【修复】优先从编辑器获取标题（必须是编辑器中的明文，避免 double encryption）
+    if (noteEditorRef.value && noteEditorRef.value.getCurrentTitle) {
+      titleToSave = noteEditorRef.value.getCurrentTitle()
+      console.log('[Vault] Got title from editor:', { titleLength: titleToSave.length })
+    } else {
+      // 备选：使用当前笔记数据中的标题
+      titleToSave = currentNoteData.value.title
+      console.log('[Vault] Using title from currentNoteData:', { titleLength: titleToSave.length })
+    }
 
     // 优先从编辑器获取内容（必须是编辑器中的明文）
     if (noteEditorRef.value && noteEditorRef.value.getContent) {
@@ -584,8 +594,7 @@ async function handleSave() {
         // 因为 keyExpireTime 可能已过期，即使 dek.value 还有值
         console.log('[Vault] Checking encryption key validity...', {
           isKeyValid: isKeyValid.value,
-          hasDek: !!dek.value,
-          hasKeyExpireTime: !!keyExpireTime ? keyExpireTime.value > Date.now() : false
+          hasDek: !!dek.value
         })
 
         if (!isKeyValid.value) {
@@ -618,24 +627,33 @@ async function handleSave() {
         // 前端加密：使用 crypto-js 在浏览器中加密解密后的内容
         console.log('[Vault] Starting encryption with DEK...')
 
-        // 加密标题
+        // 【重要】加密标题 - 检查是否已经是加密数据
         if (titleToSave) {
           try {
-            titleToSave = encryptContent(titleToSave, dek.value)
-            console.log('[Vault] Title encrypted successfully')
+            // 【防护】检查标题是否已经看起来像加密数据
+            if (looksLikeEncrypted(titleToSave)) {
+              console.warn('[Vault] Title looks like it\'s already encrypted, skipping title encryption to prevent double-encryption')
+            } else {
+              titleToSave = encryptContent(titleToSave, dek.value)
+              console.log('[Vault] Title encrypted successfully', { encryptedLength: titleToSave.length })
+            }
           } catch (e) {
             console.warn('[Vault] Failed to encrypt title:', e.message)
-            // 如果标题加密失败，继续（可能标题不需要加密或为明文）
           }
         }
 
-        // 加密内容 - 【关键】确保加密的是明文，不是密文
-        contentToSave = encryptContent(contentToSave, dek.value)
-
-        console.log('[Vault] Content encrypted successfully', {
-          encryptedLength: contentToSave.length,
-          sample: contentToSave.substring(0, 50)
-        })
+        // 【重要】加密内容 - 检查是否已经是加密数据，防止 double encryption
+        if (looksLikeEncrypted(contentToSave)) {
+          console.warn('[Vault] Content looks like it\'s already encrypted, skipping content encryption to prevent double-encryption', {
+            contentLength: contentToSave.length
+          })
+        } else {
+          contentToSave = encryptContent(contentToSave, dek.value)
+          console.log('[Vault] Content encrypted successfully', {
+            encryptedLength: contentToSave.length,
+            sample: contentToSave.substring(0, 50)
+          })
+        }
       } catch (e) {
         console.error('[Vault] Encryption failed:', e)
         ElMessage.error('加密失败: ' + e.message)
@@ -853,6 +871,28 @@ onMounted(async () => {
   // 监听笔记保密状态变化事件
   window.addEventListener('note-secret-toggled', handleNoteSecretToggled)
 
+  // 【新增】全局监听 vault-verification-success 事件
+  // 确保任何时候 DEK 都被正确保存到 vaultStore
+  const handleVaultVerificationSuccess = (event) => {
+    try {
+      const { dek: dekFromEvent, expireTime } = event.detail || {}
+      if (dekFromEvent && expireTime) {
+        console.log('[Vault] Global handler: Received DEK from verification event, saving to store...', {
+          dekLength: dekFromEvent.length,
+          expireTime
+        })
+        vaultStore.setDEK(dekFromEvent, expireTime)
+      } else {
+        console.warn('[Vault] Event missing DEK or expireTime')
+      }
+    } catch (e) {
+      console.error('[Vault] Error handling vault verification success:', e)
+    }
+  }
+  window.addEventListener('vault-verification-success', handleVaultVerificationSuccess)
+  // 保存句柄以便卸载时移除
+  window.__vaultVerificationHandler = handleVaultVerificationSuccess
+
   // 尝试从 Redis 恢复加密密钥（如果用户已验证过）
   const keyRecovered = await tryRecoverKeyFromSession()
   if (keyRecovered) {
@@ -888,6 +928,11 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('note-secret-toggled', handleNoteSecretToggled)
+  // 移除全局 vault 验证成功监听器
+  if (window.__vaultVerificationHandler) {
+    window.removeEventListener('vault-verification-success', window.__vaultVerificationHandler)
+    delete window.__vaultVerificationHandler
+  }
 })
 
 // 页面离开前的防呆提醒
