@@ -54,8 +54,8 @@
               </span>
             </div>
             <div class="toolbar-right">
-              <!-- 模式切换 -->
-              <div class="mode-switch">
+              <!-- 模式切换 - 回收站中隐藏编辑按钮 -->
+              <div v-if="!currentNoteData.is_trashed" class="mode-switch">
                 <button
                   class="toolbar-btn"
                   :class="{ active: viewMode === 'read' }"
@@ -73,21 +73,22 @@
                   <i class="fas fa-pen"></i>
                 </button>
               </div>
-              
+
               <div class="divider"></div>
 
               <!-- 操作按钮 -->
-              <button 
-                v-if="viewMode === 'edit'" 
-                class="toolbar-btn primary" 
+              <button
+                v-if="viewMode === 'edit'"
+                class="toolbar-btn primary"
                 @click="handleSave"
                 :disabled="isSaving"
               >
                 <i class="fas fa-save"></i> {{ isSaving ? '保存中...' : '保存' }}
               </button>
 
-              <!-- 公开分享按钮 -->
+              <!-- 公开分享按钮 - 回收站中隐藏 -->
               <button
+                v-if="!currentNoteData.is_trashed"
                 class="toolbar-btn"
                 @click="handleTogglePublic"
                 :title="currentNoteData.is_public ? '设为私密' : '公开分享'"
@@ -95,9 +96,9 @@
                 <i :class="currentNoteData.is_public ? 'fas fa-globe' : 'fas fa-lock'"></i>
               </button>
 
-              <!-- 复制公开链接按钮 -->
+              <!-- 复制公开链接按钮 - 回收站中隐藏 -->
               <button
-                v-if="currentNoteData.is_public"
+                v-if="currentNoteData.is_public && !currentNoteData.is_trashed"
                 class="toolbar-btn"
                 @click="handleCopyPublicLink"
                 title="复制公开链接"

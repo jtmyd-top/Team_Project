@@ -99,3 +99,62 @@
 .secondary-panel ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.2);
 }
+
+/* ==================== 删除确认对话框红色样式 ==================== */
+
+/* Element Plus MessageBox 自定义样式 */
+.delete-confirm-box .el-message-box__header {
+  padding: 20px 20px 10px;
+}
+
+.delete-confirm-box .el-message-box__title {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+.delete-confirm-box .el-message-box__content {
+  padding: 10px 20px 20px;
+  color: #606266;
+}
+
+.delete-confirm-box .el-message-box__btns {
+  padding: 10px 20px 20px;
+}
+
+.delete-confirm-box .el-button--primary {
+  background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+  border: none;
+  color: #fff;
+  font-weight: 500;
+}
+
+.delete-confirm-box .el-button--primary:hover {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  box-shadow: 0 4px 12px rgba(245, 108, 108, 0.4);
+}
+
+/* Element Plus 按钮默认样式覆盖 */
+.el-button--danger {
+  background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+  border: none;
+  color: #fff;
+  font-weight: 500;
+}
+
+.el-button--danger:hover {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  box-shadow: 0 4px 12px rgba(245, 108, 108, 0.4);
+  transform: translateY(-1px);
+}
+
+.el-button--warning {
+  background: linear-gradient(135deg, #e6a23c 0%, #d97706 100%);
+  border: none;
+  color: #fff;
+  font-weight: 500;
+}
+
+.el-button--warning:hover {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  box-shadow: 0 4px 12px rgba(230, 162, 60, 0.4);
+}
