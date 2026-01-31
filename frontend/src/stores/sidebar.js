@@ -476,6 +476,12 @@ export const useSidebarStore = defineStore('sidebar', () => {
       vaultStatus.value.isVerified = false
       vaultStatus.value.remainingSeconds = 0
       currentNotes.value = []
+
+      // 【关键修复】清除 vaultStore 中的 DEK，确保锁定后无法解密
+      const { useVaultStore } = await import('./vault.js')
+      const vaultStore = useVaultStore()
+      vaultStore.clearDEK()
+      console.log('[Sidebar] Vault locked, DEK cleared')
     } catch (e) {
       console.error('锁定保密柜失败:', e)
       throw e
@@ -735,9 +741,14 @@ export const useSidebarStore = defineStore('sidebar', () => {
           'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
         }
       })
-      
-      // 从当前列表移除（回收站视图）
+
+      // 從當前列表移除（回收站視圖）
       currentNotes.value = currentNotes.value.filter(n => n.id !== noteId)
+
+      // 【新增】觸發筆記還原事件，讓預覽區清空
+      window.dispatchEvent(new CustomEvent('note-restored-from-trash', {
+        detail: { noteId }
+      }))
     } catch (e) {
       error.value = e.message
       throw e

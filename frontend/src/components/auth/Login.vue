@@ -130,6 +130,7 @@
                 :maxlength="useBackupCode ? 8 : 6"
                 class="auth-input code-input"
                 @keyup.enter="verifyTwoFA"
+                @input="handleVerificationCodeInput"
               >
                 <template #prefix>
                   <i class="fas fa-key input-icon"></i>
@@ -525,6 +526,20 @@ const backToPassword = () => {
   useBackupCode.value = false
   countdown.value = 0
   refreshCaptcha()
+}
+
+const handleVerificationCodeInput = () => {
+  // 获取期望的验证码长度
+  const expectedLength = useBackupCode.value ? 8 : 6
+  const currentLength = twoFaForm.code.length
+
+  // 当输入达到预期长度时，自动触发验证
+  if (currentLength === expectedLength) {
+    // 延迟20ms确保输入完全更新，避免验证时收到不完整的输入
+    setTimeout(() => {
+      verifyTwoFA()
+    }, 20)
+  }
 }
 
 onMounted(() => {

@@ -360,19 +360,57 @@ VAULT_CAPTCHA_THRESHOLD = 3
 VAULT_ALERT_THRESHOLD = 3
 
 
-def get_vault_access_key(user_id):
-    """获取保密柜访问状态的缓存key"""
-    return f'vault_access:{user_id}'
+def get_vault_access_key(user_id_or_request):
+    """
+    获取保密柜访问状态的缓存key
+    【修复】使用 session_key 而不是 user_id，确保不同设备独立解锁
+
+    Args:
+        user_id_or_request: 用户ID（向后兼容）或 HttpRequest 对象
+    """
+    # 向后兼容：如果传入的是 request 对象，提取 session_key
+    if hasattr(user_id_or_request, 'session'):
+        request = user_id_or_request
+        if not request.session.session_key:
+            request.session.create()
+        return f'vault_access:{request.session.session_key}'
+    else:
+        # 兼容旧代码：直接使用 user_id
+        return f'vault_access:{user_id_or_request}'
 
 
-def get_vault_fail_key(user_id):
-    """获取保密柜验证失败计数的缓存key"""
-    return f'vault_fail:{user_id}'
+def get_vault_fail_key(user_id_or_request):
+    """
+    获取保密柜验证失败计数的缓存key
+    【修复】使用 session_key 而不是 user_id，确保不同设备有独立的失败计数
+
+    Args:
+        user_id_or_request: 用户ID（向后兼容）或 HttpRequest 对象
+    """
+    if hasattr(user_id_or_request, 'session'):
+        request = user_id_or_request
+        if not request.session.session_key:
+            request.session.create()
+        return f'vault_fail:{request.session.session_key}'
+    else:
+        return f'vault_fail:{user_id_or_request}'
 
 
-def get_vault_lock_key(user_id):
-    """获取保密柜锁定状态的缓存key"""
-    return f'vault_lock:{user_id}'
+def get_vault_lock_key(user_id_or_request):
+    """
+    获取保密柜锁定状态的缓存key
+    【修复】使用 session_key 而不是 user_id，确保不同设备有独立的锁定状态
+
+    Args:
+        user_id_or_request: 用户ID（向后兼容）或 HttpRequest 对象
+    """
+    if hasattr(user_id_or_request, 'session'):
+        request = user_id_or_request
+        if not request.session.session_key:
+            request.session.create()
+        return f'vault_lock:{request.session.session_key}'
+    else:
+        return f'vault_lock:{user_id_or_request}'
 
 
 def get_vault_fail_count(user_id):
@@ -510,26 +548,28 @@ def send_vault_security_alert(user, fail_count, ip_address=None):
         logger.error(f"发送保密柜安全警告邮件失败: {e}", exc_info=True)
 
 
-def check_vault_access(user):
+def check_vault_access(request):
     """
     检查用户是否已通过保密柜2FA验证（在时间窗口内）
+    【修复】现在接收 request 而不是 user，使用 session_key 检查
 
     Args:
-        user: 用户对象
+        request: HttpRequest 对象
 
     Returns:
         bool: True表示已验证且在有效期内，False表示需要重新验证
     """
-    cache_key = get_vault_access_key(user.id)
+    cache_key = get_vault_access_key(request)
     return cache.get(cache_key) is not None
 
 
-def grant_vault_access(user, window_seconds=None):
+def grant_vault_access(request, window_seconds=None):
     """
     授予用户保密柜访问权限（设置时间窗口）
+    【修复】现在接收 request 而不是 user，使用 session_key 授权
 
     Args:
-        user: 用户对象
+        request: HttpRequest 对象
         window_seconds: 时间窗口（秒），默认使用VAULT_ACCESS_WINDOW
 
     Returns:
@@ -538,37 +578,39 @@ def grant_vault_access(user, window_seconds=None):
     if window_seconds is None:
         window_seconds = VAULT_ACCESS_WINDOW
 
-    cache_key = get_vault_access_key(user.id)
+    cache_key = get_vault_access_key(request)
     expire_time = int(time.time()) + window_seconds
     cache.set(cache_key, expire_time, timeout=window_seconds)
 
-    logger.info(f"用户 {user.id} 获得保密柜访问权限，有效期 {window_seconds} 秒")
+    logger.info(f"用户 {request.user.id} (session: {request.session.session_key}) 获得保密柜访问权限，有效期 {window_seconds} 秒")
     return expire_time
 
 
-def revoke_vault_access(user):
+def revoke_vault_access(request):
     """
     撤销用户的保密柜访问权限（主动锁定）
+    【修复】现在接收 request 而不是 user，使用 session_key 撤销
 
     Args:
-        user: 用户对象
+        request: HttpRequest 对象
     """
-    cache_key = get_vault_access_key(user.id)
+    cache_key = get_vault_access_key(request)
     cache.delete(cache_key)
-    logger.info(f"用户 {user.id} 的保密柜访问权限已撤销")
+    logger.info(f"用户 {request.user.id} (session: {request.session.session_key}) 的保密柜访问权限已撤销")
 
 
-def get_vault_access_remaining(user):
+def get_vault_access_remaining(request):
     """
     获取保密柜访问权限剩余时间
+    【修复】现在接收 request 而不是 user，使用 session_key 查询
 
     Args:
-        user: 用户对象
+        request: HttpRequest 对象
 
     Returns:
         int: 剩余秒数，0表示已过期或未验证
     """
-    cache_key = get_vault_access_key(user.id)
+    cache_key = get_vault_access_key(request)
     expire_time = cache.get(cache_key)
 
     if expire_time is None:
@@ -628,7 +670,7 @@ def verify_captcha_for_vault(captcha_type, turnstile_token, image_captcha, user_
     return False, '未知的验证码类型'
 
 
-def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
+def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, duration_minutes=None):
     """
     验证保密柜2FA并授予访问权限（带速率限制和指数退避）
 
@@ -637,6 +679,7 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
         code: 用户输入的验证码
         use_backup: 是否使用备用验证码
         captcha_params: CAPTCHA参数 {'captcha_type': str, 'turnstile_token': str, 'image_captcha': str}
+        duration_minutes: 【新增】用户选择的解锁时长（分钟），None表示使用默认值
 
     Returns:
         dict: {
@@ -647,11 +690,38 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': int,
             'lock_seconds': int,
             'remaining_seconds': int,
-            'require_captcha': bool
+            'require_captcha': bool,
+            'window_seconds': int  # 【新增】实际设置的窗口时长（秒）
         }
     """
     user = request.user
     profile = getattr(user, 'profile', None)
+
+    # 【新增】处理 duration 参数，应用安全边界
+    if duration_minutes is None:
+        window_seconds = VAULT_ACCESS_WINDOW  # 默认30分钟
+    else:
+        # 验证并转换为秒数
+        if isinstance(duration_minutes, str):
+            try:
+                duration_minutes = int(duration_minutes)
+            except ValueError:
+                duration_minutes = 30
+
+        if duration_minutes == 0:
+            # 特殊值 0 表示"直到浏览器关闭"，后端使用 24 小时作为兜底
+            window_seconds = 24 * 60 * 60  # 24 小时
+            logger.info(f"用户 {user.id} 选择会话级别锁定，后端兜底 24 小时")
+        elif duration_minutes < 1:
+            # 无效的正数值，使用默认值
+            window_seconds = VAULT_ACCESS_WINDOW
+        elif duration_minutes > 720:
+            # 【安全边界】最大 12 小时，防止恶意获取永久权限
+            window_seconds = 720 * 60  # 12 小时
+            logger.warning(f"用户 {user.id} 请求超过 12 小时的解锁时长，已截断为 720 分钟")
+        else:
+            # 正常范围内的值
+            window_seconds = duration_minutes * 60
 
     if not profile:
         return {
@@ -662,13 +732,14 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': 0,
             'lock_seconds': 0,
             'remaining_seconds': 0,
-            'require_captcha': False
+            'require_captcha': False,
+            'window_seconds': 0
         }
 
     # 如果用户未启用2FA，直接授予访问权限
     if not profile.two_fa_enabled:
-        expire_time = grant_vault_access(user)
-        remaining = get_vault_access_remaining(user)
+        expire_time = grant_vault_access(request, window_seconds=window_seconds)  # 【修改】传 window_seconds
+        remaining = get_vault_access_remaining(request)
         return {
             'success': True,
             'message': '',
@@ -677,7 +748,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': 0,
             'lock_seconds': 0,
             'remaining_seconds': remaining,
-            'require_captcha': False
+            'require_captcha': False,
+            'window_seconds': window_seconds
         }
 
     # 检查是否被锁定
@@ -691,7 +763,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': fail_count,
             'lock_seconds': lock_remaining,
             'remaining_seconds': 0,
-            'require_captcha': False
+            'require_captcha': False,
+            'window_seconds': 0  # 【新增】
         }
 
     # 检查是否需要CAPTCHA验证（失败次数 >= 3）
@@ -705,7 +778,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
                 'fail_count': fail_count,
                 'lock_seconds': 0,
                 'remaining_seconds': 0,
-                'require_captcha': True
+                'require_captcha': True,
+                'window_seconds': 0  # 【新增】
             }
 
         # 验证CAPTCHA
@@ -726,7 +800,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
                 'fail_count': fail_count,
                 'lock_seconds': 0,
                 'remaining_seconds': 0,
-                'require_captcha': True
+                'require_captcha': True,
+                'window_seconds': 0  # 【新增】
             }
 
     # 验证2FA
@@ -735,8 +810,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
     if success:
         # 验证成功，重置失败计数并授予访问权限
         reset_vault_fail_count(user.id)
-        expire_time = grant_vault_access(user)
-        remaining = get_vault_access_remaining(user)
+        expire_time = grant_vault_access(request, window_seconds=window_seconds)  # 【修改】传 window_seconds
+        remaining = get_vault_access_remaining(request)
         return {
             'success': True,
             'message': '',
@@ -745,7 +820,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': 0,
             'lock_seconds': 0,
             'remaining_seconds': remaining,
-            'require_captcha': False
+            'require_captcha': False,
+            'window_seconds': window_seconds  # 【新增】
         }
 
     # 验证失败，增加失败计数
@@ -768,7 +844,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': new_fail_count,
             'lock_seconds': lock_seconds,
             'remaining_seconds': 0,
-            'require_captcha': False
+            'require_captcha': False,
+            'window_seconds': 0  # 【新增】
         }
 
     if require_captcha:
@@ -780,7 +857,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
             'fail_count': new_fail_count,
             'lock_seconds': 0,
             'remaining_seconds': 0,
-            'require_captcha': True
+            'require_captcha': True,
+            'window_seconds': 0  # 【新增】
         }
 
     return {
@@ -791,7 +869,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None):
         'fail_count': new_fail_count,
         'lock_seconds': 0,
         'remaining_seconds': 0,
-        'require_captcha': False
+        'require_captcha': False,
+        'window_seconds': 0  # 【新增】
     }
 
 
@@ -825,8 +904,8 @@ def require_vault_access(view_func):
         if not profile or not profile.two_fa_enabled:
             return view_func(request, *args, **kwargs)
 
-        # 检查是否在有效期内
-        if check_vault_access(request.user):
+        # 【修复】检查是否在有效期内：现在传 request 而不是 request.user
+        if check_vault_access(request):
             return view_func(request, *args, **kwargs)
 
         # 需要2FA验证

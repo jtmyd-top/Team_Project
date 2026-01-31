@@ -37,7 +37,10 @@
       "Bash(python3:*)",
       "Bash(iconv:*)",
       "Bash(git pull:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(npm run lint:*)",
+      "Bash(node:*)",
+      "Bash(git checkout frontend/src/components/knowledge/KnowledgeList.vue)"
     ],
     "deny": [],
     "ask": []

@@ -1390,11 +1390,14 @@ def note_detail_api(request, note_id):
     local_updated_at = timezone.localtime(note.updated_at)
     local_created_at = timezone.localtime(note.created_at)
     if request.method == 'GET':
+        # 【安全红线】回收站中的保密笔记不返回 content 字段
+        # 普通笔记即使在回收站中也可以预览，但保密笔记需要还原后才能查看
+        include_content = not (note.is_secret and note.is_trashed)
+
         if request.GET.get('full_content') == 'true':
             data = {
                 'id': note.id,
                 'title': note.title,
-                'content': note.content or "",
                 'is_public': note.is_public,
                 'is_secret': note.is_secret,
                 'is_trashed': note.is_trashed,  # 【新增】返回回收站状态
@@ -1405,14 +1408,19 @@ def note_detail_api(request, note_id):
                 'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
                 'toc': note.toc or [],  # 添加目录数据
             }
+            # 【新增】條件性包含 content
+            if include_content:
+                data['content'] = note.content or ""
+            else:
+                data['content_locked'] = True
+                data['lock_reason'] = '此笔记位于回收站中，内容已锁定。'
             return JsonResponse(data)
 
         page = request.GET.get('page', 1)
-        paginated_content, total_pages = get_paginated_html(note.content, page)
+        paginated_content, total_pages = get_paginated_html(note.content, page) if include_content else ("", 1)
         data = {
             'id': note.id,
             'title': note.title,
-            'content': paginated_content,
             'is_public': note.is_public,
             'is_secret': note.is_secret,
             'is_trashed': note.is_trashed,  # 【新增】返回回收站状态
@@ -1427,16 +1435,32 @@ def note_detail_api(request, note_id):
             'pagination': {
                 'current_page': int(page),
                 'total_pages': total_pages,
-            },
-            'toc': note.toc or [],  # 添加目录数据
+            }
         }
+        # 【新增】條件性包含 content 和分页信息
+        if include_content:
+            data['content'] = paginated_content
+        else:
+            data['content_locked'] = True
+            data['lock_reason'] = '此笔记位于回收站中，内容已锁定。'
         return JsonResponse(data)
 
     if request.method == 'PUT':
+        # 【新增】安全檢查：回收站保護
+        allowed, error_msg = check_note_edit_permission(note)
+        if not allowed:
+            return JsonResponse({'error': error_msg}, status=403)
+
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': '无效的JSON格式'}, status=400)
+
+        # 【新增】安全檢查：防止保密柜筆記發布為公開
+        if data.get('is_public') and note.is_secret:
+            allowed, error_msg = check_note_secret_operation_permission(note, 'publish')
+            if not allowed:
+                return JsonResponse({'error': error_msg}, status=403)
 
         note.title = data.get('title', note.title)
         note.is_public = data.get('is_public', note.is_public)
@@ -1479,12 +1503,23 @@ def note_detail_api(request, note_id):
 
     # --- PATCH 请求处理（部分更新）---
     if request.method == 'PATCH':
+        # 【新增】安全檢查：回收站保護
+        allowed, error_msg = check_note_edit_permission(note)
+        if not allowed:
+            return JsonResponse({'error': error_msg}, status=403)
+
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': '无效的JSON格式'}, status=400)
 
         try:
+            # 【新增】安全檢查：防止保密柜筆記發布為公開
+            if 'is_public' in data and data['is_public'] and note.is_secret:
+                allowed, error_msg = check_note_secret_operation_permission(note, 'publish')
+                if not allowed:
+                    return JsonResponse({'error': error_msg}, status=403)
+
             # 只更新提供的字段
             if 'title' in data:
                 note.title = data['title']
@@ -4000,6 +4035,7 @@ def vault_status(request):
     """
     获取保密柜状态
     返回：是否已启用2FA、是否已验证、剩余时间、保密笔记数量
+    【修复】现在使用 session_key 而不是 user_id 来检查验证状态
     """
     user = request.user
     profile = getattr(user, 'profile', None)
@@ -4007,9 +4043,9 @@ def vault_status(request):
     two_fa_enabled = profile.two_fa_enabled if profile else False
     two_fa_method = profile.two_fa_method if profile else None
 
-    # 检查是否已验证
-    is_verified = check_vault_access(user) if two_fa_enabled else True
-    remaining_seconds = get_vault_access_remaining(user) if two_fa_enabled else 0
+    # 【修复】检查是否已验证：现在传 request 而不是 user
+    is_verified = check_vault_access(request) if two_fa_enabled else True
+    remaining_seconds = get_vault_access_remaining(request) if two_fa_enabled else 0
 
     # 获取保密笔记数量
     secret_notes_count = Note.objects.filter(
@@ -4045,6 +4081,9 @@ def vault_verify(request):
     code = data.get('code', '').strip()
     use_backup = data.get('use_backup', False)
 
+    # 【新增】提取用户选择的解锁时长（分钟），默认30分钟
+    duration_minutes = data.get('duration', 30)
+
     # 提取CAPTCHA参数
     captcha_params = None
     captcha_type = data.get('captcha_type')
@@ -4058,14 +4097,13 @@ def vault_verify(request):
     if not code:
         return JsonResponse({'status': 'error', 'message': '请输入验证码'}, status=400)
 
-    # 使用新的验证函数（返回dict），传入CAPTCHA参数
-    result = verify_vault_2fa(request, code, use_backup, captcha_params)
+    # 【修改】使用新的验证函数（返回dict），传入CAPTCHA参数和duration
+    result = verify_vault_2fa(request, code, use_backup, captcha_params, duration_minutes)
 
     if result['success']:
         # ==================== 加密集成 ====================
-        # 1. 存储 vault session 到 Redis（30分钟 TTL）
-        vault_session_key = f"vault_session:{request.user.id}"
-        cache.set(vault_session_key, {'verified_at': timezone.now().isoformat()}, timeout=1800)
+        # 1. 【修改】使用用户选择的时长来授予访问权限
+        grant_vault_access(request, window_seconds=result['window_seconds'])
 
         # 2. 尝试返回 DEK 用于前端解密
         try:
@@ -4118,8 +4156,9 @@ def vault_verify(request):
 def vault_lock(request):
     """
     主动锁定保密柜（撤销访问权限）
+    【修复】现在使用 session_key 而不是 user_id
     """
-    revoke_vault_access(request.user)
+    revoke_vault_access(request)
     return JsonResponse({
         'status': 'success',
         'message': '保密柜已锁定'
@@ -4192,7 +4231,7 @@ def vault_notes_list(request):
 
     # 检查2FA验证状态
     if profile and profile.two_fa_enabled:
-        if not check_vault_access(user):
+        if not check_vault_access(request):  # 【修复】传 request 而不是 user
             return JsonResponse({
                 'status': 'require_vault_2fa',
                 'code': 'require_vault_2fa',
@@ -4221,7 +4260,7 @@ def vault_notes_list(request):
     return JsonResponse({
         'status': 'success',
         'notes': notes_data,
-        'remaining_seconds': get_vault_access_remaining(user) if profile and profile.two_fa_enabled else 0
+        'remaining_seconds': get_vault_access_remaining(request) if profile and profile.two_fa_enabled else 0  # 【修复】传 request 而不是 user
     })
 
 
@@ -4279,7 +4318,7 @@ def vault_get_key(request):
     获取保险柜 DEK（Data Encryption Key）用于解密
 
     逻辑：
-    1. 检查 Redis 中是否有有效的 vault_session:{user_id}
+    1. 检查 vault_access 状态（使用 session_key）
     2. 如果有且未过期：返回 DEK，刷新 TTL
     3. 如果无或已过期：返回 403，提示需要 2FA 验证
 
@@ -4291,22 +4330,20 @@ def vault_get_key(request):
     }
     """
     from knowledge_project.utils.vault_crypto import VaultEncryption
+    from .decorators import check_vault_access, get_vault_access_remaining
 
     try:
         user = request.user
-        vault_session_key = f"vault_session:{user.id}"
 
-        # 检查 Redis 中的 vault session
-        session_data = cache.get(vault_session_key)
-
-        if not session_data:
-            # Session 过期，需要重新验证
+        # 【修复】使用 check_vault_access 检查访问权限（与 grant_vault_access 一致）
+        if not check_vault_access(request):
+            # 未授权，需要重新验证
             return JsonResponse({
                 'status': 'error',
                 'message': '需要重新验证'
             }, status=403)
 
-        # Session 有效，返回 DEK
+        # 已授权，返回 DEK
         try:
             profile = user.profile
             if not profile.vault_initialized:
@@ -4322,13 +4359,13 @@ def vault_get_key(request):
             )
             dek_b64 = __import__('base64').b64encode(dek).decode('utf-8')
 
-            # 刷新 Redis TTL（30分钟）
-            cache.set(vault_session_key, session_data, timeout=1800)
+            # 获取剩余时间
+            remaining_seconds = get_vault_access_remaining(request)
 
             return JsonResponse({
                 'status': 'success',
                 'dek': dek_b64,
-                'expire_time': 1800
+                'expire_time': remaining_seconds
             })
 
         except Exception as e:

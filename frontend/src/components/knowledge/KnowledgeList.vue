@@ -311,7 +311,6 @@ async function decryptNoteTitle() {
 
   // 如果没有有效的 DEK，不能解密
   if (!isKeyValid.value || !dek.value) {
-    console.warn('[Vault] Cannot decrypt title: no valid DEK')
     decryptedTitle.value = ''
     return
   }
@@ -320,10 +319,8 @@ async function decryptNoteTitle() {
     // 尝试解密标题
     const plainTitle = decryptContent(currentNoteData.value.title, dek.value)
     decryptedTitle.value = plainTitle
-    console.log('[Vault] Title decrypted successfully in KnowledgeList')
   } catch (e) {
     // 标题可能是明文（旧笔记），保留原值
-    console.warn('[Vault] Failed to decrypt title (might be plaintext):', e.message)
     decryptedTitle.value = ''  // 让 displayTitle computed 显示原标题
   }
 }
@@ -399,7 +396,6 @@ async function fetchNoteDetail(noteId) {
 
     hasUnsavedChanges.value = false
   } catch (e) {
-    console.error('获取笔记详情失败:', e)
     ElMessage.error('无法加载笔记内容')
   }
 }
@@ -503,7 +499,6 @@ async function handleCreateNote(folderId = null) {
       throw new Error('创建失败：未返回笔记 ID')
     }
   } catch (e) {
-    console.error('创建笔记失败:', e)
     ElMessage.error('创建笔记失败')
   }
 }
@@ -517,7 +512,6 @@ function handleEditorChange(content) {
   // 忽略空内容更新，防止编辑器初始化时的事件覆盖已有内容
   // 但如果原本就是空内容（新建笔记），则允许标记为已修改
   if (!content && currentNoteData.value.content && currentNoteData.value.content.length > 0) {
-    console.log('忽略空内容更新，保持现有数据')
     return
   }
 
@@ -577,12 +571,10 @@ async function handleSave() {
     if (noteEditorRef.value && noteEditorRef.value.getCurrentTitle) {
       titleToSave = noteEditorRef.value.getCurrentTitle()
       plainTextTitle = titleToSave  // 【新增】保存明文标题
-      console.log('[Vault] Got title from editor:', { titleLength: titleToSave.length })
     } else {
       // 备选：使用当前笔记数据中的标题
       titleToSave = currentNoteData.value.title
       plainTextTitle = titleToSave  // 【新增】保存明文标题
-      console.log('[Vault] Using title from currentNoteData:', { titleLength: titleToSave.length })
     }
 
     // 优先从编辑器获取内容（必须是编辑器中的明文）
@@ -598,17 +590,11 @@ async function handleSave() {
       try {
         // 【关键修复】检查 isKeyValid 而不仅仅是 dek.value
         // 因为 keyExpireTime 可能已过期，即使 dek.value 还有值
-        console.log('[Vault] Checking encryption key validity...', {
-          isKeyValid: isKeyValid.value,
-          hasDek: !!dek.value
-        })
 
         if (!isKeyValid.value) {
-          console.warn('[Vault] Key has expired or is invalid, attempting to recover from session...')
           // 尝试从 session 恢复 DEK
           const recovered = await tryRecoverKeyFromSession()
           if (!recovered || !isKeyValid.value) {
-            console.error('[Vault] Failed to recover DEK, 2FA verification required')
             ElMessage.error('加密密钥已失效，请重新进行 2FA 验证')
             isSaving.value = false
             return
@@ -616,7 +602,6 @@ async function handleSave() {
         }
 
         if (!dek.value) {
-          console.error('[Vault] DEK is empty after validation')
           ElMessage.error('无法获取加密密钥')
           isSaving.value = false
           return
@@ -624,44 +609,30 @@ async function handleSave() {
 
         // 【重要】确认 contentToSave 是编辑器中的明文，而不是数据库中的密文
         // 判断方法：编辑器内容长度通常与原明文长度相同，如果与原密文长度相同则可能是错误
-        console.log('[Vault] Preparing to encrypt...', {
-          contentLength: contentToSave.length,
-          originalContentLength: currentNoteData.value.content.length,
-          isDifferent: contentToSave !== currentNoteData.value.content
-        })
 
         // 前端加密：使用 crypto-js 在浏览器中加密解密后的内容
-        console.log('[Vault] Starting encryption with DEK...')
 
         // 【重要】加密标题 - 检查是否已经是加密数据
         if (titleToSave) {
           try {
             // 【防护】检查标题是否已经看起来像加密数据
             if (looksLikeEncrypted(titleToSave)) {
-              console.warn('[Vault] Title looks like it\'s already encrypted, skipping title encryption to prevent double-encryption')
+              // Skip
             } else {
               titleToSave = encryptContent(titleToSave, dek.value)
-              console.log('[Vault] Title encrypted successfully', { encryptedLength: titleToSave.length })
             }
           } catch (e) {
-            console.warn('[Vault] Failed to encrypt title:', e.message)
+            // Error encrypting title
           }
         }
 
         // 【重要】加密内容 - 检查是否已经是加密数据，防止 double encryption
         if (looksLikeEncrypted(contentToSave)) {
-          console.warn('[Vault] Content looks like it\'s already encrypted, skipping content encryption to prevent double-encryption', {
-            contentLength: contentToSave.length
-          })
+          // Skip
         } else {
           contentToSave = encryptContent(contentToSave, dek.value)
-          console.log('[Vault] Content encrypted successfully', {
-            encryptedLength: contentToSave.length,
-            sample: contentToSave.substring(0, 50)
-          })
         }
       } catch (e) {
-        console.error('[Vault] Encryption failed:', e)
         ElMessage.error('加密失败: ' + e.message)
         isSaving.value = false
         return
@@ -701,12 +672,6 @@ async function handleSave() {
       // 【修复】使用保存前的明文标题更新列表，而不是已加密的 currentNoteData.value.title
       // plainTextTitle 是从编辑器获取的明文，不会被加密污染
       note.title = plainTextTitle
-
-      console.log('[Vault] Updated list item title:', {
-        noteId: currentNoteId.value,
-        newTitle: plainTextTitle,
-        isSecret: currentNoteData.value.is_secret
-      })
     }
 
     // 【新增】同时更新解密标题状态，这样工具栏也会显示最新的标题
@@ -728,7 +693,6 @@ async function handleSave() {
     // 保存成功后切换到阅读模式
     viewMode.value = 'read'
   } catch (e) {
-    console.error('保存失败:', e)
     ElMessage.error('保存失败，请重试')
   } finally {
     isSaving.value = false
@@ -738,13 +702,19 @@ async function handleSave() {
 // 删除笔记
 async function handleDelete() {
   if (!currentNoteId.value) return
-  
+
   try {
-    await ElMessageBox.confirm('确定要删除这篇笔记吗？它将被移动到回收站。', '确认删除', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      '确定要删除这篇笔记吗？它将被移动到回收站。',
+      '确认删除',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'error',
+        confirmButtonClass: 'el-button--danger',
+        customClass: 'delete-confirm-box'
+      }
+    )
     
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
     
@@ -766,7 +736,6 @@ async function handleDelete() {
     }
   } catch (e) {
     if (e !== 'cancel') {
-      console.error('删除失败:', e)
       ElMessage.error('删除失败')
     }
   }
@@ -806,7 +775,6 @@ async function handleTogglePublic() {
     }
     ElMessage.success(`笔记已${actionText}`)
   } catch (e) {
-    console.error(`${actionText}失败:`, e)
     ElMessage.error(`${actionText}失败，请重试`)
   }
 }
@@ -836,7 +804,6 @@ async function handleCopyPublicLink() {
     }
     ElMessage.success('链接已复制到剪贴板')
   } catch (e) {
-    console.error('复制失败:', e)
     ElMessage.error('复制失败，请手动复制')
   }
 }
@@ -864,7 +831,6 @@ watch(() => currentNoteData.value.title, (newTitle, oldTitle) => {
   // 需要同时更新 decryptedTitle 以确保工具栏标题即时更新
   if (currentNoteData.value.is_secret) {
     decryptedTitle.value = newTitle
-    console.log('[Vault] Title in edit mode updated, decryptedTitle synced:', { newTitle })
   }
 
   // 如果标题确实被用户修改了（与原始标题不同）
@@ -923,7 +889,6 @@ onMounted(async () => {
         await fetchNoteDetail(noteId)
         ElMessage.success('笔记已从保密柜移出')
       } catch (e) {
-        console.error('重新加载笔记失败:', e)
         ElMessage.error('重新加载笔记失败')
       }
     }
@@ -956,7 +921,6 @@ onMounted(async () => {
         try {
           await fetchNoteDetail(noteId)
         } catch (e) {
-          console.error('重新加载笔记失败:', e)
         }
       }
     }
@@ -984,7 +948,6 @@ onMounted(async () => {
         }))
       }
     } catch (e) {
-      console.error('加载搜索结果失败:', e)
       ElMessage.error('加载笔记失败')
     }
   })
@@ -995,26 +958,30 @@ onMounted(async () => {
     try {
       const { dek: dekFromEvent, expireTime } = event.detail || {}
       if (dekFromEvent && expireTime) {
-        console.log('[Vault] Global handler: Received DEK from verification event, saving to store...', {
-          dekLength: dekFromEvent.length,
-          expireTime
-        })
         vaultStore.setDEK(dekFromEvent, expireTime)
-      } else {
-        console.warn('[Vault] Event missing DEK or expireTime')
       }
     } catch (e) {
-      console.error('[Vault] Error handling vault verification success:', e)
+      // Error handling vault verification success
     }
   }
   window.addEventListener('vault-verification-success', handleVaultVerificationSuccess)
   // 保存句柄以便卸载时移除
   window.__vaultVerificationHandler = handleVaultVerificationSuccess
 
+  // 【新增】监听来自回收站的保密柜解锁请求
+  const handleVaultUnlockDialog = (event) => {
+    const { fromTrash, noteId } = event.detail || {}
+    console.log('[KnowledgeList] Received vault unlock dialog request:', { fromTrash, noteId })
+    // 打开保密柜验证对话框
+    sidebarStore.vaultVerifyDialogVisible = true
+  }
+  window.addEventListener('open-vault-unlock-dialog', handleVaultUnlockDialog)
+  // 保存句柄以便卸载时移除
+  window.__vaultUnlockDialogHandler = handleVaultUnlockDialog
+
   // 尝试从 Redis 恢复加密密钥（如果用户已验证过）
   const keyRecovered = await tryRecoverKeyFromSession()
   if (keyRecovered) {
-    console.log('Vault key recovered from session')
   }
 
   // 从 URL 恢复状态
@@ -1038,6 +1005,12 @@ onMounted(async () => {
     currentNoteId.value = noteId
     await fetchNoteDetail(noteId)
     viewMode.value = 'read'
+
+    // 【修复】加载笔记后，如果是加密笔记且密钥已恢复，自动解密标题
+    if (currentNoteData.value.is_secret && isKeyValid.value) {
+      await decryptNoteTitle()
+    }
+
     isLoadingNote.value = false
   }
 })
@@ -1050,6 +1023,11 @@ onUnmounted(() => {
   if (window.__vaultVerificationHandler) {
     window.removeEventListener('vault-verification-success', window.__vaultVerificationHandler)
     delete window.__vaultVerificationHandler
+  }
+  // 移除保密柜解锁对话框监听器
+  if (window.__vaultUnlockDialogHandler) {
+    window.removeEventListener('open-vault-unlock-dialog', window.__vaultUnlockDialogHandler)
+    delete window.__vaultUnlockDialogHandler
   }
 })
 
@@ -1069,7 +1047,6 @@ function handleNoteSecretToggled(event) {
   try {
     // 检查组件是否仍然存在
     if (!event || !event.detail) {
-      console.warn('Event detail is missing')
       return
     }
 
@@ -1095,7 +1072,6 @@ function handleNoteSecretToggled(event) {
     }
   } catch (e) {
     // 组件卸载时，静默处理错误
-    console.warn('Error handling note secret toggle:', e)
   }
 }
 </script>
@@ -1197,9 +1173,16 @@ function handleNoteSecretToggled(event) {
   background: var(--primary-color-dark, #337ecc);
 }
 
+.toolbar-btn.danger {
+  color: #fff;
+  background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+  border: none;
+}
+
 .toolbar-btn.danger:hover {
-  color: #f56c6c;
-  background: rgba(245, 108, 108, 0.1);
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  box-shadow: 0 4px 12px rgba(245, 108, 108, 0.4);
+  transform: translateY(-1px);
 }
 
 .divider {

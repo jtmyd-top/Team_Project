@@ -32,7 +32,25 @@
       <div v-else class="note-title-wrapper">
         <!-- 保密图标 -->
         <i v-if="note.is_secret" class="fas fa-lock vault-badge" title="保密笔记"></i>
-        <h4 class="note-title">{{ displayTitle }}</h4>
+
+        <!-- 标题内容 -->
+        <h4
+          v-if="!needsUnlock"
+          class="note-title"
+        >
+          {{ displayTitle }}
+        </h4>
+
+        <!-- 【新增】未解锁时显示模糊占位符 -->
+        <h4
+          v-else
+          class="note-title locked"
+          @click.stop="handleUnlockVault"
+          :title="isInTrash ? '在回收站中查看加密笔记需要先解锁保密柜' : '查看加密笔记需要先解锁保密柜'"
+        >
+          <span class="lock-icon">🔒</span>
+          <span class="mask-text">加密笔记{{ isInTrash ? ' - 点击解锁' : '' }}</span>
+        </h4>
       </div>
 
       <!-- 元信息 -->
@@ -55,7 +73,8 @@
       <!-- 常规操作 -->
       <template v-if="!showTrashActions">
         <!-- 收藏按钮 -->
-        <button 
+        <button
+          v-if="!note.is_secret"
           class="action-btn favorite-btn"
           :class="{ 'is-favorited': note.is_favorited }"
           @click="handleFavorite"
@@ -77,19 +96,21 @@
       <!-- 回收站操作 -->
       <template v-else>
         <!-- 恢复按钮 -->
-        <button 
+        <button
           class="action-btn restore-btn"
           @click="handleRestore"
-          title="恢复"
+          :disabled="note.is_secret && !isKeyValid && !vaultStore.dek"
+          :title="note.is_secret && !isKeyValid && !vaultStore.dek ? '需要先解锁保密柜' : '恢复'"
         >
           <i class="fas fa-undo"></i>
         </button>
-        
+
         <!-- 永久删除按钮 -->
-        <button 
+        <button
           class="action-btn delete-btn"
           @click="handleDelete"
-          title="永久删除"
+          :disabled="note.is_secret && !isKeyValid && !vaultStore.dek"
+          :title="note.is_secret && !isKeyValid && !vaultStore.dek ? '需要先解锁保密柜' : '永久删除'"
         >
           <i class="fas fa-trash-alt"></i>
         </button>
@@ -102,6 +123,7 @@
 import { ref, watch, nextTick, computed } from 'vue'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
+import { useVaultStore } from '@/stores/vault'
 
 const props = defineProps({
   note: {
@@ -139,6 +161,7 @@ const titleInput = ref(null)
 // 解密状态
 const { isKeyValid, dek } = useVaultEncryption()
 const { decryptContent } = useClientCrypto()
+const vaultStore = useVaultStore()
 const decryptedTitle = ref('')
 
 // 计算属性：显示的标题（已解密或原标题）
@@ -148,7 +171,12 @@ const displayTitle = computed(() => {
     return props.note.title || '无标题'
   }
 
-  // 如果已解密，返回解密后的标题
+  // 【新增】如果 parent 已经设置了解密后的标题，直接使用
+  if (props.note.decryptedTitle) {
+    return props.note.decryptedTitle
+  }
+
+  // 如果本地解密过，返回解密后的标题
   if (decryptedTitle.value) {
     return decryptedTitle.value
   }
@@ -156,6 +184,24 @@ const displayTitle = computed(() => {
   // 如果还没解密，返回原标题（可能是密文）
   return props.note.title || '无标题'
 })
+
+// 计算属性：是否在回收站
+const isInTrash = computed(() => props.showTrashActions)
+
+// 【新增】计算属性：是否需要解锁
+// 条件：是保密笔记 + 未解锁 + 在回收站
+const needsUnlock = computed(() => {
+  return props.note.is_secret && !isKeyValid.value && !vaultStore.dek && isInTrash.value
+})
+
+// 【新增】处理解锁保密柜的请求
+function handleUnlockVault() {
+  console.log('[NoteListItem] User clicked to unlock vault for note:', props.note.id)
+  // 触发全局解锁事件
+  window.dispatchEvent(new CustomEvent('request-vault-unlock', {
+    detail: { fromTrash: true, noteId: props.note.id }
+  }))
+}
 
 // 解密笔记标题
 function decryptNoteTitle() {
@@ -171,15 +217,25 @@ function decryptNoteTitle() {
     return
   }
 
-  // 如果没有有效的 DEK，不能解密
-  if (!isKeyValid.value || !dek.value) {
+  // 【修复】尝试获取有效的 DEK
+  // 首先尝试 useVaultEncryption 中的 DEK
+  let dekToUse = dek.value
+
+  // 如果 isKeyValid 为 false，尝试从 vaultStore 获取 DEK（可能在回收站中 isKeyValid 被重置）
+  if (!isKeyValid.value && vaultStore.dek) {
+    dekToUse = vaultStore.dek
+  }
+
+  // 如果仍然没有 DEK，无法解密
+  if (!dekToUse) {
     decryptedTitle.value = ''
+    console.warn('[Vault] No DEK available for decryption in trash:', props.note.id)
     return
   }
 
   try {
-    // 尝试解密标题
-    const plainTitle = decryptContent(props.note.title, dek.value)
+    // 尝试解密标题 【修复】使用 dekToUse 而不是 dek.value
+    const plainTitle = decryptContent(props.note.title, dekToUse)
     decryptedTitle.value = plainTitle
     console.log('[Vault] Title decrypted successfully in NoteListItem:', props.note.id)
   } catch (e) {
@@ -198,10 +254,20 @@ watch(() => props.editingNoteId, (newVal) => {
   }
 })
 
+// 【新增】监听 active 变化，当笔记被选中时尝试解密
+watch(() => props.active, (isActive) => {
+  if (isActive && props.note.is_secret && !decryptedTitle.value) {
+    // 笔记被选中且是保密笔记且还未解密，立即尝试解密
+    console.log('[NoteListItem] Attempting to decrypt title for active note:', props.note.id)
+    decryptNoteTitle()
+  }
+})
+
 // 监听 note 对象变化（切换笔记时重新解密）
 watch(() => props.note.id, () => {
   decryptedTitle.value = ''
-  if (isKeyValid.value) {
+  // 【修复】尝试解密，即使 isKeyValid 为 false（可能在回收站中）
+  if (props.note.is_secret && (isKeyValid.value || vaultStore.dek)) {
     decryptNoteTitle()
   }
 })
@@ -210,15 +276,19 @@ watch(() => props.note.id, () => {
 watch(() => isKeyValid.value, (valid) => {
   if (valid && props.note.is_secret && props.note.title) {
     decryptNoteTitle()
-  } else if (!valid && props.note.is_secret) {
-    // DEK 失效，清除解密的标题
+  } else if (!valid && props.note.is_secret && !vaultStore.dek) {
+    // 【修复】只有当 vaultStore.dek 也不可用时，才清除解密的标题
     decryptedTitle.value = ''
+  } else if (!valid && props.note.is_secret && vaultStore.dek) {
+    // 如果 isKeyValid 为 false，但 vaultStore.dek 仍有效，尝试使用 vaultStore.dek 解密
+    decryptNoteTitle()
   }
 })
 
 // 组件挂载时，如果已解锁，立即解密标题
 watch(() => props.note, (note) => {
-  if (note.is_secret && isKeyValid.value && note.title) {
+  // 【修复】尝试解密，即使 isKeyValid 为 false（可能在回收站中）
+  if (note.is_secret && note.title && (isKeyValid.value || vaultStore.dek)) {
     decryptNoteTitle()
   }
 }, { immediate: true })
@@ -233,6 +303,22 @@ watch(() => {
   if (props.note.is_secret) {
     decryptNoteTitle()
   }
+})
+
+// 【新增】监听 showTrashActions 变化，在回收站也解密标题
+watch(() => props.showTrashActions, (isInTrash) => {
+  // 【修复】不依赖 isKeyValid，因为在回收站中 isKeyValid 可能为 false
+  // 只要 note 是 secret，就尝试解密（即使 isKeyValid 为 false）
+  if (props.note.is_secret) {
+    decryptNoteTitle()
+  }
+})
+
+// 【新增】监听 props.note.decryptedTitle 变化，当 parent 更新时同步本地状态
+watch(() => props.note.decryptedTitle, (newDecryptedTitle) => {
+  console.log('[NoteListItem] parent decryptedTitle updated:', props.note.id, 'value:', newDecryptedTitle?.substring?.(0, 20))
+  // 当 parent 设置了 decryptedTitle，触发计算属性重新计算
+  // Vue 会自动处理这个，无需额外操作
 })
 
 // 开始编辑
@@ -401,6 +487,35 @@ function handleDelete() {
   text-overflow: ellipsis;
 }
 
+/* 【新增】加密笔记未解锁时的模糊显示 */
+.note-title.locked {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary, #999);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.note-title.locked:hover {
+  background: var(--primary-color-light, rgba(64, 158, 255, 0.1));
+  color: var(--primary-color, #409eff);
+}
+
+.note-title.locked .lock-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.note-title.locked .mask-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
 .note-title-wrapper {
   display: flex;
   align-items: center;
@@ -480,6 +595,17 @@ function handleDelete() {
   background: var(--hover-bg, rgba(0,0,0,0.1));
 }
 
+/* 【新增】禁用按钮样式 */
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.action-btn:disabled:hover {
+  background: transparent;
+}
+
 .favorite-btn:hover,
 .favorite-btn.is-favorited {
   color: var(--warning-color, #e6a23c);
@@ -493,8 +619,21 @@ function handleDelete() {
   color: var(--success-color, #67c23a);
 }
 
+.delete-btn {
+  color: #f56c6c;
+  background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 .delete-btn:hover {
-  color: var(--error-color, #f56c6c);
+  color: #e74c3c;
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  transform: scale(1.2);
 }
 
 /* 激活状态下操作按钮始终可见 */

@@ -255,15 +255,21 @@ onUnmounted(() => {
 }
 
 .menu-item.danger {
-  color: var(--error-color, #f56c6c);
+  color: #fff;
+  background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+  border-radius: 6px;
+  margin: 4px 8px;
+  font-weight: 500;
 }
 
 .menu-item.danger i:first-child {
-  color: var(--error-color, #f56c6c);
+  color: #fff;
 }
 
 .menu-item.danger:hover {
-  background: rgba(245, 108, 108, 0.1);
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  box-shadow: 0 2px 8px rgba(245, 108, 108, 0.4);
+  transform: translateY(-1px);
 }
 
 .menu-divider {

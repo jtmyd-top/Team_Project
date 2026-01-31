@@ -329,6 +329,17 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+
+  // 【新增】监听来自 NoteListItem 的解锁请求
+  window.addEventListener('request-vault-unlock', (event) => {
+    const { fromTrash, noteId } = event.detail
+    console.log('[SecondaryPanel] Received vault unlock request from trash:', noteId)
+    // 触发保密柜解锁对话框
+    // 这将由 AppLayout 或更高级的组件处理
+    window.dispatchEvent(new CustomEvent('open-vault-unlock-dialog', {
+      detail: { fromTrash, noteId }
+    }))
+  })
 })
 
 onUnmounted(() => {
@@ -409,10 +420,97 @@ const filteredNotes = computed(() => {
     return sidebarStore.currentNotes
   }
   const query = searchQuery.value.toLowerCase()
-  return sidebarStore.currentNotes.filter(note => 
+  return sidebarStore.currentNotes.filter(note =>
     note.title.toLowerCase().includes(query)
   )
 })
+
+// 【新增】监听 DEK 变化，当保密柜解锁时重新解密回收站笔记
+watch(
+  () => dek.value,
+  () => {
+    // 当 DEK 变化时，重新尝试解密回收站笔记
+    if (sidebarStore.activeModule === 'trash' && dek.value) {
+      console.log('[SecondaryPanel] DEK updated, retrying trash note decryption')
+      sidebarStore.currentNotes.forEach(note => {
+        if (note.is_secret && note.title && !note.decryptedTitle) {
+          try {
+            const plainTitle = decryptContent(note.title, dek.value)
+            note.decryptedTitle = plainTitle
+            console.log('[SecondaryPanel] ✅ Title decrypted after unlock:', note.id)
+          } catch (e) {
+            console.warn('[SecondaryPanel] Failed to decrypt after unlock:', note.id)
+          }
+        }
+      })
+    }
+  }
+)
+
+// 【新增】监听当 DEK 变为不可用时，清除所有 decryptedTitle（强制显示占位符）
+watch(
+  () => isKeyValid.value,
+  (valid) => {
+    if (!valid) {
+      console.log('[SecondaryPanel] DEK became unavailable, clearing decryptedTitles for force-masked display')
+      // 清除所有已设置的 decryptedTitle，强制显示占位符
+      sidebarStore.currentNotes.forEach(note => {
+        if (note.is_secret && note.decryptedTitle) {
+          note.decryptedTitle = undefined  // 使用 undefined 而不是 delete，确保 Vue 响应式更新
+          console.log('[SecondaryPanel] Cleared decryptedTitle for:', note.id)
+        }
+      })
+    }
+  }
+)
+
+// 【新增】监听回收站笔记变化，自动解密保密笔记的标题
+watch(
+  () => ({
+    notes: sidebarStore.currentNotes,
+    isTrash: sidebarStore.activeModule === 'trash',
+    dek: dek.value,
+    vaultDek: vaultStore.dek
+  }),
+  ({ notes, isTrash, dek: dekValue, vaultDek }) => {
+    if (!isTrash) {
+      console.log('[SecondaryPanel] Watch triggered but not in trash, activeModule:', sidebarStore.activeModule)
+      return  // 只在回收站中处理
+    }
+
+    console.log('[SecondaryPanel] Watch triggered in trash, notes count:', notes.length, 'DEK available:', !!(dekValue || vaultDek), 'isKeyValid:', isKeyValid.value)
+
+    // 对回收站中的保密笔记进行标题解密
+    notes.forEach(note => {
+      console.log('[SecondaryPanel] Processing note:', note.id, 'is_secret:', note.is_secret, 'decryptedTitle:', !!note.decryptedTitle)
+
+      // 跳过已经解密过的笔记
+      if (note.decryptedTitle) {
+        return
+      }
+
+      if (note.is_secret && note.title) {
+        // 尝试使用 dek.value 或 vaultStore.dek 解密
+        const dekToUse = dekValue || vaultDek
+
+        if (dekToUse) {
+          try {
+            const plainTitle = decryptContent(note.title, dekToUse)
+            note.decryptedTitle = plainTitle  // 保存解密后的标题
+            console.log('[SecondaryPanel] ✅ Title decrypted for trash note:', note.id, plainTitle.substring(0, 20))
+          } catch (e) {
+            console.warn('[SecondaryPanel] ❌ Failed to decrypt trash note title:', note.id, e.message)
+            // 解密失败，不设置 decryptedTitle，前端会显示模糊展示
+          }
+        } else {
+          console.log('[SecondaryPanel] ⚠️ No DEK available for trash note:', note.id, '- will show masked title')
+          // 没有 DEK，NoteListItem 会显示模糊展示
+        }
+      }
+    })
+  },
+  { deep: true, immediate: true }  // 【新增】immediate: true 让 watch 立即执行
+)
 
 // 方法
 function handleBack() {
@@ -445,10 +543,11 @@ async function handleFolderDelete(folder) {
       `文件夹内的笔记将移动到未分类笔记。`,
       `确定删除"${folder.name}"？`,
       {
-        confirmButtonText: '删除',
+        confirmButtonText: '确认删除',
         cancelButtonText: '取消',
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger'
+        type: 'error',
+        confirmButtonClass: 'el-button--danger',
+        customClass: 'delete-confirm-box'
       }
     )
     sidebarStore.deleteFolder(folder.id)
@@ -1006,9 +1105,10 @@ async function handleNoteTrash(note) {
       '笔记将被移入回收站，可以随时恢复。',
       `移入回收站？`,
       {
-        confirmButtonText: '移入回收站',
+        confirmButtonText: '确认移入回收站',
         cancelButtonText: '取消',
-        type: 'warning'
+        type: 'warning',
+        confirmButtonClass: 'el-button--warning'
       }
     )
     sidebarStore.trashNote(note.id)
@@ -1027,10 +1127,11 @@ async function handleNoteDelete(note) {
       '此操作不可恢复，笔记将被永久删除。',
       `永久删除"${note.title}"？`,
       {
-        confirmButtonText: '永久删除',
+        confirmButtonText: '确认永久删除',
         cancelButtonText: '取消',
         type: 'error',
-        confirmButtonClass: 'el-button--danger'
+        confirmButtonClass: 'el-button--danger',
+        customClass: 'delete-confirm-box'
       }
     )
     sidebarStore.permanentDeleteNote(note.id)

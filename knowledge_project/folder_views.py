@@ -10,6 +10,8 @@ from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from .models import Folder, Note
 from .utilt import get_sidebar_cache_key
+# 【新增】導入安全檢查函數
+from .views import check_note_secret_operation_permission
 
 
 def build_folder_tree(folders, parent_id=None):
@@ -326,17 +328,21 @@ def favorited_notes_api(request):
 def trashed_notes_api(request):
     """获取回收站中的笔记列表"""
     user = request.user
-    
+
     notes = Note.objects.filter(
-        author=user, 
+        author=user,
         is_trashed=True
     ).order_by('-trashed_at').select_related('folder')
-    
+
     return JsonResponse({
         'notes': [{
             'id': note.id,
             'title': note.title,
             'trashed_at': note.trashed_at.strftime('%Y-%m-%d %H:%M') if note.trashed_at else None,
+            'is_secret': note.is_secret,  # 【新增】返回 is_secret，前端用于判断是否加密
+            'is_trashed': note.is_trashed,  # 【新增】返回 is_trashed
+            'is_favorited': note.is_favorited,  # 【新增】返回 is_favorited
+            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),  # 【新增】返回 updated_at
             'folder': {
                 'id': note.folder.id,
                 'name': note.folder.name
@@ -351,10 +357,15 @@ def toggle_note_favorite_api(request, note_id):
     """切换笔记的收藏状态"""
     user = request.user
     note = get_object_or_404(Note, id=note_id, author=user)
-    
+
+    # 【新增】安全檢查：保密柜保護
+    allowed, error_msg = check_note_secret_operation_permission(note, 'favorite')
+    if not allowed:
+        return JsonResponse({'error': error_msg}, status=403)
+
     note.is_favorited = not note.is_favorited
     note.save(update_fields=['is_favorited'])
-    
+
     return JsonResponse({
         'status': 'success',
         'is_favorited': note.is_favorited

@@ -68,6 +68,24 @@
           </div>
         </div>
 
+        <!-- 【新增】解锁时长选择 -->
+        <div class="duration-selector">
+          <label class="duration-label">保密柜保持解锁时长</label>
+          <el-select
+            v-model="durationMinutes"
+            class="duration-select"
+            placeholder="选择解锁时长"
+            :disabled="isVerifying"
+          >
+            <el-option
+              v-for="option in durationOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </div>
+
         <!-- 错误提示 -->
         <transition name="fade">
           <div v-if="errorMessage" class="error-message">
@@ -134,7 +152,7 @@
 
 <script setup>
 import { ref, watch, computed, nextTick, onUnmounted } from 'vue'
-import { ElMessage, ElDialog, ElButton, ElCheckbox } from 'element-plus'
+import { ElMessage, ElDialog, ElButton, ElCheckbox, ElSelect, ElOption } from 'element-plus'
 import CaptchaWidget from './CaptchaWidget.vue'
 
 const props = defineProps({
@@ -170,6 +188,16 @@ const captchaLoadError = ref(false)
 const codeInputRef = ref(null)
 const captchaWidgetRef = ref(null)
 const isVerificationSuccess = ref(false)  // 标记验证是否成功
+
+// 【新增】解锁时长选择
+const durationMinutes = ref(30)  // 默认30分钟
+const durationOptions = [
+  { label: '15 分钟', value: 15 },
+  { label: '30 分钟 (默认)', value: 30 },
+  { label: '1 小时', value: 60 },
+  { label: '4 小时', value: 240 },
+  { label: '直到浏览器关闭', value: 0 }
+]
 
 // CAPTCHA 参数
 const captchaParams = ref({
@@ -351,7 +379,8 @@ const handleVerify = async () => {
     // 构建请求体
     const requestBody = {
       code: code.value,
-      use_backup: useBackup.value
+      use_backup: useBackup.value,
+      duration: durationMinutes.value  // 【新增】包含用户选择的解锁时长（分钟）
     }
 
     // 如果需要CAPTCHA，添加验证参数
@@ -442,6 +471,7 @@ const handleClose = () => {
   isShaking.value = false
   requireCaptcha.value = false
   captchaLoadError.value = false
+  durationMinutes.value = 30  // 【新增】重置为默认值
   captchaParams.value = {
     captcha_type: 'turnstile',
     turnstile_token: '',
@@ -705,6 +735,33 @@ onUnmounted(() => {
   transform: translateY(-50%);
   color: #667eea;
   font-size: 20px;
+}
+
+/* 【新增】解锁时长选择器 */
+.duration-selector {
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.duration-label {
+  display: block;
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.duration-select {
+  width: 140px !important;
+  margin: 0 auto;
+}
+
+.duration-select :deep(.el-input) {
+  border-radius: 10px;
+}
+
+.duration-select :deep(.el-input__wrapper) {
+  border-color: #dcdfe6;
 }
 
 /* 错误消息 */

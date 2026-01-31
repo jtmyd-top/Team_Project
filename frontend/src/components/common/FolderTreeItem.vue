@@ -313,8 +313,15 @@ function showContextMenu(e) {
   color: var(--primary-color, #409eff);
 }
 
+.folder-actions .delete-btn {
+  color: #f56c6c;
+  background: rgba(245, 108, 108, 0.1);
+}
+
 .folder-actions .delete-btn:hover {
-  color: var(--error-color, #f56c6c);
+  color: #fff;
+  background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
+  box-shadow: 0 2px 8px rgba(245, 108, 108, 0.4);
 }
 
 .folder-children {
