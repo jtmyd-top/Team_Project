@@ -82,6 +82,12 @@ urlpatterns = [
     path('api/notes/<int:note_id>/restore/', folder_views.restore_note_api, name='restore_note_api'),
     path('api/notes/<int:note_id>/permanent-delete/', folder_views.permanent_delete_note_api, name='permanent_delete_note_api'),
 
+    # ==================== 回收站（文件夹）API ====================
+    path('api/folders/trashed-items/', folder_views.trashed_items_api, name='trashed_items_api'),
+    path('api/folders/trashed/<int:folder_id>/contents/', folder_views.trashed_folder_contents_api, name='trashed_folder_contents_api'),
+    path('api/folders/<int:folder_id>/restore/', folder_views.restore_folder_api, name='restore_folder_api'),
+    path('api/folders/<int:folder_id>/permanent-delete/', folder_views.permanent_delete_folder_api, name='permanent_delete_folder_api'),
+
     # ==================== 保密柜（Vault）API ====================
     path('api/vault/status/', views.vault_status, name='vault_status'),
     path('api/vault/init/', views.vault_init, name='vault_init'),

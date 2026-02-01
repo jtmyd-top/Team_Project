@@ -269,8 +269,8 @@ function handleKeydown(event) {
 <style scoped>
 .drag-drop-overlay {
   position: fixed;
-  top: 64px;
-  right: 20px;
+  top: calc(64px + 50px); /* 顶部导航栏 + 工具栏高度 */
+  left: 304px; /* 一级侧边栏(64px) + 二级侧边栏(240px) */
   z-index: 1000;
   pointer-events: auto;
 }
@@ -407,12 +407,12 @@ function handleKeydown(event) {
 }
 
 .slide-fade-enter-from {
-  transform: translateX(20px);
+  transform: translateY(-10px);
   opacity: 0;
 }
 
 .slide-fade-leave-to {
-  transform: translateX(20px);
+  transform: translateY(-10px);
   opacity: 0;
 }
 </style>

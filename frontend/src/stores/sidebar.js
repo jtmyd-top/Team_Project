@@ -156,7 +156,15 @@ export const useSidebarStore = defineStore('sidebar', () => {
    * 切换模块
    */
   function setActiveModule(module) {
+    const previousModule = activeModule.value
     activeModule.value = module
+
+    // 【安全】从保密柜切换到其他模块时，清空当前笔记 ID
+    // 这样预览区会被清空，防止解密内容泄露
+    if (previousModule === 'vault' && module !== 'vault') {
+      currentNoteId.value = null
+      console.log('[Sidebar] Switched from vault, clearing currentNoteId for security')
+    }
 
     // 根据模块重置视图
     if (module === 'my-space') {
@@ -362,14 +370,134 @@ export const useSidebarStore = defineStore('sidebar', () => {
     const data = await response.json()
     currentNotes.value = data.notes || []
   }
-  
+
   /**
-   * 加载回收站笔记
+   * 加载回收站笔记和文件夹
    */
   async function loadTrashedNotes() {
-    const response = await fetch('/api/notes/trashed/')
-    const data = await response.json()
-    currentNotes.value = data.notes || []
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch('/api/folders/trashed-items/')
+      const data = await response.json()
+
+      // 存储混合列表（文件夹 + 笔记）
+      currentNotes.value = data.items || []
+
+      // 重置当前文件夹（在回收站根目录）
+      currentFolder.value = null
+      currentSubfolders.value = []
+
+      secondaryView.value = 'trash'
+    } catch (e) {
+      error.value = e.message
+      console.error('加载回收站失败:', e)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /**
+   * 【新增】进入回收站中的文件夹
+   */
+  async function enterTrashedFolder(folderId) {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`/api/folders/trashed/${folderId}/contents/`)
+      const data = await response.json()
+
+      currentFolder.value = {
+        id: data.folder.id,
+        name: data.folder.name,
+        trashed_at: data.folder.trashed_at
+      }
+
+      // 合并子文件夹和笔记显示
+      currentNotes.value = [
+        ...(data.subfolders || []).map(item => ({ ...item, type: 'folder' })),
+        ...(data.notes || []).map(item => ({ ...item, type: 'note' }))
+      ]
+
+      currentSubfolders.value = data.subfolders || []
+    } catch (e) {
+      error.value = e.message
+      console.error('加载回收站文件夹内容失败:', e)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /**
+   * 【新增】从回收站文件夹返回根目录
+   */
+  async function backToTrashRoot() {
+    await loadTrashedNotes()
+  }
+
+  /**
+   * 【新增】恢复文件夹
+   */
+  async function restoreFolder(folderId) {
+    try {
+      const response = await fetch(`/api/folders/${folderId}/restore/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error('恢复失败')
+      }
+
+      const data = await response.json()
+
+      // 从当前列表移除
+      currentNotes.value = currentNotes.value.filter(item => item.id !== folderId)
+
+      // 触发事件
+      window.dispatchEvent(new CustomEvent('folder-restored-from-trash', {
+        detail: { folderId }
+      }))
+
+      return data
+    } catch (e) {
+      error.value = e.message
+      throw e
+    }
+  }
+
+  /**
+   * 【新增】永久删除文件夹
+   */
+  async function permanentDeleteFolder(folderId) {
+    try {
+      const response = await fetch(`/api/folders/${folderId}/permanent-delete/`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error('删除失败')
+      }
+
+      const data = await response.json()
+
+      // 从当前列表移除
+      currentNotes.value = currentNotes.value.filter(item => item.id !== folderId)
+
+      return data
+    } catch (e) {
+      error.value = e.message
+      throw e
+    }
   }
 
   /**
@@ -572,10 +700,17 @@ export const useSidebarStore = defineStore('sidebar', () => {
   async function createFolder(name, parentId = null) {
     try {
       const newFolder = await folderApi.create({ name, parent_id: parentId })
-      
+
       // 重新加载文件夹树
       await loadFolders()
-      
+
+      // 【新增】如果当前在某个文件夹内，且新创建的子文件夹属于当前文件夹，刷新子文件夹列表
+      if (secondaryView.value === 'notes' && currentFolderId.value === parentId) {
+        const data = await folderApi.fetchNotes(currentFolderId.value)
+        currentSubfolders.value = data.subfolders || []
+      }
+      // 如果在文件夹列表视图，不需要额外操作，因为 loadFolders 已经更新了 folders
+
       return newFolder
     } catch (e) {
       error.value = e.message
@@ -592,6 +727,16 @@ export const useSidebarStore = defineStore('sidebar', () => {
 
       // 重新加载文件夹树
       await loadFolders()
+
+      // 【新增】如果当前在某个文件夹内，刷新子文件夹列表
+      if (secondaryView.value === 'notes' && currentFolderId.value) {
+        const data = await folderApi.fetchNotes(currentFolderId.value)
+        currentSubfolders.value = data.subfolders || []
+        // 同时更新当前文件夹信息（可能重命名的是当前文件夹）
+        if (data.folder) {
+          currentFolder.value = data.folder
+        }
+      }
     } catch (e) {
       error.value = e.message
       throw e
@@ -638,14 +783,20 @@ export const useSidebarStore = defineStore('sidebar', () => {
   async function deleteFolder(folderId) {
     try {
       await folderApi.delete(folderId)
-      
+
       // 如果当前在这个文件夹中，返回文件夹列表
       if (currentFolderId.value === folderId) {
         backToFolders()
       }
-      
+
       // 重新加载文件夹树
       await loadFolders()
+
+      // 【新增】如果当前在某个文件夹内，刷新子文件夹列表（可能删除的是子文件夹）
+      if (secondaryView.value === 'notes' && currentFolderId.value) {
+        const data = await folderApi.fetchNotes(currentFolderId.value)
+        currentSubfolders.value = data.subfolders || []
+      }
     } catch (e) {
       error.value = e.message
       throw e
@@ -669,7 +820,21 @@ export const useSidebarStore = defineStore('sidebar', () => {
       }))
 
       // 刷新当前视图
-      await loadModuleData()
+      if (activeModule.value === 'my-space') {
+        // 如果在 my-space 模块，需要根据当前视图决定刷新内容
+        if (secondaryView.value === 'folders') {
+          // 文件夹列表视图：只刷新文件夹树
+          await loadFolders()
+        } else if (secondaryView.value === 'notes') {
+          // 笔记列表视图：刷新当前文件夹的笔记和子文件夹
+          const data = await folderApi.fetchNotes(currentFolderId.value)
+          currentNotes.value = data.notes || []
+          currentSubfolders.value = data.subfolders || []
+        }
+      } else {
+        // 其他模块：统一调用 loadModuleData
+        await loadModuleData()
+      }
     } catch (e) {
       error.value = e.message
       throw e
@@ -825,6 +990,10 @@ export const useSidebarStore = defineStore('sidebar', () => {
     trashNote,
     restoreNote,
     permanentDeleteNote,
+    enterTrashedFolder,      // 【新增】
+    backToTrashRoot,         // 【新增】
+    restoreFolder,           // 【新增】
+    permanentDeleteFolder,   // 【新增】
 
     // 保密柜动作
     loadVaultStatus,

@@ -177,9 +177,15 @@
             </button>
           </div>
 
+          <!-- 【新增】回收站只读 Banner -->
+          <div v-if="isInTrashView && sidebarStore.currentFolder" class="trash-readonly-banner">
+            <i class="fas fa-info-circle"></i>
+            <span>此文件夹位于回收站，无法编辑</span>
+          </div>
+
           <!-- 正常笔记列表（非保密柜或已验证） -->
           <template v-else>
-            <!-- 子文件夹列表（如果有） -->
+            <!-- 【修改】回收站中的子文件夹列表 -->
             <div v-if="sidebarStore.currentSubfolders.length > 0" class="subfolders-section">
               <div class="section-header">
                 <i class="fas fa-folder"></i>
@@ -189,11 +195,16 @@
                 v-for="subfolder in sidebarStore.currentSubfolders"
                 :key="subfolder.id"
                 class="subfolder-item"
+                :class="{ 'is-trashed': isInTrashView }"
                 @click="handleSubfolderClick(subfolder)"
               >
                 <i class="fas fa-folder folder-icon"></i>
                 <span class="subfolder-name">{{ subfolder.name }}</span>
-                <span v-if="subfolder.notes_count > 0" class="subfolder-count">
+                <!-- 【修改】回收站显示项目数量 -->
+                <span v-if="isInTrashView && subfolder.children_count !== undefined" class="subfolder-count">
+                  包含 {{ subfolder.children_count }} 个项目
+                </span>
+                <span v-else-if="subfolder.notes_count > 0" class="subfolder-count">
                   {{ subfolder.notes_count }}
                 </span>
                 <i v-if="subfolder.has_children" class="fas fa-chevron-right subfolder-arrow"></i>
@@ -207,22 +218,54 @@
                 <i class="fas fa-file-alt"></i>
                 <span>笔记</span>
               </div>
-              <NoteListItem
-                v-for="note in filteredNotes"
-                :key="note.id"
-                :note="note"
-                :active="note.id === activeNoteId"
-                :show-folder="showFolderInfo"
-                :show-trash-actions="sidebarStore.activeModule === 'trash'"
-                :editing-note-id="editingNoteId"
-                @click="handleNoteClick(note)"
-                @favorite="handleNoteFavorite(note)"
-                @trash="handleNoteTrash(note)"
-                @restore="handleNoteRestore(note)"
-                @delete="handleNoteDelete(note)"
-                @contextmenu="handleNoteContextMenu"
-                @rename="handleNoteRename"
-              />
+              <!-- 【修改】回收站中显示混合列表（笔记 + 文件夹） -->
+              <template v-if="isInTrashView && !sidebarStore.currentFolder">
+                <!-- 回收站根目录：显示混合列表 -->
+                <div
+                  v-for="item in filteredNotes"
+                  :key="item.id"
+                  class="trash-item"
+                  :class="{ 'is-folder': item.type === 'folder' }"
+                  @click="handleTrashItemClick(item)"
+                >
+                  <i :class="item.type === 'folder' ? 'fas fa-folder' : 'fas fa-file-alt'" class="item-icon"></i>
+                  <div class="item-info">
+                    <span class="item-name">{{ item.type === 'folder' ? item.name : displayTitle(item) }}</span>
+                    <span class="item-time">{{ item.trashed_at || item.updated_at }}</span>
+                    <!-- 文件夹显示项目数 -->
+                    <span v-if="item.type === 'folder' && item.children_count" class="item-count">
+                      包含 {{ item.children_count }} 个项目
+                    </span>
+                  </div>
+                  <div class="item-actions" @click.stop>
+                    <button class="action-btn restore-btn" @click="handleItemRestore(item)">
+                      <i class="fas fa-undo"></i>
+                    </button>
+                    <button class="action-btn delete-btn" @click="handleItemDelete(item)">
+                      <i class="fas fa-trash-alt"></i>
+                    </button>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <!-- 正常笔记列表 -->
+                <NoteListItem
+                  v-for="note in filteredNotes"
+                  :key="note.id"
+                  :note="note"
+                  :active="note.id === activeNoteId"
+                  :show-folder="showFolderInfo"
+                  :show-trash-actions="sidebarStore.activeModule === 'trash'"
+                  :editing-note-id="editingNoteId"
+                  @click="handleNoteClick(note)"
+                  @favorite="handleNoteFavorite(note)"
+                  @trash="handleNoteTrash(note)"
+                  @restore="handleNoteRestore(note)"
+                  @delete="handleNoteDelete(note)"
+                  @contextmenu="handleNoteContextMenu"
+                  @rename="handleNoteRename"
+                />
+              </template>
             </div>
 
             <!-- 空笔记状态 -->
@@ -368,8 +411,13 @@ const moveDialogMode = ref('move') // 'move' or 'copy'
 const editingNoteId = ref(null)
 
 // 计算属性
+const isInTrashView = computed(() => {
+  return sidebarStore.activeModule === 'trash'
+})
+
 const showBackButton = computed(() => {
   return sidebarStore.activeModule === 'my-space' && sidebarStore.secondaryView === 'notes'
+    || (isInTrashView.value && sidebarStore.currentFolder)  // 【新增】回收站文件夹中也显示返回按钮
 })
 
 const panelTitle = computed(() => {
@@ -378,6 +426,9 @@ const panelTitle = computed(() => {
       return sidebarStore.currentFolder?.name || '未分类笔记'
     }
     return '笔记分类'
+  }
+  if (isInTrashView.value && sidebarStore.currentFolder) {
+    return sidebarStore.currentFolder.name
   }
   return sidebarStore.moduleTitle
 })
@@ -514,7 +565,12 @@ watch(
 
 // 方法
 function handleBack() {
-  sidebarStore.backToFolders()
+  if (isInTrashView.value && sidebarStore.currentFolder) {
+    // 【新增】从回收站文件夹返回根目录
+    sidebarStore.backToTrashRoot()
+  } else {
+    sidebarStore.backToFolders()
+  }
 }
 
 function handleSearch() {
@@ -530,7 +586,85 @@ function handleFolderClick(folder) {
 }
 
 function handleSubfolderClick(subfolder) {
-  sidebarStore.enterFolder(subfolder.id)
+  if (isInTrashView.value) {
+    // 【新增】回收站中进入文件夹
+    sidebarStore.enterTrashedFolder(subfolder.id)
+  } else {
+    sidebarStore.enterFolder(subfolder.id)
+  }
+}
+
+// 【新增】回收站混合列表点击处理
+function handleTrashItemClick(item) {
+  if (item.type === 'folder') {
+    sidebarStore.enterTrashedFolder(item.id)
+  } else {
+    emit('note-select', item.id)
+  }
+}
+
+// 【新增】回收站项目恢复
+async function handleItemRestore(item) {
+  try {
+    await ElMessageBox.confirm(
+      item.type === 'folder'
+        ? `文件夹"${item.name}"及其内容将被恢复到原位置。`
+        : '笔记将被恢复到原位置。',
+      '确认恢复',
+      {
+        confirmButtonText: '确认恢复',
+        cancelButtonText: '取消',
+        type: 'success'
+      }
+    )
+
+    if (item.type === 'folder') {
+      await sidebarStore.restoreFolder(item.id)
+      ElMessage.success('文件夹已恢复')
+    } else {
+      await sidebarStore.restoreNote(item.id)
+      ElMessage.success('笔记已恢复')
+    }
+  } catch {
+    // 用户取消
+  }
+}
+
+// 【新增】回收站项目删除
+async function handleItemDelete(item) {
+  try {
+    await ElMessageBox.confirm(
+      item.type === 'folder'
+        ? `文件夹"${item.name}"及其所有内容将被永久删除，此操作不可恢复。`
+        : '此操作不可恢复，笔记将被永久删除。',
+      item.type === 'folder' ? '永久删除文件夹' : '永久删除笔记',
+      {
+        confirmButtonText: '确认永久删除',
+        cancelButtonText: '取消',
+        type: 'error',
+        confirmButtonClass: 'el-button--danger',
+        customClass: 'delete-confirm-box'
+      }
+    )
+
+    if (item.type === 'folder') {
+      await sidebarStore.permanentDeleteFolder(item.id)
+      ElMessage.success('文件夹已永久删除')
+    } else {
+      await sidebarStore.permanentDeleteNote(item.id)
+      ElMessage.success('笔记已永久删除')
+    }
+  } catch {
+    // 用户取消
+  }
+}
+
+// 【新增】显示笔记标题（处理加密笔记）
+function displayTitle(item) {
+  if (!item.is_secret || item.decryptedTitle) {
+    return item.decryptedTitle || item.title
+  }
+  return '加密笔记 - 点击解锁'
 }
 
 function handleFolderRename(folder, newName) {
@@ -1701,6 +1835,97 @@ watch(showCreateFolderDialog, (show) => {
 
 .create-btn:hover {
   background: var(--primary-color-dark, #337ecc);
+}
+
+/* 【新增】回收站只读 Banner */
+.trash-readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 8px 12px;
+  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+  border-left: 3px solid #f39c12;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.trash-readonly-banner i {
+  font-size: 14px;
+}
+
+/* 【新增】回收站项目列表 */
+.trash-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  border-radius: 8px;
+  margin: 2px 0;
+}
+
+.trash-item:hover {
+  background: var(--hover-bg, rgba(0,0,0,0.05));
+}
+
+.trash-item.is-folder {
+  background: var(--hover-bg, rgba(0,0,0,0.03));
+}
+
+.trash-item .item-icon {
+  font-size: 16px;
+  margin-right: 10px;
+  color: var(--text-secondary, #666);
+}
+
+.trash-item.is-folder .item-icon {
+  color: #f39c12;
+}
+
+.trash-item .item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trash-item .item-name {
+  font-size: 13px;
+  color: var(--text-primary, #333);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-item .item-time {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+}
+
+.trash-item .item-count {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  margin-top: 2px;
+}
+
+.trash-item .item-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.trash-item:hover .item-actions {
+  opacity: 1;
+}
+
+.subfolder-item.is-trashed {
+  opacity: 0.8;
+  background: rgba(245, 108, 108, 0.05);
 }
 
 .empty-actions {

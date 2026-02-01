@@ -50,12 +50,25 @@ class Folder(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
+    # 【新增】回收站相关字段
+    is_trashed = models.BooleanField(default=False, verbose_name="已删除")
+    trashed_at = models.DateTimeField(null=True, blank=True, verbose_name="删除时间")
+    original_parent = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='restored_children',
+        verbose_name="删除前的父文件夹"
+    )
+
     class Meta:
         verbose_name = "文件夹"
         verbose_name_plural = "文件夹"
         ordering = ['order', 'name']
         indexes = [
             models.Index(fields=['owner', 'parent']),
+            models.Index(fields=['is_trashed']),  # 【新增】回收站索引
         ]
 
     def __str__(self):
@@ -84,6 +97,32 @@ class Folder(models.Model):
         for child in self.children.all():
             count += child.get_notes_count()
         return count
+
+    # 【新增】回收站相关方法
+    def move_to_trash(self):
+        """将文件夹移入回收站"""
+        from django.utils import timezone
+        self.is_trashed = True
+        self.trashed_at = timezone.now()
+        # 保存原始父文件夹，用于恢复
+        if self.parent:
+            self.original_parent = self.parent
+        self.save(update_fields=['is_trashed', 'trashed_at', 'original_parent'])
+
+    def restore_from_trash(self):
+        """从回收站恢复文件夹"""
+        self.is_trashed = False
+        self.trashed_at = None
+        # 恢复到原始父文件夹
+        if self.original_parent:
+            self.parent = self.original_parent
+        self.save(update_fields=['is_trashed', 'trashed_at', 'parent'])
+
+    def get_trashed_children_count(self):
+        """获取回收站中该文件夹包含的笔记和子文件夹数量"""
+        notes_count = self.notes_in_folder.filter(is_trashed=True).count()
+        folders_count = self.children.filter(is_trashed=True).count()
+        return notes_count + folders_count
 
 
 # ---------------- 笔记 ----------------

@@ -29,6 +29,16 @@
 
         <!-- 正常笔记显示 -->
         <div v-else-if="currentNoteId" class="note-workspace">
+          <!-- 【修改】回收站只读模式 Banner - 仅在回收站中显示 -->
+          <div v-if="currentNoteData.is_trashed && sidebarStore.activeModule === 'trash'" class="trash-readonly-banner-wrapper">
+            <div class="trash-readonly-banner">
+              <i class="fas fa-info-circle"></i>
+              <div class="banner-content">
+                <span class="banner-title">此笔记位于回收站中</span>
+                <span class="banner-message">只能查看，无法编辑。恢复后可正常编辑。</span>
+              </div>
+            </div>
+          </div>
           <!-- 顶部工具栏 -->
           <div class="workspace-toolbar">
             <div class="toolbar-left">
@@ -310,18 +320,24 @@ async function decryptNoteTitle() {
     return
   }
 
+  // 【关键修复】使用双重 DEK 源：优先使用 dek.value，备用 vaultStore.dek
+  const dekToUse = dek.value || vaultStore.dek
+
   // 如果没有有效的 DEK，不能解密
-  if (!isKeyValid.value || !dek.value) {
+  if (!dekToUse) {
+    console.log('[KnowledgeList] decryptNoteTitle: No DEK available')
     decryptedTitle.value = ''
     return
   }
 
   try {
     // 尝试解密标题
-    const plainTitle = decryptContent(currentNoteData.value.title, dek.value)
+    const plainTitle = decryptContent(currentNoteData.value.title, dekToUse)
     decryptedTitle.value = plainTitle
+    console.log('[KnowledgeList] Title decrypted successfully:', plainTitle.substring(0, 20))
   } catch (e) {
     // 标题可能是明文（旧笔记），保留原值
+    console.warn('[KnowledgeList] Failed to decrypt title:', e.message)
     decryptedTitle.value = ''  // 让 displayTitle computed 显示原标题
   }
 }
@@ -358,14 +374,19 @@ async function handleNoteSelect(noteId) {
   sidebarStore.setCurrentNoteId(noteId)
 
   // 切换笔记时，默认进入阅读模式，除非是新创建的空笔记
-  if (!currentNoteData.value.content && !currentNoteData.value.title) {
+  // 回收站中的笔记强制使用阅读模式
+  if (currentNoteData.value.is_trashed) {
+    viewMode.value = 'read'
+  } else if (!currentNoteData.value.content && !currentNoteData.value.title) {
     viewMode.value = 'edit'
   } else {
     viewMode.value = 'read'
   }
 
   // 如果是加密笔记且已解锁，解密标题
-  if (currentNoteData.value.is_secret && isKeyValid.value) {
+  if (currentNoteData.value.is_secret) {
+    // 【修复】只要笔记是加密的，就尝试解密（无论当前 isKeyValid 状态）
+    // 因为可能用户刚完成 2FA 验证，DEK 刚刚恢复
     await decryptNoteTitle()
   } else {
     decryptedTitle.value = ''
@@ -842,11 +863,39 @@ watch(() => currentNoteData.value.title, (newTitle, oldTitle) => {
 
 // 监听保险柜解锁状态：当 DEK 恢复或验证成功时，自动解密标题
 watch(() => isKeyValid.value, async (valid) => {
-  if (valid && currentNoteData.value.is_secret && currentNoteData.value.title && !decryptedTitle.value) {
+  if (valid && currentNoteData.value.is_secret && currentNoteData.value.title) {
     // 密钥刚刚变有效，解密当前笔记的标题
+    console.log('[KnowledgeList] isKeyValid became true, attempting to decrypt title')
     await decryptNoteTitle()
   } else if (!valid && currentNoteData.value.is_secret) {
     // 密钥失效，清除解密的标题
+    console.log('[KnowledgeList] isKeyValid became false, clearing decrypted title')
+    decryptedTitle.value = ''
+  }
+})
+
+// 【新增】监听 dek.value 变化：当 session 恢复或 2FA 验证成功时，自动解密标题
+watch(() => dek.value, async (newDek) => {
+  // 只要 DEK 有值，就立即尝试解密（无论之前的状态如何）
+  if (newDek && currentNoteData.value.is_secret && currentNoteData.value.title) {
+    console.log('[KnowledgeList] dek.value updated, attempting to decrypt title')
+    await decryptNoteTitle()
+  } else if (!newDek && currentNoteData.value.is_secret && !vaultStore.dek) {
+    // DEK 完全失效
+    console.log('[KnowledgeList] dek.value lost and vaultStore.dek unavailable, clearing title')
+    decryptedTitle.value = ''
+  }
+})
+
+// 【新增】监听 vaultStore.dek 变化，处理 vaultStore 中 DEK 更新的情况
+watch(() => vaultStore.dek, async (newVaultDek) => {
+  // 当 vaultStore.dek 有值时，也尝试解密（可能 dek.value 还没更新）
+  if (newVaultDek && currentNoteData.value.is_secret && currentNoteData.value.title) {
+    console.log('[KnowledgeList] vaultStore.dek available, attempting to decrypt title')
+    await decryptNoteTitle()
+  } else if (!newVaultDek && currentNoteData.value.is_secret) {
+    // vaultStore.dek 被清除时（立即锁定），清除解密的标题
+    console.log('[KnowledgeList] vaultStore.dek cleared, clearing decrypted title')
     decryptedTitle.value = ''
   }
 })
@@ -857,6 +906,20 @@ watch(() => currentNoteId.value, () => {
   nextTick(() => {
     originalTitle = currentNoteData.value.title || ''
   })
+})
+
+// 【新增】监听当前模块变化，从保密柜切换时清空预览区
+watch(() => sidebarStore.activeModule, (newModule, previousModule) => {
+  // 从保密柜切换到其他模块时，清空预览区内容
+  if (previousModule === 'vault' && newModule !== 'vault') {
+    console.log('[KnowledgeList] Switched from vault, clearing preview area')
+    currentNoteId.value = null
+    currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+    decryptedTitle.value = ''
+    hasUnsavedChanges.value = false
+    viewMode.value = 'read'
+    ElMessage.info('已切换模块，预览已清空')
+  }
 })
 
 // 初始化
@@ -1201,6 +1264,47 @@ function handleNoteSecretToggled(event) {
   position: relative;
   scroll-behavior: smooth;
   background: var(--bg-primary, #fff);
+}
+
+/* 【新增】回收站只读 Banner */
+.trash-readonly-banner-wrapper {
+  padding: 16px;
+  background: var(--bg-primary, #fff);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.trash-readonly-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+  border-left: 4px solid #f39c12;
+  border-radius: 8px;
+}
+
+.trash-readonly-banner i {
+  font-size: 20px;
+  color: #f39c12;
+  margin-top: 2px;
+}
+
+.trash-readonly-banner .banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trash-readonly-banner .banner-title {
+  font-weight: 600;
+  color: #856404;
+  font-size: 14px;
+}
+
+.trash-readonly-banner .banner-message {
+  color: #856404;
+  font-size: 13px;
+  opacity: 0.9;
 }
 
 .viewer-wrapper {

@@ -33,6 +33,7 @@ import DOMPurify from 'dompurify'
 import { useCodeEnhancer, getCodeEnhancerStyles } from '@composables/useCodeEnhancer'
 import { useVaultEncryption } from '@composables/useVaultEncryption'
 import { useClientCrypto } from '@composables/useClientCrypto'
+import { useVaultStore } from '@/stores/vault'
 
 const props = defineProps({
   content: {
@@ -71,6 +72,17 @@ const { enhance: enhanceCodeBlocks } = useCodeEnhancer()
 const { isKeyValid, dek } = useVaultEncryption()
 const { decryptContent, looksLikeEncrypted } = useClientCrypto()
 
+// 获取 vaultStore 用于访问全局 DEK
+const vaultStore = useVaultStore()
+
+// 【新增】标记是否已请求过 2FA 验证（防止重复请求）
+const hasRequestedVaultUnlock = ref(false)
+
+// 【新增】计算属性：检查是否有任何可用的 DEK
+const hasAnyValidDek = computed(() => {
+  return !!(dek.value || vaultStore.dek)
+})
+
 // 加密相关状态
 const isDecrypting = ref(false)
 const decryptError = ref('')
@@ -78,25 +90,16 @@ const decryptedContent = ref('')
 
 // 计算属性：响应式解密内容
 const displayContent = computed(() => {
-  // 【P0 - 安全加固】检查是否是回收站中的保密笔记
-  // 如果是，禁止解密内容以保护隐私
-  if (props.isSecret && props.isTrashed) {
-    console.log('[Security] Blocking decryption for secret note in trash:', {
-      noteId: props.noteId,
-      isSecret: props.isSecret,
-      isTrashed: props.isTrashed
-    })
-    // 返回特殊的提示信息，而不是密文或解密内容
-    return '<div class="vault-trash-notice">🔒 内容已锁定</div>'
-  }
-
+  // 【修复】回收站中的保密笔记处理逻辑
+  // 不再阻止解密，允许正常笔记直接显示，保密笔记在 2FA 验证后显示
   if (!props.isSecret) {
-    // 普通笔记，直接返回原内容
+    // 普通笔记（包括回收站中的），直接返回原内容
     return props.content
   }
 
-  if (!isKeyValid.value) {
-    // 加密笔记未解锁
+  // 保密笔记需要检查是否已解锁（检查所有 DEK 源）
+  if (!hasAnyValidDek.value) {
+    // 加密笔记未解锁 - 返回空字符串，让 renderContent 处理显示
     return ''
   }
 
@@ -121,13 +124,7 @@ const displayContent = computed(() => {
 
 // 前端解密加密笔记
 async function decryptNoteContent() {
-  // 【P0 - 安全加固】如果是回收站中的保密笔记，不执行解密
-  if (props.isSecret && props.isTrashed) {
-    console.log('[Security] Skipping decryption for secret note in trash')
-    // 不解密，直接返回
-    return
-  }
-
+  // 【修复】回收站中的保密笔记也可以解密（在完成 2FA 后）
   if (!props.isSecret || !props.content) {
     return
   }
@@ -138,7 +135,8 @@ async function decryptNoteContent() {
     contentLength: props.content?.length || 0,
     contentSample: props.content?.substring(0, 30),
     hasKeyValid: !!isKeyValid.value,
-    hasDek: !!dek.value
+    hasDek: !!dek.value,
+    hasVaultDek: !!vaultStore.dek
   })
 
   // 如果内容看起来不像密文，跳过解密
@@ -152,22 +150,25 @@ async function decryptNoteContent() {
   decryptError.value = ''
 
   try {
+    // 【修复】使用双重 DEK 源
+    const dekToUse = dek.value || vaultStore.dek
+
     // 获取用户的 DEK（Data Encryption Key，来自 2FA 验证）
-    if (!dek.value) {
+    if (!dekToUse) {
       console.error('[Vault] No DEK available for decryption, user needs to verify 2FA')
       decryptError.value = '缺少加密密钥，请重新验证'
       return
     }
 
     console.log('[Vault] DEK available, decrypting...', {
-      dekLength: dek.value?.length || 0,
-      dekSample: dek.value?.substring(0, 20)
+      dekLength: dekToUse?.length || 0,
+      dekSample: dekToUse?.substring(0, 20)
     })
 
     // 前端解密：在浏览器中使用 DEK 解密
     // 新的 useClientCrypto 已经是 Python 兼容格式
     // 可以解密旧的迁移数据和新的加密数据
-    const plaintext = decryptContent(props.content, dek.value)
+    const plaintext = decryptContent(props.content, dekToUse)
     decryptedContent.value = plaintext
 
     console.log('[Vault] Content decrypted successfully in browser', {
@@ -178,7 +179,7 @@ async function decryptNoteContent() {
     console.error('[Vault] 前端解密失败:', e, {
       message: e.message,
       contentLength: props.content?.length,
-      dekLength: dek.value?.length
+      dekLength: dekToUse?.length
     })
     decryptError.value = '解密失败：' + e.message
   } finally {
@@ -463,25 +464,31 @@ const renderContent = (forceStyleUpdate = false) => {
   // 使用 displayContent 而不是 props.content，这样可以自动处理解密
   const rawHtml = displayContent.value || ''
 
-  if (rawHtml !== cachedRawHtml) {
+  // 【修复】检查 DEK 是否可用（包括 dek 和 vaultStore.dek）
+  const hasValidDek = !!(dek.value || vaultStore.dek)
+  const needsVerification = props.isSecret && !hasValidDek
+
+  // 【修复】强制更新：当需要验证时，即使内容相同也要重新渲染
+  const shouldUpdate = rawHtml !== cachedRawHtml || needsVerification || forceStyleUpdate
+
+  if (shouldUpdate) {
     cachedRawHtml = rawHtml
 
-    // 【P0】回收站中的保密笔记：显示安全提示
-    if (props.isSecret && props.isTrashed) {
-      cachedCleanHtml = `
-        <div class="vault-trash-locked-notice">
-          <div class="notice-icon">🔒</div>
-          <div class="notice-title">内容已锁定</div>
-          <div class="notice-message">此笔记位于回收站中，出于安全考虑，内容暂不显示。</div>
-          <div class="notice-hint">请将其还原后在保密柜中查看。</div>
-        </div>
-      `
+    // 【修改】回收站中的笔记处理逻辑
+    if (needsVerification) {
+      // 保密笔记 + 未解锁：显示需要验证的提示
+      cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">🔒 保密笔记，请完成 2FA 验证后查看内容。</div>'
       tocItems.value = []
       showToc.value = false
-    } else if (props.isSecret && !isKeyValid.value) {
-      cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">保密笔记，请完成 2FA 验证后查看内容。</div>'
-      tocItems.value = []
-      showToc.value = false
+
+      // 【新增】请求打开 2FA 验证弹窗（仅请求一次）
+      if (!hasRequestedVaultUnlock.value) {
+        console.log('[NoteShadowViewer] Requesting vault unlock for secret note:', props.noteId, 'hasValidDek:', hasValidDek)
+        hasRequestedVaultUnlock.value = true
+        window.dispatchEvent(new CustomEvent('open-vault-unlock-dialog', {
+          detail: { fromTrash: props.isTrashed, noteId: props.noteId }
+        }))
+      }
     } else if (props.isSecret && isDecrypting.value) {
       // 解密中的状态
       cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">解密中，请稍候...</div>'
@@ -493,7 +500,7 @@ const renderContent = (forceStyleUpdate = false) => {
       tocItems.value = []
       showToc.value = false
     } else {
-      // 正常内容渲染
+      // 正常内容渲染（包括已解锁的保密笔记、回收站中的正常笔记）
       cachedCleanHtml = DOMPurify.sanitize(rawHtml, purifyConfig)
 
       // 使用后端提供的 TOC 数据
@@ -675,8 +682,8 @@ const scrollToHeading = (id) => {
 
 onMounted(() => {
   initShadowRoot()
-  // 如果是加密笔记且已解锁（且不在回收站），立即解密
-  if (props.isSecret && isKeyValid.value && props.content && props.noteId && !props.isTrashed) {
+  // 如果是加密笔记且已解锁，立即解密（包括回收站中的笔记）
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
     decryptNoteContent()
   }
 })
@@ -687,8 +694,8 @@ watch(() => props.content, () => {
     initShadowRoot()
   }
 
-  // 如果是加密笔记且已解锁（且不在回收站），重新解密
-  if (props.isSecret && isKeyValid.value && props.content && props.noteId && !props.isTrashed) {
+  // 如果是加密笔记且已解锁，重新解密（包括回收站中的笔记）
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
     decryptNoteContent()
   } else {
     renderContent(false)
@@ -699,17 +706,18 @@ watch(() => props.content, () => {
 watch(() => props.noteId, () => {
   decryptedContent.value = ''
   decryptError.value = ''
+  hasRequestedVaultUnlock.value = false // 重置标记，允许新笔记请求 2FA
 
-  if (props.isSecret && isKeyValid.value && props.content && props.noteId && !props.isTrashed) {
+  if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
     decryptNoteContent()
   } else {
     renderContent(false)
   }
 })
 
-// 监听密钥状态：保险柜解锁时自动解密
+// 监听密钥状态：保险柜解锁时自动解密（包括回收站中的笔记）
 watch(() => isKeyValid.value, (valid) => {
-  if (valid && props.isSecret && props.content && props.noteId && !props.isTrashed && !decryptedContent.value) {
+  if (valid && props.isSecret && props.content && props.noteId && !decryptedContent.value) {
     decryptNoteContent()
   } else if (!valid && props.isSecret) {
     // 密钥失效，清除解密内容

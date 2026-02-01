@@ -146,17 +146,24 @@ def folder_detail_api(request, folder_id):
         })
 
     elif request.method == 'DELETE':
-        # 将文件夹内的笔记移动到收件箱
-        folder.notes_in_folder.update(folder=None)
-        
-        # 递归删除子文件夹的笔记也移到收件箱
+        # 【修复】将文件夹移入回收站，而不是直接删除
+        # 将文件夹及其所有子文件夹标记为已删除
+        folder.move_to_trash()
+
+        # 递归将所有子文件夹也移入回收站
         for child in folder.get_descendants():
-            child.notes_in_folder.update(folder=None)
-        
-        folder.delete()
+            child.move_to_trash()
+
+        # 同时将文件夹内的所有笔记移入回收站
+        folder.notes_in_folder.update(is_trashed=True)
+
+        # 递归将子文件夹内的笔记也移入回收站
+        for child in folder.get_descendants():
+            child.notes_in_folder.update(is_trashed=True)
+
         cache.delete(get_sidebar_cache_key(user.id))
-        
-        return JsonResponse({'status': 'success', 'message': '文件夹已删除'})
+
+        return JsonResponse({'status': 'success', 'message': '文件夹已移入回收站'})
 
 
 @login_required
@@ -325,13 +332,180 @@ def favorited_notes_api(request):
 
 @login_required
 @require_http_methods(["GET"])
+def trashed_items_api(request):
+    """获取回收站中的所有项目（文件夹 + 笔记）"""
+    user = request.user
+
+    # 获取被删除的文件夹
+    trashed_folders = Folder.objects.filter(
+        owner=user,
+        is_trashed=True
+    ).order_by('-trashed_at')
+
+    # 获取被删除的笔记（排除那些在已删除文件夹中的笔记）
+    trashed_notes = Note.objects.filter(
+        author=user,
+        is_trashed=True
+    ).exclude(
+        folder__is_trashed=True  # 【关键】不显示已删除文件夹内的笔记
+    ).order_by('-trashed_at').select_related('folder')
+
+    folders_data = []
+    for folder in trashed_folders:
+        folders_data.append({
+            'type': 'folder',
+            'id': folder.id,
+            'name': folder.name,
+            'trashed_at': folder.trashed_at.strftime('%Y-%m-%d %H:%M') if folder.trashed_at else None,
+            'children_count': folder.get_trashed_children_count(),  # 包含的项目数
+            'has_children': folder.children.filter(is_trashed=True).exists() or \
+                           folder.notes_in_folder.filter(is_trashed=True).exists()
+        })
+
+    notes_data = []
+    for note in trashed_notes:
+        notes_data.append({
+            'type': 'note',
+            'id': note.id,
+            'title': note.title,
+            'trashed_at': note.trashed_at.strftime('%Y-%m-%d %H:%M') if note.trashed_at else None,
+            'is_secret': note.is_secret,
+            'is_trashed': note.is_trashed,
+            'is_favorited': note.is_favorited,
+            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'folder': {
+                'id': note.folder.id,
+                'name': note.folder.name
+            } if note.folder and not note.folder.is_trashed else None
+        })
+
+    # 合并并按删除时间排序
+    all_items = sorted(
+        folders_data + notes_data,
+        key=lambda x: x['trashed_at'] or '',
+        reverse=True
+    )
+
+    return JsonResponse({
+        'items': all_items
+    })
+
+
+@login_required
+@require_http_methods(["GET"])
+def trashed_folder_contents_api(request, folder_id):
+    """获取回收站中被删除文件夹的内容"""
+    user = request.user
+    folder = get_object_or_404(Folder, id=folder_id, owner=user, is_trashed=True)
+
+    # 获取该文件夹内被删除的笔记
+    notes = folder.notes_in_folder.filter(is_trashed=True).order_by('-trashed_at')
+
+    # 获取该文件夹内被删除的子文件夹
+    subfolders = folder.children.filter(is_trashed=True).order_by('-trashed_at')
+
+    return JsonResponse({
+        'folder': {
+            'id': folder.id,
+            'name': folder.name,
+            'trashed_at': folder.trashed_at.strftime('%Y-%m-%d %H:%M') if folder.trashed_at else None,
+        },
+        'notes': [{
+            'type': 'note',
+            'id': note.id,
+            'title': note.title,
+            'trashed_at': note.trashed_at.strftime('%Y-%m-%d %H:%M') if note.trashed_at else None,
+            'is_secret': note.is_secret,
+            'is_trashed': note.is_trashed,
+            'is_favorited': note.is_favorited
+        } for note in notes],
+        'subfolders': [{
+            'type': 'folder',
+            'id': sf.id,
+            'name': sf.name,
+            'trashed_at': sf.trashed_at.strftime('%Y-%m-%d %H:%M') if sf.trashed_at else None,
+            'children_count': sf.get_trashed_children_count(),
+            'has_children': sf.children.filter(is_trashed=True).exists() or \
+                           sf.notes_in_folder.filter(is_trashed=True).exists()
+        } for sf in subfolders]
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def restore_folder_api(request, folder_id):
+    """从回收站恢复文件夹及其内容"""
+    user = request.user
+    folder = get_object_or_404(Folder, id=folder_id, owner=user, is_trashed=True)
+
+    # 恢复文件夹本身
+    folder.restore_from_trash()
+
+    # 同时恢复文件夹内的所有笔记和子文件夹
+    folder.notes_in_folder.filter(is_trashed=True).update(
+        is_trashed=False,
+        trashed_at=None
+    )
+
+    # 递归恢复子文件夹
+    def restore_children(parent_folder):
+        for child in parent_folder.children.filter(is_trashed=True):
+            child.restore_from_trash()
+            # 恢复子文件夹内的笔记
+            child.notes_in_folder.filter(is_trashed=True).update(
+                is_trashed=False,
+                trashed_at=None
+            )
+            restore_children(child)
+
+    restore_children(folder)
+
+    cache.delete(get_sidebar_cache_key(user.id))
+
+    return JsonResponse({
+        'status': 'success',
+        'message': '文件夹及内容已恢复'
+    })
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def permanent_delete_folder_api(request, folder_id):
+    """永久删除文件夹及其内容"""
+    user = request.user
+    folder = get_object_or_404(Folder, id=folder_id, owner=user, is_trashed=True)
+
+    # 递归删除所有子文件夹和笔记
+    def delete_folder_recursive(folder_to_delete):
+        # 先删除所有笔记
+        folder_to_delete.notes_in_folder.all().delete()
+        # 递归删除子文件夹
+        for child in folder_to_delete.children.all():
+            delete_folder_recursive(child)
+        # 最后删除文件夹本身
+        folder_to_delete.delete()
+
+    delete_folder_recursive(folder)
+
+    cache.delete(get_sidebar_cache_key(user.id))
+
+    return JsonResponse({
+        'status': 'success',
+        'message': '文件夹已永久删除'
+    })
+
+
+@login_required
+@require_http_methods(["GET"])
 def trashed_notes_api(request):
-    """获取回收站中的笔记列表"""
+    """获取回收站中的笔记列表（保留用于向后兼容）"""
     user = request.user
 
     notes = Note.objects.filter(
         author=user,
         is_trashed=True
+    ).exclude(
+        folder__is_trashed=True
     ).order_by('-trashed_at').select_related('folder')
 
     return JsonResponse({
@@ -339,14 +513,14 @@ def trashed_notes_api(request):
             'id': note.id,
             'title': note.title,
             'trashed_at': note.trashed_at.strftime('%Y-%m-%d %H:%M') if note.trashed_at else None,
-            'is_secret': note.is_secret,  # 【新增】返回 is_secret，前端用于判断是否加密
-            'is_trashed': note.is_trashed,  # 【新增】返回 is_trashed
-            'is_favorited': note.is_favorited,  # 【新增】返回 is_favorited
-            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),  # 【新增】返回 updated_at
+            'is_secret': note.is_secret,
+            'is_trashed': note.is_trashed,
+            'is_favorited': note.is_favorited,
+            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M'),
             'folder': {
                 'id': note.folder.id,
                 'name': note.folder.name
-            } if note.folder else None
+            } if note.folder and not note.folder.is_trashed else None
         } for note in notes]
     })
 
