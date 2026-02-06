@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import { ElLoading, ElMessage } from 'element-plus'
 import 'element-plus/dist/index.css'
 import '@static/css/folder-layout.css' // 引入新的文件夹布局样式
-import KnowledgeList from '@components/knowledge/KnowledgeList.vue'
+import KnowledgeList from '@components/knowledge/KnowledgeList/index.vue'
 import { setupGlobalErrorHandler } from '@utils/errorHandler'
 
 // 创建Vue应用实例

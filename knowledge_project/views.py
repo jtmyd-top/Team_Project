@@ -1807,6 +1807,8 @@ def create_note_api(request):
     为当前登录用户创建一篇新的空白笔记。
     支持指定 folder_id 将笔记放入特定文件夹。
     支持 is_secret 参数标记为保密笔记。
+    
+    【安全】创建保密笔记时，必须先通过 2FA 验证（保密柜已解锁）。
     """
     user = request.user
 
@@ -1817,6 +1819,17 @@ def create_note_api(request):
         content = data.get('content', '')
         folder_id = data.get('folder_id')
         is_secret = data.get('is_secret', False)  # 添加保密参数
+
+        # 【安全检查】创建保密笔记时，必须已通过 2FA 验证
+        if is_secret:
+            profile = getattr(user, 'profile', None)
+            if profile and profile.two_fa_enabled:
+                if not check_vault_access(request):
+                    return JsonResponse({
+                        'status': 'error',
+                        'code': 'vault_locked',
+                        'message': '创建保密笔记需要先解锁保密柜'
+                    }, status=403)
 
         # 验证文件夹归属（如果指定了 folder_id）
         folder = None
@@ -3242,24 +3255,57 @@ def password_reset_api(request):
                     logger.info(f"[密码重置] 准备发送邮件到: {email}")
                     logger.info(f"[密码重置] 发件人: {getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')}")
                     logger.info(f"[密码重置] SMTP配置: HOST={settings.EMAIL_HOST}, PORT={settings.EMAIL_PORT}, USER={settings.EMAIL_HOST_USER}")
-                    
-                    result = send_mail(
-                        subject=subject,
-                        message=message,
-                        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
-                        recipient_list=[email],
-                        fail_silently=False
-                    )
-                    
-                    logger.info(f"[密码重置] 邮件发送结果: {result} (1表示成功)")
 
-                    # 标记尝试为成功
-                    reset_attempt.is_successful = True
-                    reset_attempt.save()
+                    result = None
+                    send_success = False
+                    error_message = None
+
+                    # 尝试使用代理发送（如果配置了代理）
+                    try:
+                        from knowledge_project.utils.proxy_email_sender import send_mail_with_proxy
+                        success, msg = send_mail_with_proxy(
+                            subject=subject,
+                            message=message,
+                            recipient_list=[email],
+                            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+                        )
+
+                        if success:
+                            result = 1
+                            send_success = True
+                            logger.info(f"[密码重置] 邮件发送成功: {msg}")
+                        else:
+                            logger.warning(f"[密码重置] 代理发送失败: {msg}，尝试直连发送")
+                    except ImportError:
+                        logger.info(f"[密码重置] 代理模块未安装，使用直连发送")
+                    except Exception as proxy_error:
+                        logger.warning(f"[密码重置] 代理发送异常: {proxy_error}，尝试直连发送")
+
+                    # 如果代理未成功，尝试直连
+                    if not send_success:
+                        try:
+                            result = send_mail(
+                                subject=subject,
+                                message=message,
+                                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+                                recipient_list=[email],
+                                fail_silently=False
+                            )
+                            send_success = True
+                            logger.info(f"[密码重置] 直连发送成功: {result}")
+                        except Exception as direct_error:
+                            error_message = str(direct_error)
+                            logger.error(f"[密码重置] 直连也失败: {error_message}")
+
+                    # 标记尝试状态
+                    if send_success:
+                        reset_attempt.is_successful = True
+                        reset_attempt.save()
+                    else:
+                        logger.warning(f"[密码重置] 邮件发送最终失败: {error_message}")
 
                 except Exception as e:
-                    logger.error(f"[密码重置] 发送邮件失败: {str(e)}", exc_info=True)
-                    # 记录已经默认为失败状态，无需额外更新
+                    logger.error(f"[密码重置] 发送邮件异常: {str(e)}", exc_info=True)
 
             # 统一返回消息，不暴露邮箱是否存在
             return JsonResponse({
@@ -3404,7 +3450,6 @@ def reset_password_view(request, user_id, token):
                 })
             else:
                 # 传统表单提交，重定向到首页
-                from django.shortcuts import redirect
                 return redirect('home')
 
         except Exception as e:
@@ -4445,5 +4490,3 @@ def vault_export(request):
             'status': 'error',
             'message': f'导出失败: {str(e)}'
         }, status=500)
-
-

@@ -97,6 +97,9 @@ class SmartEmailSender:
         except Exception as e:
             logger.error(f"Outlook SMTP发送失败: {str(e)}")
             return False
+        finally:
+            if use_proxy:
+                self._clear_proxy()
 
     def send_email_django(self, subject, message, to_emails, from_email=None):
         """使用Django默认邮件后端发送"""

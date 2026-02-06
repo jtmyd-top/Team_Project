@@ -150,12 +150,26 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # 智能邮件后端 (可选，当需要使用智能邮件发送器时取消注释)
 # EMAIL_BACKEND = 'knowledge_project.utils.smart_email_sender.SmartEmailBackend'
+
+# 代理邮件后端 (推荐，自动回退到代理)
+# EMAIL_BACKEND = 'knowledge_project.utils.proxy_email_sender.ProxyEmailBackend'
+
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ['true', '1', 't']
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# --- 邮件代理配置 ---
+# 当直连失败时，自动使用代理重试
+SMTP_PROXY_HOST = os.getenv('SMTP_PROXY_HOST')          # 代理服务器地址，如 '127.0.0.1'
+SMTP_PROXY_PORT = int(os.getenv('SMTP_PROXY_PORT', '1080'))  # 代理端口，如 1080 (SOCKS5) 或 7890 (HTTP)
+SMTP_PROXY_TYPE = os.getenv('SMTP_PROXY_TYPE', 'socks5')    # 代理类型: 'socks5', 'socks4', 或 'http'
+SMTP_PROXY_USERNAME = os.getenv('SMTP_PROXY_USERNAME')  # 代理用户名（可选）
+SMTP_PROXY_PASSWORD = os.getenv('SMTP_PROXY_PASSWORD')  # 代理密码（可选）
+EMAIL_FALLBACK_TO_PROXY = os.getenv('EMAIL_FALLBACK_TO_PROXY', 'True').lower() in ['true', '1', 't']
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '30'))  # 连接超时时间（秒）
 
 # --- Cloudflare Turnstile Configuration ---
 CLOUDFLARE_TURNSTILE_SITE_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SITE_KEY')

@@ -229,6 +229,8 @@
                   @click="handleTrashItemClick(item)"
                 >
                   <i :class="item.type === 'folder' ? 'fas fa-folder' : 'fas fa-file-alt'" class="item-icon"></i>
+                  <!-- 【新增】保密笔记锁图标 -->
+                  <i v-if="item.type === 'note' && item.is_secret" class="fas fa-lock secret-lock-icon"></i>
                   <div class="item-info">
                     <span class="item-name">{{ item.type === 'folder' ? item.name : displayTitle(item) }}</span>
                     <span class="item-time">{{ item.trashed_at || item.updated_at }}</span>
@@ -333,7 +335,7 @@ import { useVaultStore } from '@/stores/vault'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
 import FolderTreeItem from '@/components/common/FolderTreeItem.vue'
-import NoteListItem from '@/components/common/NoteListItem.vue'
+import NoteListItem from '@/components/common/NoteListItem/index.vue'
 import NoteContextMenu from '@/components/common/NoteContextMenu.vue'
 import MoveToDialog from '@/components/common/MoveToDialog.vue'
 
@@ -434,7 +436,11 @@ const panelTitle = computed(() => {
 })
 
 const showNewNoteBtn = computed(() => {
-  return ['all-notes', 'my-space', 'vault'].includes(sidebarStore.activeModule)
+  // 在保密柜模块中，只有已验证（解锁）状态才显示新建按钮
+  if (sidebarStore.activeModule === 'vault') {
+    return sidebarStore.vaultStatus.isVerified
+  }
+  return ['all-notes', 'my-space'].includes(sidebarStore.activeModule)
 })
 
 const showNewFolderBtn = computed(() => {
@@ -452,7 +458,15 @@ const showFolderInfo = computed(() => {
 })
 
 const showCreateNoteInEmpty = computed(() => {
-  return !['trash'].includes(sidebarStore.activeModule)
+  // 回收站不显示新建按钮
+  if (sidebarStore.activeModule === 'trash') return false
+  
+  // 在保密柜模块中，只有已验证（解锁）状态才显示空状态下的新建按钮
+  if (sidebarStore.activeModule === 'vault') {
+    return sidebarStore.vaultStatus.isVerified
+  }
+  
+  return true
 })
 
 const emptyStateText = computed(() => {
@@ -1883,6 +1897,14 @@ watch(showCreateFolderDialog, (show) => {
 
 .trash-item.is-folder .item-icon {
   color: #f39c12;
+}
+
+/* 【新增】回收站保密笔记锁图标 */
+.trash-item .secret-lock-icon {
+  font-size: 12px;
+  color: #f56c6c;
+  margin-right: 6px;
+  flex-shrink: 0;
 }
 
 .trash-item .item-info {

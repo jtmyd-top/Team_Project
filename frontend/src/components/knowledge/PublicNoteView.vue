@@ -197,7 +197,7 @@
 </template>
 
 <script>
-import NoteShadowViewer from './NoteShadowViewer.vue'
+import NoteShadowViewer from './NoteShadowViewer/index.vue'
 import BaseNotification from './common/BaseNotification.vue'
 
 export default {

@@ -1,0 +1,115 @@
+/* NoteEditor 样式 */
+
+.note-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.encryption-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  background-color: #f0f9ff;
+  border: 1px solid #b3d8ff;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 13px;
+  color: #0084f4;
+}
+
+.encryption-indicator :deep(.el-tag) {
+  background-color: transparent;
+  border-color: #b3d8ff;
+  color: #0084f4;
+}
+
+.encryption-indicator :deep(.el-icon) {
+  margin-right: 5px;
+}
+
+.indicator-text {
+  color: #0084f4;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.decrypt-error {
+  margin-bottom: 15px;
+}
+
+.decrypting-prompt {
+  margin-bottom: 15px;
+}
+
+.locked-prompt {
+  padding: 20px;
+  text-align: center;
+}
+
+.editor-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 600px;
+}
+
+.title-input {
+  width: 100%;
+  font-size: 32px;
+  font-weight: 700;
+  border: none;
+  background: transparent;
+  color: var(--k-text, #1a1a1a);
+  margin-bottom: 20px;
+  outline: none;
+  padding: 0;
+}
+
+.title-input::placeholder {
+  color: var(--k-text-sec, #666);
+  opacity: 0.5;
+}
+
+.editor-wrapper {
+  flex: 1;
+  min-height: 600px;
+  border: 1px solid var(--k-border, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 修复 TinyMCE iframe 的 position: absolute 导致的高度塌陷 */
+.editor-wrapper :deep(.tox-tinymce) {
+  height: 100% !important;
+  min-height: 600px;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.editor-wrapper :deep(.tox-editor-container) {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.editor-wrapper :deep(.tox-sidebar-wrap) {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.editor-wrapper :deep(.tox-edit-area) {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.editor-wrapper :deep(.tox-edit-area__iframe) {
+  position: static !important;
+  flex: 1 !important;
+}

@@ -94,7 +94,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useUserStore } from '@stores/user.js'
 import SideNav from './SideNav.vue'
 import DrawerSidebar from './DrawerSidebar.vue'
-import FolderTree from './FolderTree.vue'
+import FolderTree from './FolderTree/index.vue'
 import FolderPicker from './FolderPicker.vue'
 
 const props = defineProps({

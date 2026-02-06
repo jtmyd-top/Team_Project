@@ -198,13 +198,13 @@ import { useVaultStore } from '@/stores/vault'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import PrimarySidebar from '@/components/layout/PrimarySidebar.vue'
-import SecondaryPanel from '@/components/layout/SecondaryPanel.vue'
+import PrimarySidebar from '@/components/layout/PrimarySidebar/index.vue'
+import SecondaryPanel from '@/components/layout/SecondaryPanel/index.vue'
 import Breadcrumb from '@/components/common/Breadcrumb.vue'
-import NoteEditor from '@/components/knowledge/NoteEditor.vue'
-import NoteShadowViewer from '@/components/knowledge/NoteShadowViewer.vue'
+import NoteEditor from '@/components/knowledge/NoteEditor/index.vue'
+import NoteShadowViewer from '@/components/knowledge/NoteShadowViewer/index.vue'
 import DragDropOverlay from '@/components/common/DragDropOverlay.vue'
-import VaultVerifyDialog from '@/components/common/VaultVerifyDialog.vue'
+import VaultVerifyDialog from '@/components/common/VaultVerifyDialog/index.vue'
 import VaultSetupDialog from '@/components/common/VaultSetupDialog.vue'
 
 // Store
@@ -278,8 +278,9 @@ async function handleVaultVerified(data) {
 
 // 保密柜验证取消
 function handleVaultCancel() {
-  // 切换回全部笔记
-  sidebarStore.setActiveModule('all-notes')
+  // 【修复】取消 2FA 验证时，不切换模块，只是关闭弹窗
+  // 用户可以继续浏览当前模块（保密柜/回收站），只是无法查看保密笔记内容
+  // 如果需要查看，用户需要再次点击保密笔记或点击解锁图标
 }
 
 // 前往设置页面

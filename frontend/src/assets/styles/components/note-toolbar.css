@@ -1,0 +1,97 @@
+/* NoteToolbar 样式 */
+
+.note-toolbar {
+  height: 60px;
+  border-bottom: 1px solid var(--k-border, #e0e0e0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: var(--k-bg, #fff);
+  flex-shrink: 0;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+}
+
+.meta-info {
+  font-size: 14px;
+  color: var(--k-text-sec, #666);
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--k-text-sec, #666);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.icon-btn:hover {
+  background: var(--k-hover, #f5f5f5);
+  color: var(--k-text, #1a1a1a);
+}
+
+.icon-btn.danger:hover {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+.btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.btn.primary {
+  background: var(--k-primary, #1890ff);
+  color: white;
+}
+
+.btn.primary:hover {
+  opacity: 0.9;
+}
+
+.btn.text {
+  background: transparent;
+  color: var(--k-text, #1a1a1a);
+}
+
+.btn.text:hover {
+  background: var(--k-hover, #f5f5f5);
+}
+
+.divider-vertical {
+  width: 1px;
+  height: 20px;
+  background: var(--k-border, #e0e0e0);
+  margin: 0 4px;
+}
+
+@media (max-width: 768px) {
+  .note-toolbar {
+    padding: 0 12px;
+  }
+
+  .btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .btn.primary span {
+    display: none;
+  }
+}
