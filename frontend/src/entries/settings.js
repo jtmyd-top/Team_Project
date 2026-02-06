@@ -7,7 +7,7 @@ import ElementPlus from 'element-plus';
 import { apiService } from '@services/apiService';
 
 // 导入主应用组件
-import SettingsApp from '@components/settings/SettingsApp.vue';
+import SettingsApp from '@components/settings/SettingsApp/index.vue';
 
 // 导入用户状态管理
 import { useUserStore } from '@stores/user.js';

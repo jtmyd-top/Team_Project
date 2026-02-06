@@ -1,0 +1,12 @@
+.encrypted-note-content {
+  width: 100%;
+}
+
+.decrypting-state {
+  padding: 20px;
+}
+
+.note-content {
+  padding: 10px;
+  line-height: 1.6;
+}

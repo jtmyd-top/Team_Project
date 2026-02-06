@@ -6,7 +6,7 @@
  */
 
 import { ref, createApp, h } from 'vue'
-import BaseNotification from '../components/common/BaseNotification.vue'
+import BaseNotification from '../components/common/BaseNotification/index.vue'
 
 // 单例实例
 let notificationInstance = null

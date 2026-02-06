@@ -2,7 +2,7 @@
 import { createApp } from 'vue';
 import ElementPlus from 'element-plus';
 import 'element-plus/dist/index.css';
-import ForgotPassword from '@components/auth/ForgotPassword.vue';
+import ForgotPassword from '@components/auth/ForgotPassword/index.vue';
 
 // 创建Vue应用
 const app = createApp(ForgotPassword);

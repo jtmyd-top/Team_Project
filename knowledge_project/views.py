@@ -2738,7 +2738,6 @@ def generate_backup_codes_list():
 # ==================== 两因素认证登录验证 API ====================
 
 @require_http_methods(["POST"])
-@csrf_exempt
 def verify_2fa_login(request):
     """
     验证2FA登录码
@@ -2839,7 +2838,6 @@ def verify_2fa_login(request):
 
 
 @require_http_methods(["POST"])
-@csrf_exempt
 def resend_2fa_email(request):
     """
     重新发送2FA邮箱验证码（带频率限制）
@@ -3565,15 +3563,12 @@ def check_rate_limit(email, ip_address, fingerprint, limit=3):
     return True, None
 
 
-@csrf_exempt
+@require_http_methods(["GET"])
 def turnstile_config(request):
     """
     获取Turnstile配置信息，包含是否启用状态
     前端可根据 enabled 字段决定是否加载 Turnstile
     """
-    if request.method != 'GET':
-        return JsonResponse({'error': '只支持GET请求'}, status=405)
-
     try:
         enabled = is_turnstile_enabled()
         site_key = get_site_key() if enabled else None
@@ -3927,15 +3922,12 @@ def verify_captcha_unified(request, turnstile_token=None, image_captcha=None, ca
         return False, '未知的验证类型'
 
 
-@csrf_exempt
+@require_http_methods(["POST"])
 def login_api(request):
     """
     API端点：处理JSON格式的登录请求
     支持两因素认证，支持 Turnstile 和图形验证码双模式
     """
-    if request.method != 'POST':
-        return JsonResponse({'error': '只支持POST请求'}, status=405)
-
     try:
         # 解析JSON数据
         data = json.loads(request.body)

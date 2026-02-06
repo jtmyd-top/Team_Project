@@ -164,27 +164,22 @@ export const useVaultStore = defineStore('vault', () => {
         const initData = await initResponse.json()
         if (initData.status === 'success') {
           vaultInitialized.value = true
-          console.log('[Vault] Lazy initialization successful')
         }
       } else if (initResponse.status === 400) {
         // 400 = 保密柜已初始化，忽略此错误
         const errorData = await initResponse.json()
         if (errorData.message && errorData.message.includes('已初始化')) {
           vaultInitialized.value = true
-          console.log('[Vault] Vault already initialized')
         } else {
           vaultInitError.value = errorData.message
-          console.warn('[Vault] Init returned 400 but not for already-initialized:', errorData.message)
         }
       } else {
         // 其他错误
         const errorData = await initResponse.json()
         vaultInitError.value = errorData.message || 'Failed to initialize vault'
-        console.error('[Vault] Lazy initialization failed:', vaultInitError.value)
       }
     } catch (e) {
       vaultInitError.value = e.message
-      console.error('[Vault] Error during lazy init check:', e)
     } finally {
       vaultInitializing.value = false
     }

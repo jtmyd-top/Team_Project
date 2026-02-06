@@ -64,16 +64,13 @@ export function useNoteListItem(props, emit) {
 
     if (!dekToUse) {
       decryptedTitle.value = ''
-      console.warn('[Vault] No DEK available for decryption in trash:', props.note.id)
       return
     }
 
     try {
       const plainTitle = decryptContent(props.note.title, dekToUse)
       decryptedTitle.value = plainTitle
-      console.log('[Vault] Title decrypted successfully in NoteListItem:', props.note.id)
     } catch (e) {
-      console.warn('[Vault] Failed to decrypt title in NoteListItem:', e.message)
       decryptedTitle.value = ''
     }
   }
@@ -89,7 +86,6 @@ export function useNoteListItem(props, emit) {
 
   watch(() => props.active, (isActive) => {
     if (isActive && props.note.is_secret && !decryptedTitle.value) {
-      console.log('[NoteListItem] Attempting to decrypt title for active note:', props.note.id)
       decryptNoteTitle()
     }
   })
@@ -130,7 +126,7 @@ export function useNoteListItem(props, emit) {
   })
 
   watch(() => props.note.decryptedTitle, (newDecryptedTitle) => {
-    console.log('[NoteListItem] parent decryptedTitle updated:', props.note.id, 'value:', newDecryptedTitle?.substring?.(0, 20))
+    // parent set decryptedTitle
   })
 
   // ==================== 编辑逻辑 ====================
@@ -192,6 +188,12 @@ export function useNoteListItem(props, emit) {
 
   // ==================== 事件处理 ====================
   function handleClick() {
+    // 【关键修复】如果是回收站中的加密笔记且未解锁，先触发解锁流程
+    if (props.note.is_secret && isInTrash.value && !isKeyValid.value && !vaultStore.dek) {
+      console.log('[NoteListItem] Encrypted note in trash clicked without DEK, triggering unlock')
+      handleUnlockVault()
+      return
+    }
     emit('click', props.note)
   }
 
@@ -220,7 +222,6 @@ export function useNoteListItem(props, emit) {
   }
 
   function handleUnlockVault() {
-    console.log('[NoteListItem] User clicked to unlock vault for note:', props.note.id)
     window.dispatchEvent(new CustomEvent('request-vault-unlock', {
       detail: { fromTrash: true, noteId: props.note.id }
     }))

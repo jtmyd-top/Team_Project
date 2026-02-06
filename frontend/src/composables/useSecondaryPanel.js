@@ -47,6 +47,10 @@ export function useSecondaryPanel(props, emit) {
   // 编辑状态
   const editingNoteId = ref(null)
 
+  // 批量选择状态（回收站专用）
+  const batchSelectMode = ref(false)
+  const selectedItems = ref([]) // { type: 'note'|'folder', id: number }[]
+
   // ==================== 计算属性 ====================
   const isInTrashView = computed(() => {
     return sidebarStore.activeModule === 'trash'
@@ -114,6 +118,26 @@ export function useSecondaryPanel(props, emit) {
     }
     return texts[sidebarStore.activeModule] || '暂无内容'
   })
+
+  // 批量选择：是否全选
+  const isAllSelected = computed(() => {
+    if (!isInTrashView.value || filteredNotes.value.length === 0) return false
+    return filteredNotes.value.every(item =>
+      selectedItems.value.some(s => s.type === item.type && s.id === item.id)
+    )
+  })
+
+  // 批量选择：是否部分选中
+  const isPartialSelected = computed(() => {
+    if (!isInTrashView.value || filteredNotes.value.length === 0) return false
+    const selectedCount = filteredNotes.value.filter(item =>
+      selectedItems.value.some(s => s.type === item.type && s.id === item.id)
+    ).length
+    return selectedCount > 0 && selectedCount < filteredNotes.value.length
+  })
+
+  // 批量选择：选中数量
+  const selectedCount = computed(() => selectedItems.value.length)
 
   const filteredNotes = computed(() => {
     if (!searchQuery.value) {
@@ -290,6 +314,14 @@ export function useSecondaryPanel(props, emit) {
     if (item.type === 'folder') {
       sidebarStore.enterTrashedFolder(item.id)
     } else {
+      // 【关键修复】如果是加密笔记且未解锁，先触发解锁流程
+      if (item.is_secret && !isKeyValid.value && !vaultStore.dek) {
+        console.log('[SecondaryPanel] Encrypted note in trash clicked without DEK, triggering unlock')
+        window.dispatchEvent(new CustomEvent('request-vault-unlock', {
+          detail: { fromTrash: true, noteId: item.id }
+        }))
+        return
+      }
       emit('note-select', item.id)
     }
   }
@@ -356,6 +388,140 @@ export function useSecondaryPanel(props, emit) {
       return item.decryptedTitle || item.title
     }
     return '加密笔记 - 点击解锁'
+  }
+
+  // ==================== 批量操作（回收站专用）====================
+
+  // 切换批量选择模式
+  function toggleBatchSelectMode() {
+    batchSelectMode.value = !batchSelectMode.value
+    if (!batchSelectMode.value) {
+      selectedItems.value = []
+    }
+  }
+
+  // 退出批量选择模式
+  function exitBatchSelectMode() {
+    batchSelectMode.value = false
+    selectedItems.value = []
+  }
+
+  // 检查项目是否被选中
+  function isItemSelected(item) {
+    return selectedItems.value.some(s => s.type === item.type && s.id === item.id)
+  }
+
+  // 切换单个项目的选中状态
+  function toggleItemSelection(item) {
+    const index = selectedItems.value.findIndex(s => s.type === item.type && s.id === item.id)
+    if (index > -1) {
+      selectedItems.value.splice(index, 1)
+    } else {
+      selectedItems.value.push({ type: item.type, id: item.id, name: item.name || item.title })
+    }
+  }
+
+  // 全选/取消全选
+  function toggleSelectAll() {
+    if (isAllSelected.value) {
+      // 取消全选
+      selectedItems.value = []
+    } else {
+      // 全选当前列表
+      selectedItems.value = filteredNotes.value.map(item => ({
+        type: item.type,
+        id: item.id,
+        name: item.name || item.title
+      }))
+    }
+  }
+
+  // 批量恢复
+  async function handleBatchRestore() {
+    if (selectedItems.value.length === 0) return
+
+    try {
+      await ElMessageBox.confirm(
+        `确定要恢复选中的 ${selectedItems.value.length} 个项目吗？`,
+        '批量恢复',
+        {
+          confirmButtonText: '确认恢复',
+          cancelButtonText: '取消',
+          type: 'success'
+        }
+      )
+
+      const errors = []
+      for (const item of selectedItems.value) {
+        try {
+          if (item.type === 'folder') {
+            await sidebarStore.restoreFolder(item.id)
+          } else {
+            await sidebarStore.restoreNote(item.id)
+          }
+        } catch (e) {
+          errors.push(item.name || item.id)
+        }
+      }
+
+      if (errors.length === 0) {
+        ElMessage.success(`成功恢复 ${selectedItems.value.length} 个项目`)
+      } else if (errors.length < selectedItems.value.length) {
+        ElMessage.warning(`部分恢复成功，${errors.length} 个项目恢复失败`)
+      } else {
+        ElMessage.error('恢复失败')
+      }
+
+      // 清空选择并退出批量模式
+      exitBatchSelectMode()
+    } catch {
+      // 用户取消
+    }
+  }
+
+  // 批量永久删除
+  async function handleBatchDelete() {
+    if (selectedItems.value.length === 0) return
+
+    try {
+      await ElMessageBox.confirm(
+        `确定要永久删除选中的 ${selectedItems.value.length} 个项目吗？此操作不可恢复！`,
+        '批量永久删除',
+        {
+          confirmButtonText: '确认永久删除',
+          cancelButtonText: '取消',
+          type: 'error',
+          confirmButtonClass: 'el-button--danger',
+          customClass: 'delete-confirm-box'
+        }
+      )
+
+      const errors = []
+      for (const item of selectedItems.value) {
+        try {
+          if (item.type === 'folder') {
+            await sidebarStore.permanentDeleteFolder(item.id)
+          } else {
+            await sidebarStore.permanentDeleteNote(item.id)
+          }
+        } catch (e) {
+          errors.push(item.name || item.id)
+        }
+      }
+
+      if (errors.length === 0) {
+        ElMessage.success(`成功删除 ${selectedItems.value.length} 个项目`)
+      } else if (errors.length < selectedItems.value.length) {
+        ElMessage.warning(`部分删除成功，${errors.length} 个项目删除失败`)
+      } else {
+        ElMessage.error('删除失败')
+      }
+
+      // 清空选择并退出批量模式
+      exitBatchSelectMode()
+    } catch {
+      // 用户取消
+    }
   }
 
   // ==================== 文件夹操作 ====================
@@ -1172,6 +1338,13 @@ export function useSecondaryPanel(props, emit) {
     moveDialogMode,
     editingNoteId,
 
+    // 批量选择状态
+    batchSelectMode,
+    selectedItems,
+    isAllSelected,
+    isPartialSelected,
+    selectedCount,
+
     // 计算属性
     isInTrashView,
     showBackButton,
@@ -1194,6 +1367,15 @@ export function useSecondaryPanel(props, emit) {
     handleItemRestore,
     handleItemDelete,
     displayTitle,
+
+    // 批量操作
+    toggleBatchSelectMode,
+    exitBatchSelectMode,
+    isItemSelected,
+    toggleItemSelection,
+    toggleSelectAll,
+    handleBatchRestore,
+    handleBatchDelete,
 
     // 文件夹操作
     handleFolderRename,
@@ -1226,6 +1408,9 @@ export function useSecondaryPanel(props, emit) {
     handleInboxDragOver,
     handleInboxDragLeave,
     handleInboxDrop,
-    handleNoteDrop
+    handleNoteDrop,
+
+    // Stores
+    sidebarStore
   }
 }

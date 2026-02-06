@@ -1,0 +1,143 @@
+/* SecondarySidebar 组件样式 */
+
+.secondary-sidebar {
+  width: 260px;
+  height: 100%;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 101;
+}
+
+.secondary-sidebar.collapsed {
+  width: 0;
+  border-right: none;
+  opacity: 0;
+}
+
+.secondary-sidebar .sidebar-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.secondary-sidebar .sidebar-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.secondary-sidebar .collapse-btn {
+  padding: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.secondary-sidebar .collapse-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.secondary-sidebar .search-section {
+  padding: 0 16px 12px;
+  flex-shrink: 0;
+}
+
+.secondary-sidebar .search-box {
+  position: relative;
+}
+
+.secondary-sidebar .search-box i {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.secondary-sidebar .search-box input {
+  width: 100%;
+  padding: 8px 12px 8px 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg, var(--bg-secondary));
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.secondary-sidebar .search-box input:focus {
+  border-color: var(--primary-color);
+}
+
+.secondary-sidebar .sidebar-actions {
+  padding: 0 16px 16px;
+  flex-shrink: 0;
+}
+
+.secondary-sidebar .new-note-btn {
+  width: 100%;
+  padding: 8px;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity 0.2s;
+}
+
+.secondary-sidebar .new-note-btn:hover {
+  opacity: 0.9;
+}
+
+.secondary-sidebar .sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 8px;
+}
+
+.secondary-sidebar .load-trigger {
+  height: 20px;
+  margin-top: 10px;
+}
+
+.secondary-sidebar .loading-more {
+  text-align: center;
+  padding: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* Scrollbar styling */
+.secondary-sidebar .sidebar-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.secondary-sidebar .sidebar-content::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 2px;
+}
+
+.secondary-sidebar .sidebar-content::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -31,6 +31,17 @@
 
         <!-- 操作按钮 -->
         <div class="panel-actions">
+          <!-- 回收站批量选择按钮 -->
+          <button
+            v-if="isInTrashView && filteredNotes.length > 0"
+            class="action-btn"
+            :class="{ 'is-active': batchSelectMode }"
+            @click="toggleBatchSelectMode"
+            :title="batchSelectMode ? '退出批量选择' : '批量选择'"
+          >
+            <i :class="batchSelectMode ? 'fas fa-times' : 'fas fa-check-square'"></i>
+          </button>
+
           <!-- 保密柜锁定按钮 -->
           <button
             v-if="sidebarStore.activeModule === 'vault' && sidebarStore.vaultStatus.isVerified"
@@ -113,26 +124,30 @@
 
         <!-- 文件夹树视图（我的空间 - 文件夹列表） -->
         <template v-else-if="sidebarStore.activeModule === 'my-space' && sidebarStore.secondaryView === 'folders'">
-          <!-- 未分类笔记（也是放置目标） -->
-          <div
-            class="inbox-item"
-            :class="{ 'is-drop-target': isInboxDragOver }"
-            @click="sidebarStore.enterInbox()"
-            @dragover.prevent="handleInboxDragOver"
-            @dragleave="handleInboxDragLeave"
-            @drop="handleInboxDrop"
-          >
-            <i class="fas fa-inbox"></i>
-            <span class="inbox-label">未分类笔记</span>
-            <span v-if="sidebarStore.inboxCount > 0" class="inbox-count">
-              {{ sidebarStore.inboxCount }}
-            </span>
-          </div>
+          <!-- 文件夹树（包含未分类笔记） -->
+          <div class="folder-tree">
+            <!-- 未分类笔记（文件夹样式） -->
+            <div
+              class="folder-tree-item inbox-folder"
+              :class="{ 'is-drop-target': isInboxDragOver }"
+            >
+              <div
+                class="folder-row"
+                :class="{ 'is-drop-target': isInboxDragOver }"
+                @click="sidebarStore.enterInbox()"
+                @dragover.prevent="handleInboxDragOver"
+                @dragleave="handleInboxDragLeave"
+                @drop="handleInboxDrop"
+              >
+                <i class="fas fa-inbox folder-icon inbox-icon"></i>
+                <span class="folder-name">未分类笔记</span>
+                <span v-if="sidebarStore.inboxCount > 0" class="notes-count">
+                  {{ sidebarStore.inboxCount }}
+                </span>
+              </div>
+            </div>
 
-          <div class="divider"></div>
-
-          <!-- 文件夹树 -->
-          <div v-if="sidebarStore.folders.length > 0" class="folder-tree">
+            <!-- 文件夹列表 -->
             <FolderTreeItem
               v-for="folder in sidebarStore.folders"
               :key="folder.id"
@@ -145,8 +160,8 @@
             />
           </div>
 
-          <!-- 空状态 -->
-          <div v-else class="empty-state">
+          <!-- 空状态（没有文件夹时） -->
+          <div v-if="sidebarStore.folders.length === 0 && sidebarStore.inboxCount === 0" class="empty-state">
             <i class="fas fa-folder-open"></i>
             <p>尚未创建分类</p>
             <div class="empty-actions">
@@ -177,14 +192,14 @@
             </button>
           </div>
 
-          <!-- 【新增】回收站只读 Banner -->
-          <div v-if="isInTrashView && sidebarStore.currentFolder" class="trash-readonly-banner">
-            <i class="fas fa-info-circle"></i>
-            <span>此文件夹位于回收站，无法编辑</span>
-          </div>
-
           <!-- 正常笔记列表（非保密柜或已验证） -->
           <template v-else>
+            <!-- 【新增】回收站只读 Banner -->
+            <div v-if="isInTrashView && sidebarStore.currentFolder" class="trash-readonly-banner">
+              <i class="fas fa-info-circle"></i>
+              <span>此文件夹位于回收站，无法编辑</span>
+            </div>
+
             <!-- 【修改】回收站中的子文件夹列表 -->
             <div v-if="sidebarStore.currentSubfolders.length > 0" class="subfolders-section">
               <div class="section-header">
@@ -218,16 +233,59 @@
                 <i class="fas fa-file-alt"></i>
                 <span>笔记</span>
               </div>
-              <!-- 【修改】回收站中显示混合列表（笔记 + 文件夹） -->
-              <template v-if="isInTrashView && !sidebarStore.currentFolder">
-                <!-- 回收站根目录：显示混合列表 -->
+              <!-- 【修改】回收站中显示混合列表（笔记 + 文件夹），包括回收站文件夹内 -->
+              <template v-if="isInTrashView">
+                <!-- 批量选择工具栏 -->
+                <div v-if="batchSelectMode" class="batch-toolbar">
+                  <label class="select-all-checkbox">
+                    <input
+                      type="checkbox"
+                      :checked="isAllSelected"
+                      :indeterminate="isPartialSelected"
+                      @change="toggleSelectAll"
+                    />
+                    <span>全选</span>
+                  </label>
+                  <span class="selected-count">已选 {{ selectedCount }} 项</span>
+                  <div class="batch-actions">
+                    <button
+                      class="batch-btn restore"
+                      :disabled="selectedCount === 0"
+                      @click="handleBatchRestore"
+                    >
+                      <i class="fas fa-undo"></i>
+                      恢复
+                    </button>
+                    <button
+                      class="batch-btn delete"
+                      :disabled="selectedCount === 0"
+                      @click="handleBatchDelete"
+                    >
+                      <i class="fas fa-trash-alt"></i>
+                      删除
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 回收站：显示混合列表（根目录和文件夹内都使用） -->
                 <div
                   v-for="item in filteredNotes"
-                  :key="item.id"
+                  :key="`${item.type}-${item.id}`"
                   class="trash-item"
-                  :class="{ 'is-folder': item.type === 'folder' }"
-                  @click="handleTrashItemClick(item)"
+                  :class="{
+                    'is-folder': item.type === 'folder',
+                    'is-selected': batchSelectMode && isItemSelected(item)
+                  }"
+                  @click="batchSelectMode ? toggleItemSelection(item) : handleTrashItemClick(item)"
                 >
+                  <!-- 批量选择复选框 -->
+                  <label v-if="batchSelectMode" class="item-checkbox" @click.stop>
+                    <input
+                      type="checkbox"
+                      :checked="isItemSelected(item)"
+                      @change="toggleItemSelection(item)"
+                    />
+                  </label>
                   <i :class="item.type === 'folder' ? 'fas fa-folder' : 'fas fa-file-alt'" class="item-icon"></i>
                   <!-- 【新增】保密笔记锁图标 -->
                   <i v-if="item.type === 'note' && item.is_secret" class="fas fa-lock secret-lock-icon"></i>
@@ -239,7 +297,7 @@
                       包含 {{ item.children_count }} 个项目
                     </span>
                   </div>
-                  <div class="item-actions" @click.stop>
+                  <div v-if="!batchSelectMode" class="item-actions" @click.stop>
                     <button class="action-btn restore-btn" @click="handleItemRestore(item)">
                       <i class="fas fa-undo"></i>
                     </button>
@@ -328,10 +386,10 @@
 </template>
 
 <script setup>
-import FolderTreeItem from '@/components/common/FolderTreeItem.vue'
+import FolderTreeItem from '@/components/common/FolderTreeItem/index.vue'
 import NoteListItem from '@/components/common/NoteListItem/index.vue'
-import NoteContextMenu from '@/components/common/NoteContextMenu.vue'
-import MoveToDialog from '@/components/common/MoveToDialog.vue'
+import NoteContextMenu from '@/components/common/NoteContextMenu/index.vue'
+import MoveToDialog from '@/components/common/MoveToDialog/index.vue'
 import { useSecondaryPanel } from '@/composables/useSecondaryPanel'
 import '@/assets/styles/components/secondary-panel.css'
 
@@ -362,6 +420,13 @@ const {
   moveDialogMode,
   editingNoteId,
 
+  // 批量选择状态
+  batchSelectMode,
+  selectedItems,
+  isAllSelected,
+  isPartialSelected,
+  selectedCount,
+
   // 计算属性
   isInTrashView,
   showBackButton,
@@ -384,6 +449,15 @@ const {
   handleItemRestore,
   handleItemDelete,
   displayTitle,
+
+  // 批量操作
+  toggleBatchSelectMode,
+  exitBatchSelectMode,
+  isItemSelected,
+  toggleItemSelection,
+  toggleSelectAll,
+  handleBatchRestore,
+  handleBatchDelete,
 
   // 文件夹操作
   handleFolderRename,

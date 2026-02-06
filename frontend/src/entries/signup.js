@@ -6,7 +6,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 // 导入 API 服务（会自动挂载到 window.apiService）
 import '@services/apiService'
 
-import Signup from '@components/auth/Signup.vue'
+import Signup from '@components/auth/Signup/index.vue'
 
 const app = createApp(Signup)
 

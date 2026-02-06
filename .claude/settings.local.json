@@ -40,7 +40,10 @@
       "Bash(cd:*)",
       "Bash(npm run lint:*)",
       "Bash(node:*)",
-      "Bash(git checkout frontend/src/components/knowledge/KnowledgeList.vue)"
+      "Bash(git checkout frontend/src/components/knowledge/KnowledgeList.vue)",
+      "Bash(for file in \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\settings\"/*.vue)",
+      "Bash(done)",
+      "Bash(for file in \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\common\"/*.vue \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\common\"/*/*.vue)"
     ],
     "deny": [],
     "ask": []

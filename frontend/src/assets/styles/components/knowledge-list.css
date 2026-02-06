@@ -40,7 +40,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  background: var(--bg-primary, #fff);
+  background: #f1f5f9;
   flex-shrink: 0;
 }
 
@@ -164,6 +164,65 @@
   color: #856404;
   font-size: 13px;
   opacity: 0.9;
+}
+
+/* 回收站中保密笔记提示 */
+.trash-secret-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 300px;
+  padding: 40px;
+  text-align: center;
+  color: var(--text-secondary, #666);
+}
+
+.trash-secret-notice .notice-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e8f4fd 0%, #d4e9f7 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.trash-secret-notice .notice-icon i {
+  font-size: 36px;
+  color: #409eff;
+}
+
+.trash-secret-notice .notice-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+  margin: 0 0 12px;
+}
+
+.trash-secret-notice .notice-message {
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+  margin: 0 0 8px;
+  max-width: 300px;
+}
+
+.trash-secret-notice .notice-hint {
+  font-size: 13px;
+  color: var(--text-tertiary, #999);
+  margin: 0;
+  max-width: 300px;
+}
+
+/* 暗色模式适配 */
+.dark .trash-secret-notice .notice-icon {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2c4a6e 100%);
+}
+
+.dark .trash-secret-notice .notice-icon i {
+  color: #64b5f6;
 }
 
 .viewer-wrapper {

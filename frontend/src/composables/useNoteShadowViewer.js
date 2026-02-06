@@ -40,6 +40,11 @@ export function useNoteShadowViewer(props) {
   // ==================== 计算属性 ====================
   const hasAnyValidDek = computed(() => !!(dek.value || vaultStore.dek))
 
+  // 检查是否有有效的密钥（本地或 store 中）
+  const hasValidKey = computed(() => {
+    return isKeyValid.value || !!(vaultStore.dek && vaultStore.keyExpireTime && vaultStore.keyExpireTime > Date.now())
+  })
+
   const displayContent = computed(() => {
     if (!props.isSecret) {
       return props.content
@@ -118,6 +123,13 @@ export function useNoteShadowViewer(props) {
     const needsVerification = props.isSecret && !hasValidDek
     const shouldUpdate = rawHtml !== cachedRawHtml || needsVerification || forceStyleUpdate
 
+    console.log('[ShadowViewer] renderContent called', {
+      rawHtmlLength: rawHtml.length,
+      shouldUpdate,
+      forceStyleUpdate,
+      hasPreTags: rawHtml.includes('<pre')
+    })
+
     if (shouldUpdate) {
       cachedRawHtml = rawHtml
 
@@ -149,6 +161,7 @@ export function useNoteShadowViewer(props) {
         showToc.value = false
       } else {
         cachedCleanHtml = DOMPurify.sanitize(rawHtml, purifyConfig)
+        console.log('[ShadowViewer] Sanitized HTML has pre tags:', cachedCleanHtml.includes('<pre'))
         tocItems.value = props.toc || []
         showToc.value = tocItems.value.length >= TOC_THRESHOLD
       }
@@ -166,17 +179,31 @@ export function useNoteShadowViewer(props) {
       `
     }
 
-    nextTick(() => {
+    // 增强代码块 - 使用 requestAnimationFrame 确保 DOM 已渲染
+    requestAnimationFrame(() => {
       if (!shadowRoot.value) return
 
-      const contentEl = shadowRoot.value.querySelector('.note-content')
-      if (!contentEl) return
+      const content = shadowRoot.value.querySelector('.note-content')
+      if (!content) {
+        console.log('[CodeEnhancer] No .note-content found')
+        return
+      }
 
-      try {
-        setupScrollSpy()
-        enhanceCodeBlocks(contentEl)
-      } catch (e) {
-        console.warn('Error enhancing code blocks:', e)
+      setupScrollSpy()
+
+      const preBlocks = content.querySelectorAll('pre')
+      console.log('[CodeEnhancer] Found pre blocks:', preBlocks.length)
+
+      if (preBlocks.length > 0) {
+        preBlocks.forEach((pre, index) => {
+          console.log(`[CodeEnhancer] Pre block ${index}:`, {
+            className: pre.className,
+            hasCode: !!pre.querySelector('code'),
+            textLength: pre.textContent?.length || 0
+          })
+        })
+        enhanceCodeBlocks(content)
+        console.log('[CodeEnhancer] Enhancement completed')
       }
     })
   }
@@ -300,7 +327,7 @@ export function useNoteShadowViewer(props) {
   // ==================== 生命周期 ====================
   onMounted(() => {
     initShadowRoot()
-    if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+    if (props.isSecret && hasValidKey.value && props.content && props.noteId) {
       decryptNoteContent()
     }
   })
@@ -320,7 +347,7 @@ export function useNoteShadowViewer(props) {
       initShadowRoot()
     }
 
-    if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+    if (props.isSecret && hasValidKey.value && props.content && props.noteId) {
       decryptNoteContent()
     } else {
       renderContent(false)
@@ -332,14 +359,14 @@ export function useNoteShadowViewer(props) {
     decryptError.value = ''
     hasRequestedVaultUnlock.value = false
 
-    if (props.isSecret && isKeyValid.value && props.content && props.noteId) {
+    if (props.isSecret && hasValidKey.value && props.content && props.noteId) {
       decryptNoteContent()
     } else {
       renderContent(false)
     }
   })
 
-  watch(() => isKeyValid.value, (valid) => {
+  watch(() => hasValidKey.value, (valid) => {
     if (valid && props.isSecret && props.content && props.noteId && !decryptedContent.value) {
       decryptNoteContent()
     } else if (!valid && props.isSecret) {

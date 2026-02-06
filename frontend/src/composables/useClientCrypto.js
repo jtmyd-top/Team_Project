@@ -111,12 +111,6 @@ export function useClientCrypto() {
       // 6. 返回 Base64 编码
       const result = toBase64(combined)
 
-      console.log('[Vault] Content encrypted in browser (Python-compatible format)', {
-        plainTextLength: plaintext.length,
-        encryptedLength: result.length,
-        sample: result.substring(0, 30)
-      })
-
       return result
     } catch (e) {
       console.error('[Vault] 客户端加密错误:', e)
@@ -206,12 +200,6 @@ export function useClientCrypto() {
       if (!plaintext) {
         throw new Error('解密结果为空，可能密钥错误或数据损坏')
       }
-
-      console.log('[Vault] Content decrypted in browser (Python-compatible format)', {
-        encryptedLength: encryptedBase64.length,
-        decryptedLength: plaintext.length,
-        sample: plaintext.substring(0, 50)
-      })
 
       return plaintext
     } catch (e) {

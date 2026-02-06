@@ -1,0 +1,321 @@
+/* NoteViewer 组件样式 */
+
+.encrypted-prompt {
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.decrypting-state {
+  padding: 20px;
+}
+
+.decrypt-error {
+  padding: 20px;
+}
+
+/* NoteViewer 容器基础样式 */
+.note-viewer {
+  width: 100%;
+  line-height: 1.8;
+  color: var(--text-primary, #333);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Prose 排版样式 */
+.note-prose :deep(*) {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.note-prose :deep(div) {
+  display: block;
+  margin: 0.5em 0;
+}
+
+/* 标题 */
+.note-prose :deep(h1) {
+  font-size: 1.8em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+  display: block;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.note-prose :deep(h2) {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  line-height: 1.35;
+  display: block;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.note-prose :deep(h3) {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+  line-height: 1.4;
+  display: block;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.note-prose :deep(h4),
+.note-prose :deep(h5),
+.note-prose :deep(h6) {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  line-height: 1.4;
+  display: block;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.note-prose :deep(p) {
+  margin: 1em 0;
+  line-height: 1.8;
+  display: block;
+  color: var(--text-primary, #333);
+}
+
+/* 链接 */
+.note-prose :deep(a) {
+  color: var(--primary-color, #409eff);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.note-prose :deep(a:hover) {
+  color: var(--primary-color-light, #66b1ff);
+  text-decoration: underline;
+}
+
+/* 列表 */
+.note-prose :deep(ul),
+.note-prose :deep(ol) {
+  margin: 1em 0;
+  padding-left: 2em;
+  display: block;
+}
+
+.note-prose :deep(ul) {
+  list-style-type: disc;
+}
+
+.note-prose :deep(ol) {
+  list-style-type: decimal;
+}
+
+.note-prose :deep(li) {
+  margin: 0.5em 0;
+  line-height: 1.6;
+  display: list-item;
+}
+
+/* 引用块 */
+.note-prose :deep(blockquote) {
+  margin: 1em 0;
+  padding: 0.5em 1em;
+  border-left: 4px solid var(--primary-color, #409eff);
+  background: var(--bg-secondary, rgba(64, 158, 255, 0.05));
+  border-radius: 0 4px 4px 0;display: block;
+}
+
+.note-prose :deep(blockquote p) {
+  margin: 0.5em 0;
+}
+
+/* 代码 */
+.note-prose :deep(code) {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-size: 0.9em;
+  color: var(--text-primary, #333);
+}
+
+.note-prose :deep(pre) {
+  margin: 1em 0;
+  padding: 1em;
+  background: var(--bg-tertiary, #f5f5f5);
+  border-radius: 8px;
+  overflow-x: auto;
+  display: block;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.note-prose :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.875em;
+  line-height: 1.6;
+}
+
+/* 图片 */
+.note-prose :deep(img) {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1em auto;
+  border-radius: 8px;
+}
+
+/* 表格 */
+.note-prose :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;display: table;
+  overflow-x: auto;
+}
+
+.note-prose :deep(th),
+.note-prose :deep(td) {
+  border: 1px solid var(--border-color, #e0e0e0);
+  padding: 0.75em 1em;
+  text-align: left;
+}
+
+.note-prose :deep(th) {
+  background: var(--bg-secondary, #f5f5f5);
+  font-weight: 600;
+}
+
+.note-prose :deep(tr:nth-child(even)) {
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.02));
+}
+
+/* 分割线 */
+.note-prose :deep(hr) {
+  margin: 2em 0;
+  border: none;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  display: block;
+}
+
+/* 强调文本 */
+.note-prose :deep(strong),
+.note-prose :deep(b) {
+  font-weight: 600;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.note-prose :deep(em),
+.note-prose :deep(i) {
+  font-style: italic;
+}
+
+/* 删除线 */
+.note-prose :deep(del),
+.note-prose :deep(s) {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* 下划线 */
+.note-prose :deep(u) {
+  text-decoration: underline;
+}
+
+/* 标记高亮 */
+.note-prose :deep(mark) {
+  background: rgba(255, 230, 0, 0.4);
+  padding: 0.1em 0.2em;
+  border-radius: 2px;
+}
+
+/* 上下标 */
+.note-prose :deep(sub) {
+  font-size: 0.75em;
+  vertical-align: sub;
+}
+
+.note-prose :deep(sup) {
+  font-size: 0.75em;
+  vertical-align: super;
+}
+
+/* 表单元素 */
+.note-prose :deep(button) {
+  display: inline-block;
+  padding: 0.5em 1em;
+  background: var(--bg-secondary, #f0f0f0);
+  border: 1px solid var(--border-color, #d0d0d0);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: inherit;
+  color: var(--text-primary, #333);
+}
+
+.note-prose :deep(input),
+.note-prose :deep(textarea) {
+  display: inline-block;
+  padding: 0.5em;
+  border: 1px solid var(--border-color, #d0d0d0);
+  border-radius: 4px;
+  font-size: inherit;
+  max-width: 100%;
+}
+
+/* span 和 label */
+.note-prose :deep(span) {
+  display: inline;
+}
+
+.note-prose :deep(label) {
+  display: inline-block;
+  margin: 0.25em 0;
+}
+
+/* figure 和 figcaption */
+.note-prose :deep(figure) {
+  margin: 1.5em 0;
+  display: block;
+}
+
+.note-prose :deep(figcaption) {
+  text-align: center;
+  font-size: 0.9em;
+  color: var(--text-secondary, #666);margin-top: 0.5em;
+}
+
+/* details 和 summary */
+.note-prose :deep(details) {
+  margin: 1em 0;
+  padding: 1em;
+  background: var(--bg-secondary, #f9f9f9);
+  border-radius: 4px;
+}
+
+.note-prose :deep(summary) {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+/* 视频和音频 */
+.note-prose :deep(video),
+.note-prose :deep(audio) {
+  max-width: 100%;
+  display: block;
+  margin: 1em 0;
+}
+
+/* 防止外部 flex/grid 布局影响 */
+.note-prose :deep([class*="flex"]),
+.note-prose :deep([class*="grid"]) {
+  display: block !important;
+}
+
+/* 重置可能的定位属性 */
+.note-prose :deep([style*="position: absolute"]),
+.note-prose :deep([style*="position: fixed"]) {
+  position: relative !important;
+}
+
+/* 确保所有容器不会溢出 */
+.note-prose :deep(*) {
+  max-width: 100%;overflow-wrap: break-word;
+}

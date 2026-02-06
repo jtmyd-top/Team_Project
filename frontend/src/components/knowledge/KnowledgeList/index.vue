@@ -134,27 +134,41 @@
           <div class="workspace-content">
             <!-- 阅读模式 -->
             <div v-if="viewMode === 'read'" class="viewer-wrapper">
+              <!-- 回收站中的保密笔记：显示提示而不解密 -->
+              <div v-if="currentNoteData.is_secret && currentNoteData.is_trashed" class="trash-secret-notice">
+                <div class="notice-icon">
+                  <i class="fas fa-lock"></i>
+                </div>
+                <h3 class="notice-title">保密笔记</h3>
+                <p class="notice-message">此笔记为保密笔记，在回收站中无法查看内容</p>
+                <p class="notice-hint">如需查看内容，请先恢复笔记到保密柜</p>
+              </div>
+              <!-- 正常保密笔记（非回收站） -->
               <NoteShadowViewer
-                v-if="currentNoteData.is_secret"
+                v-else-if="currentNoteData.is_secret"
                 :key="currentNoteId"
                 :content="currentNoteData.content"
-                :title="displayTitle"
+                :toc="currentNoteData.toc"
+                :is-dark="isDarkMode"
+                :is-secret="currentNoteData.is_secret"
+                :is-trashed="currentNoteData.is_trashed"
+                :note-id="currentNoteId"
               />
+              <!-- 普通笔记 -->
               <div v-else class="note-content" v-html="currentNoteData.content"></div>
             </div>
 
             <!-- 编辑模式 -->
-            <div v-else class="editor-wrapper">
-              <NoteEditor
-                :key="currentNoteId"
-                ref="noteEditorRef"
-                v-model="currentNoteData"
-                :is-light-theme="!isDarkMode"
-                :is-secret="currentNoteData.is_secret"
-                @change="handleEditorChange"
-                @save="handleSave"
-              />
-            </div>
+            <NoteEditor
+              v-else
+              :key="currentNoteId"
+              ref="noteEditorRef"
+              v-model="currentNoteData"
+              :is-light-theme="!isDarkMode"
+              :is-secret="currentNoteData.is_secret"
+              @change="handleEditorChange"
+              @save="handleSave"
+            />
           </div>
         </div>
 
@@ -190,12 +204,12 @@
 </template>
 
 <script setup>
-import Breadcrumb from '@/components/common/Breadcrumb.vue'
+import Breadcrumb from '@/components/common/Breadcrumb/index.vue'
 import NoteEditor from '@/components/knowledge/NoteEditor/index.vue'
 import NoteShadowViewer from '@/components/knowledge/NoteShadowViewer/index.vue'
-import DragDropOverlay from '@/components/common/DragDropOverlay.vue'
+import DragDropOverlay from '@/components/common/DragDropOverlay/index.vue'
 import VaultVerifyDialog from '@/components/common/VaultVerifyDialog/index.vue'
-import VaultSetupDialog from '@/components/common/VaultSetupDialog.vue'
+import VaultSetupDialog from '@/components/common/VaultSetupDialog/index.vue'
 import PrimarySidebar from '@/components/layout/PrimarySidebar/index.vue'
 import SecondaryPanel from '@/components/layout/SecondaryPanel/index.vue'
 import { useKnowledgeList } from '@/composables/useKnowledgeList'

@@ -1,25 +1,10 @@
 {
-  "_CaptchaWidget-!~{005}~.js": {
-    "file": "assets/CaptchaWidget.css",
-    "src": "_CaptchaWidget-!~{005}~.js"
-  },
-  "_CaptchaWidget-C15h5oy5.js": {
-    "file": "chunks/CaptchaWidget-C15h5oy5.js",
-    "name": "CaptchaWidget",
-    "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js"
-    ],
-    "css": [
-      "assets/CaptchaWidget.css"
-    ]
-  },
   "__plugin-vue_export-helper-DlAUqK2U.js": {
     "file": "chunks/_plugin-vue_export-helper-DlAUqK2U.js",
     "name": "_plugin-vue_export-helper"
   },
-  "_apiService-DI5SaA2C.js": {
-    "file": "chunks/apiService-DI5SaA2C.js",
+  "_apiService-Codkj7Mw.js": {
+    "file": "chunks/apiService-Codkj7Mw.js",
     "name": "apiService"
   },
   "_element-plus-!~{001}~.js": {
@@ -35,6 +20,20 @@
     ],
     "css": [
       "assets/element.css"
+    ]
+  },
+  "_index-!~{005}~.js": {
+    "file": "assets/index.css",
+    "src": "_index-!~{005}~.js"
+  },
+  "_index-YegUEGnG.js": {
+    "file": "chunks/index-YegUEGnG.js",
+    "name": "index",
+    "imports": [
+      "_vue-vendor-MyggWDWC.js"
+    ],
+    "css": [
+      "assets/index.css"
     ]
   },
   "_usePasswordStrength-CaVHztiB.js": {
@@ -60,8 +59,7 @@
     "imports": [
       "_vue-vendor-MyggWDWC.js",
       "_element-plus-DH9MpWH9.js",
-      "_CaptchaWidget-C15h5oy5.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_index-YegUEGnG.js",
       "_vendor-S3dOTKTB.js"
     ],
     "css": [
@@ -91,9 +89,9 @@
     "imports": [
       "_vue-vendor-MyggWDWC.js",
       "_element-plus-DH9MpWH9.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
       "_vendor-S3dOTKTB.js",
-      "_CaptchaWidget-C15h5oy5.js"
+      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_index-YegUEGnG.js"
     ],
     "css": [
       "assets/knowledge.css"
@@ -107,9 +105,8 @@
     "imports": [
       "_vue-vendor-MyggWDWC.js",
       "_element-plus-DH9MpWH9.js",
-      "_apiService-DI5SaA2C.js",
-      "_CaptchaWidget-C15h5oy5.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_apiService-Codkj7Mw.js",
+      "_index-YegUEGnG.js",
       "_vendor-S3dOTKTB.js"
     ],
     "css": [
@@ -143,7 +140,6 @@
       "_vue-vendor-MyggWDWC.js",
       "_element-plus-DH9MpWH9.js",
       "_usePasswordStrength-CaVHztiB.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
       "_vendor-S3dOTKTB.js"
     ],
     "css": [
@@ -157,9 +153,8 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_apiService-DI5SaA2C.js",
-      "_CaptchaWidget-C15h5oy5.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_apiService-Codkj7Mw.js",
+      "_index-YegUEGnG.js",
       "_element-plus-DH9MpWH9.js",
       "_vendor-S3dOTKTB.js"
     ],
@@ -175,10 +170,9 @@
     "imports": [
       "_vue-vendor-MyggWDWC.js",
       "_element-plus-DH9MpWH9.js",
-      "_apiService-DI5SaA2C.js",
-      "_CaptchaWidget-C15h5oy5.js",
+      "_apiService-Codkj7Mw.js",
+      "_index-YegUEGnG.js",
       "_usePasswordStrength-CaVHztiB.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
       "_vendor-S3dOTKTB.js"
     ],
     "css": [

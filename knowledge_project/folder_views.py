@@ -3,6 +3,7 @@
 """
 import json
 from django.db import models
+from django.db.models import Count, Q, Exists, OuterRef
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods
@@ -15,7 +16,7 @@ from .views import check_note_secret_operation_permission
 
 
 def build_folder_tree(folders, parent_id=None):
-    """递归构建文件夹树"""
+    """递归构建文件夹树（使用预加载的 notes_count）"""
     tree = []
     for folder in folders:
         if folder.parent_id == parent_id:
@@ -26,7 +27,8 @@ def build_folder_tree(folders, parent_id=None):
                 'parent_id': folder.parent_id,
                 'order': folder.order,
                 'children': children,
-                'notes_count': folder.notes_in_folder.filter(is_trashed=False, is_secret=False).count()
+                # 使用预加载的 annotated 字段，避免 N+1 查询
+                'notes_count': getattr(folder, 'notes_count', 0)
             })
     return tree
 
@@ -41,7 +43,16 @@ def folder_list_api(request):
     user = request.user
 
     if request.method == 'GET':
-        folders = Folder.objects.filter(owner=user).order_by('order', 'name')
+        # 使用 annotate 预加载 notes_count，避免 N+1 查询
+        folders = Folder.objects.filter(
+            owner=user,
+            is_trashed=False
+        ).annotate(
+            notes_count=Count(
+                'notes_in_folder',
+                filter=Q(notes_in_folder__is_trashed=False, notes_in_folder__is_secret=False)
+            )
+        ).order_by('order', 'name')
         tree = build_folder_tree(list(folders))
         
         # 获取收件箱笔记数量
@@ -102,18 +113,34 @@ def folder_detail_api(request, folder_id):
     DELETE: 删除文件夹（笔记移动到收件箱）
     """
     user = request.user
-    folder = get_object_or_404(Folder, id=folder_id, owner=user)
 
     if request.method == 'GET':
+        # 使用 annotate 获取 notes_count，避免额外查询
+        folder = Folder.objects.filter(
+            id=folder_id,
+            owner=user
+        ).annotate(
+            notes_count=Count(
+                'notes_in_folder',
+                filter=Q(notes_in_folder__is_trashed=False, notes_in_folder__is_secret=False)
+            )
+        ).first()
+
+        if not folder:
+            return JsonResponse({'error': '文件夹不存在'}, status=404)
+
         return JsonResponse({
             'id': folder.id,
             'name': folder.name,
             'parent_id': folder.parent_id,
             'order': folder.order,
-            'notes_count': folder.notes_in_folder.filter(is_trashed=False, is_secret=False).count()
+            'notes_count': folder.notes_count
         })
 
-    elif request.method == 'PUT':
+    # PUT 和 DELETE 请求使用普通查询
+    folder = get_object_or_404(Folder, id=folder_id, owner=user)
+
+    if request.method == 'PUT':
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
@@ -176,10 +203,17 @@ def folder_notes_api(request, folder_id):
     # 获取该文件夹下的直接笔记
     notes = folder.notes_in_folder.filter(is_trashed=False, is_secret=False).order_by('-updated_at')
 
-    # 获取该文件夹的直接子文件夹
+    # 获取该文件夹的直接子文件夹（使用 annotate 避免 N+1 查询）
     subfolders = Folder.objects.filter(
         owner=user,
-        parent=folder
+        parent=folder,
+        is_trashed=False
+    ).annotate(
+        notes_count=Count(
+            'notes_in_folder',
+            filter=Q(notes_in_folder__is_trashed=False, notes_in_folder__is_secret=False)
+        ),
+        has_children=Exists(Folder.objects.filter(parent=OuterRef('pk'), is_trashed=False))
     ).order_by('order', 'name')
 
     return JsonResponse({
@@ -191,8 +225,8 @@ def folder_notes_api(request, folder_id):
         'subfolders': [{
             'id': sf.id,
             'name': sf.name,
-            'notes_count': sf.notes_in_folder.filter(is_trashed=False, is_secret=False).count(),
-            'has_children': sf.children.exists()
+            'notes_count': sf.notes_count,
+            'has_children': sf.has_children
         } for sf in subfolders],
         'notes': [{
             'id': note.id,

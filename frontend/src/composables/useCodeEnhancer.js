@@ -7,12 +7,12 @@
 
 // SVG 图标常量
 const ICONS = {
-  copy: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  copy: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
   </svg>`,
 
-  copied: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  copied: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <polyline points="20 6 9 17 4 12"></polyline>
   </svg>`,
 
@@ -111,7 +111,7 @@ function createCopyButton(codeEl, options) {
   copyBtn.className = 'copy-btn'
 
   try {
-    copyBtn.innerHTML = ICONS.copy
+    copyBtn.innerHTML = `${ICONS.copy}<span>复制</span>`
   } catch (e) {
     console.warn('Error setting copy button innerHTML:', e)
     return null
@@ -129,7 +129,7 @@ function createCopyButton(codeEl, options) {
     if (success) {
       copyBtn.classList.add('copied')
       try {
-        copyBtn.innerHTML = ICONS.copied
+        copyBtn.innerHTML = `${ICONS.copied}<span>已复制</span>`
       } catch (err) {
         console.warn('Error updating copy button:', err)
       }
@@ -138,7 +138,7 @@ function createCopyButton(codeEl, options) {
         try {
           if (copyBtn && copyBtn.classList) {
             copyBtn.classList.remove('copied')
-            copyBtn.innerHTML = ICONS.copy
+            copyBtn.innerHTML = `${ICONS.copy}<span>复制</span>`
           }
         } catch (err) {
           console.warn('Error resetting copy button:', err)
@@ -163,7 +163,7 @@ function createCollapseButton(pre, options) {
   collapseBtn.className = 'collapse-btn'
 
   try {
-    collapseBtn.innerHTML = ICONS.expand
+    collapseBtn.innerHTML = `${ICONS.expand}<span>展开代码</span>`
   } catch (e) {
     console.warn('Error setting collapse button innerHTML:', e)
     return null
@@ -184,9 +184,11 @@ function createCollapseButton(pre, options) {
     const isCollapsed = pre.classList.contains(options.collapsedClass)
     if (isCollapsed) {
       pre.classList.remove(options.collapsedClass)
-      collapseBtn.setAttribute('aria-label', '折叠代码')
+      collapseBtn.innerHTML = `${ICONS.expand}<span>收起代码</span>`
+      collapseBtn.setAttribute('aria-label', '收起代码')
     } else {
       pre.classList.add(options.collapsedClass)
+      collapseBtn.innerHTML = `${ICONS.expand}<span>展开代码</span>`
       collapseBtn.setAttribute('aria-label', '展开代码')
     }
   })
@@ -205,9 +207,14 @@ function enhanceCodeBlock(pre, options) {
   if (!pre.parentNode) return  // 检查元素是否仍在 DOM 中
 
   // 跳过已经处理过的代码块
-  if (pre.classList.contains(options.enhancedClass)) return
+  if (pre.classList.contains(options.enhancedClass)) {
+    console.log('[CodeEnhancer] Skipping already enhanced block')
+    return
+  }
 
   try {
+    console.log('[CodeEnhancer] Enhancing code block...')
+
     // 获取代码元素或使用 pre 本身
     let codeEl = pre.querySelector('code')
     if (!codeEl) {
@@ -221,9 +228,11 @@ function enhanceCodeBlock(pre, options) {
 
     // 添加增强标记类名
     pre.classList.add(options.enhancedClass)
+    console.log('[CodeEnhancer] Added enhanced class')
 
     // 计算行数
     const lineCount = countLines(codeEl)
+    console.log('[CodeEnhancer] Line count:', lineCount)
 
     // 超过阈值添加折叠功能
     if (lineCount > options.collapseThreshold) {
@@ -231,12 +240,14 @@ function enhanceCodeBlock(pre, options) {
       if (options.defaultCollapsed) {
         pre.classList.add(options.collapsedClass)
       }
+      console.log('[CodeEnhancer] Added collapse classes')
     }
 
     // 添加复制按钮
     const copyBtn = createCopyButton(codeEl, options)
     if (copyBtn && pre.parentNode) {  // 确保按钮有效且 pre 仍在 DOM 中
       pre.appendChild(copyBtn)
+      console.log('[CodeEnhancer] Added copy button')
     }
 
     // 添加折叠按钮（超过阈值的代码块）
@@ -244,8 +255,11 @@ function enhanceCodeBlock(pre, options) {
       const collapseBtn = createCollapseButton(pre, options)
       if (collapseBtn && pre.parentNode) {  // 确保按钮有效且 pre 仍在 DOM 中
         pre.appendChild(collapseBtn)
+        console.log('[CodeEnhancer] Added collapse button')
       }
     }
+
+    console.log('[CodeEnhancer] Block enhancement complete')
   } catch (e) {
     console.warn('Error enhancing code block:', e)
   }
@@ -322,98 +336,138 @@ export function getCodeEnhancerStyles(isDark = false) {
   return `
   /* 代码块增强：复制和折叠 */
   pre.code-block-enhanced {
-    position: relative;
-    padding-right: 40px;
+    position: relative !important;
+    padding-top: 44px !important;
   }
 
   /* 复制按钮 */
-  pre .copy-btn {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 32px;
-    height: 32px;
-    border: none;
-    background: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'};
-    color: ${isDark ? '#aaa' : '#666'};
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    z-index: 10;
-    overflow: hidden;
-    padding: 0;
+  pre.code-block-enhanced .copy-btn {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    height: 28px !important;
+    padding: 0 10px !important;
+    border: none !important;
+    background: ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)'} !important;
+    color: ${isDark ? '#ccc' : '#555'} !important;
+    border-radius: 4px !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    transition: all 0.2s ease !important;
+    z-index: 10 !important;
+    font-size: 12px !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    line-height: 1 !important;
   }
 
-  pre .copy-btn:hover {
-    background: ${isDark ? 'rgba(64, 158, 255, 0.3)' : 'rgba(64, 158, 255, 0.2)'};
-    color: #409eff;
+  pre.code-block-enhanced .copy-btn:hover {
+    background: ${isDark ? 'rgba(64, 158, 255, 0.4)' : 'rgba(64, 158, 255, 0.2)'} !important;
+    color: #409eff !important;
   }
 
-  pre .copy-btn.copied {
-    background: #67c23a;
-    color: white;
+  pre.code-block-enhanced .copy-btn.copied {
+    background: #67c23a !important;
+    color: white !important;
   }
 
-  pre .copy-btn svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-    flex-shrink: 0;
+  pre.code-block-enhanced .copy-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+    display: block !important;
+    flex-shrink: 0 !important;
   }
 
-  /* 折叠按钮 */
-  pre .collapse-btn {
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    width: 32px;
-    height: 32px;
-    border: none;
-    background: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'};
-    color: ${isDark ? '#aaa' : '#666'};
-    border-radius: 4px;
-    cursor: pointer;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    z-index: 10;
-    overflow: hidden;
-    padding: 0;
+  pre.code-block-enhanced .copy-btn span {
+    display: inline !important;
   }
 
-  pre .collapse-btn:hover {
-    background: ${isDark ? 'rgba(64, 158, 255, 0.3)' : 'rgba(64, 158, 255, 0.2)'};
-    color: #409eff;
+  /* 折叠状态的代码块 */
+  pre.code-block-enhanced.collapsed {
+    padding-bottom: 44px !important;
   }
 
-  pre .collapse-btn svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-    flex-shrink: 0;
-    transition: transform 0.2s ease;
+  pre.code-block-enhanced.collapsed > code {
+    display: block !important;
+    max-height: 100px !important;
+    overflow: hidden !important;
   }
 
-  /* 折叠状态 */
+  /* 折叠遮罩渐变 */
+  pre.code-block-enhanced.collapsed::after {
+    content: '' !important;
+    position: absolute !important;
+    bottom: 36px !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: 50px !important;
+    background: linear-gradient(to bottom,
+      transparent 0%,
+      ${isDark ? '#2d2d2d' : '#f5f5f5'} 100%
+    ) !important;
+    pointer-events: none !important;
+  }
+
+  /* 折叠/展开按钮 */
+  pre.code-block-enhanced .collapse-btn {
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: 36px !important;
+    border: none !important;
+    background: ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'} !important;
+    color: ${isDark ? '#aaa' : '#666'} !important;
+    border-radius: 0 0 8px 8px !important;
+    cursor: pointer !important;
+    display: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    transition: all 0.2s ease !important;
+    z-index: 10 !important;
+    font-size: 13px !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    border-top: 1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'} !important;
+  }
+
+  pre.code-block-enhanced .collapse-btn:hover {
+    background: ${isDark ? 'rgba(64, 158, 255, 0.25)' : 'rgba(64, 158, 255, 0.12)'} !important;
+    color: #409eff !important;
+  }
+
+  pre.code-block-enhanced .collapse-btn svg {
+    width: 16px !important;
+    height: 16px !important;
+    display: block !important;
+    flex-shrink: 0 !important;
+    transition: transform 0.3s ease !important;
+  }
+
+  /* 折叠状态下箭头向下 */
   pre.code-block-enhanced.collapsed .collapse-btn svg {
-    transform: rotate(180deg);
+    transform: rotate(0deg) !important;
   }
 
-  pre.code-block-enhanced.collapsed code {
-    display: block;
-    max-height: 5.4em;
-    overflow: hidden;
-    -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent);
-    mask-image: linear-gradient(180deg, #000 60%, transparent);
+  /* 展开状态下箭头向上 */
+  pre.code-block-enhanced:not(.collapsed) .collapse-btn svg {
+    transform: rotate(180deg) !important;
   }
 
   /* 超过阈值的代码块显示折叠按钮 */
   pre.code-block-enhanced.long-code .collapse-btn {
-    display: flex;
+    display: flex !important;
+  }
+
+  /* 展开状态的长代码块 */
+  pre.code-block-enhanced.long-code:not(.collapsed) {
+    padding-bottom: 40px !important;
+  }
+
+  pre.code-block-enhanced.long-code:not(.collapsed)::after {
+    display: none !important;
   }
 `
 }

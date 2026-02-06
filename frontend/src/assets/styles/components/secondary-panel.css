@@ -296,7 +296,12 @@
 
 /* 文件夹树 */
 .folder-tree {
-  padding: 0 8px;
+  padding: 4px 8px;
+}
+
+/* 未分类笔记特殊样式 */
+.folder-tree .inbox-folder .inbox-icon {
+  color: var(--primary-color, #409eff);
 }
 
 /* 加载和错误状态 */
@@ -634,4 +639,113 @@
 .vault-locked-state .unlock-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+/* 批量选择按钮激活状态 */
+.action-btn.is-active {
+  background: var(--primary-color, #409eff) !important;
+  color: white !important;
+}
+
+/* 批量选择工具栏 */
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-tertiary, #f0f2f5);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.select-all-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary, #333);
+}
+
+.select-all-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-color, #409eff);
+}
+
+.selected-count {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  padding: 2px 8px;
+  background: var(--bg-primary, #fff);
+  border-radius: 10px;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.batch-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.batch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.batch-btn.restore {
+  background: #67c23a;
+  color: white;
+}
+
+.batch-btn.restore:hover:not(:disabled) {
+  background: #5daf34;
+}
+
+.batch-btn.delete {
+  background: #f56c6c;
+  color: white;
+}
+
+.batch-btn.delete:hover:not(:disabled) {
+  background: #e74c3c;
+}
+
+/* 回收站项目复选框 */
+.item-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.item-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-color, #409eff);
+}
+
+/* 回收站项目选中状态 */
+.trash-item.is-selected {
+  background: var(--primary-bg, rgba(64, 158, 255, 0.1)) !important;
+  border-left: 3px solid var(--primary-color, #409eff);
+}
+
+.trash-item.is-selected .item-icon {
+  color: var(--primary-color, #409eff);
 }

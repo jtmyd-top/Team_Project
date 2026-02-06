@@ -157,7 +157,7 @@
             </button>
           </div>
 
-          <!-- 操作按钮区 - 优化布局 -->
+          <!-- 操作按钮区 -->
           <div class="twofa-actions">
             <!-- 主按钮：验证 -->
             <el-button
@@ -182,29 +182,16 @@
               <i class="fas fa-key btn-icon"></i>
               使用备用验证码
             </el-button>
-          </div>
 
-          <!-- 返回链接 -->
-          <div class="back-link-section">
+            <!-- 返回按钮 -->
             <el-button
-              v-if="useBackupCode"
               type="primary"
               size="large"
-              @click="backToPassword"
+              @click="useBackupCode ? (useBackupCode = false) : backToPassword()"
               class="primary-btn secondary-btn"
             >
               <i class="fas fa-arrow-left btn-icon"></i>
-              返回2FA验证
-            </el-button>
-            <el-button
-              v-else
-              type="primary"
-              size="large"
-              @click="backToPassword"
-              class="primary-btn secondary-btn"
-            >
-              <i class="fas fa-arrow-left btn-icon"></i>
-              返回密码验证
+              {{ useBackupCode ? '返回2FA验证' : '返回密码验证' }}
             </el-button>
           </div>
         </el-form>
@@ -214,8 +201,8 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
-import CaptchaWidget from '@components/common/CaptchaWidget.vue'
+import { ref, onMounted } from 'vue'
+import CaptchaWidget from '@components/common/CaptchaWidget/index.vue'
 import { useLogin } from '@composables/useLogin'
 import '@/assets/styles/components/login.css'
 

@@ -1,0 +1,158 @@
+/* AppLayout 组件样式 */
+
+.app-layout {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-primary, #0f0f23);
+  color: var(--text-primary, #fff);
+}
+
+/* 主内容区 */
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 面包屑导航栏 */
+.breadcrumb-bar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--bg-secondary, #16213e);
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  flex-shrink: 0;
+}
+
+.breadcrumb-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.breadcrumb-item {
+  font-size: 13px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s ease;
+}
+
+.breadcrumb-item:hover {
+  color: var(--text-primary, #fff);
+}
+
+.breadcrumb-item.active {
+  color: var(--text-primary, #fff);
+  font-weight: 500;
+  cursor: default;
+}
+
+.breadcrumb-separator {
+  font-size: 10px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.3));
+}
+
+.expand-sidebar-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  margin-left: 12px;
+}
+
+.expand-sidebar-btn:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #fff);
+}
+
+/* 内容区域 */
+.app-content {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+}
+
+.content-wrapper {
+  width: 100%;
+  height: 100%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 沉浸模式 - 侧边栏收起时内容居中 */
+.app-content.immersive-mode .content-wrapper {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* 沉浸模式过渡动画 */
+.app-content.immersive-mode {
+  background: var(--bg-primary, #0f0f23);
+}
+
+/* 亮色主题变量 */
+.light-theme {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f8;
+  --bg-tertiary: #ebebef;
+  --text-primary: #1a1a2e;
+  --text-secondary: rgba(26, 26, 46, 0.6);
+  --border-color: rgba(0, 0, 0, 0.1);
+  --hover-bg: rgba(0, 0, 0, 0.05);
+  --active-bg: rgba(64, 158, 255, 0.1);
+  --input-bg: rgba(0, 0, 0, 0.03);
+  --input-bg-focus: rgba(0, 0, 0, 0.05);
+}
+
+/* 暗色主题变量 */
+.dark-theme {
+  --bg-primary: #0f0f23;
+  --bg-secondary: #16213e;
+  --bg-tertiary: #1a1a2e;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --active-bg: rgba(64, 158, 255, 0.15);
+  --input-bg: rgba(255, 255, 255, 0.05);
+  --input-bg-focus: rgba(255, 255, 255, 0.08);
+}
+
+/* 响应式布局 */
+@media (max-width: 1024px) {
+  .breadcrumb-bar {
+    padding: 0 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .breadcrumb-bar {
+    height: 40px;
+  }
+
+  .breadcrumb-item {
+    font-size: 12px;
+  }
+}

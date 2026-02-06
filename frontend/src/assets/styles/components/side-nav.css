@@ -1,0 +1,107 @@
+/* SideNav 组件样式 */
+
+.side-nav {
+  width: 56px;
+  height: 100%;
+  background: var(--bg-tertiary, #1a1a2e);
+  border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0;
+  flex-shrink: 0;
+  z-index: 110;
+}
+
+.nav-top,
+.nav-main,
+.nav-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-main {
+  flex: 1;
+  margin-top: 16px;
+}
+
+.nav-bottom {
+  margin-top: auto;
+}
+
+.nav-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.nav-btn:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #fff);
+}
+
+.nav-btn.active {
+  background: var(--primary-color-light, rgba(64, 158, 255, 0.15));
+  color: var(--primary-color, #409eff);
+}
+
+.nav-btn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--primary-color, #409eff);
+  border-radius: 0 2px 2px 0;
+}
+
+.user-avatar {
+  margin-top: 12px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.user-avatar:hover {
+  transform: scale(1.05);
+}
+
+.avatar-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+.avatar-placeholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--hover-bg, rgba(255, 255, 255, 0.08));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  font-size: 14px;
+  border: 2px solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+/* 响应式 - 移动端隐藏 */
+@media (max-width: 768px) {
+  .side-nav {
+    display: none;
+  }
+}

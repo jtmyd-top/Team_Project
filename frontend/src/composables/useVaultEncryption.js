@@ -50,7 +50,6 @@ export function useVaultEncryption() {
           keyExpireTime.value = Date.now() + (data.expire_time * 1000)
           // 【新增】同时更新 vaultStore
           vaultStore.setDEK(data.dek, keyExpireTime.value)
-          console.log('[Vault] Key recovered from session')
           return true
         }
       }
@@ -101,7 +100,6 @@ export function useVaultEncryption() {
         keyExpireTime.value = expireTime
         // 【新增】同时更新 vaultStore，确保跨组件数据一致
         vaultStore.setDEK(data.dek, expireTime)
-        console.log('[Vault] 2FA verified, DEK updated in both composable and store')
       }
 
       return {
@@ -226,10 +224,7 @@ export function useVaultEncryption() {
    */
   onMounted(async () => {
     // 尝试从 Redis 恢复密钥
-    const recovered = await tryRecoverKeyFromSession()
-    if (recovered) {
-      console.log('Key recovered from session')
-    }
+    await tryRecoverKeyFromSession()
   })
 
   return {

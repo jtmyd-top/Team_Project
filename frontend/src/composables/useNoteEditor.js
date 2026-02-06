@@ -79,9 +79,7 @@ export function useNoteEditor(props, emit, editorElRef) {
       if (props.modelValue.title) {
         try {
           decryptedTitle.value = await decryptContent(props.modelValue.title, dek.value)
-          console.log('[Vault] Title decrypted successfully')
         } catch (e) {
-          console.warn('[Vault] Failed to decrypt title (might be plaintext):', e)
           decryptedTitle.value = props.modelValue.title
         }
       }
@@ -89,9 +87,7 @@ export function useNoteEditor(props, emit, editorElRef) {
       if (props.modelValue.content) {
         try {
           decryptedContent.value = await decryptContent(props.modelValue.content, dek.value)
-          console.log('[Vault] Content decrypted successfully')
         } catch (e) {
-          console.error('[Vault] Failed to decrypt content:', e)
           decryptError.value = '解密失败，无法编辑此加密笔记'
           throw e
         }
@@ -214,10 +210,8 @@ export function useNoteEditor(props, emit, editorElRef) {
     promotion: false,
 
     init_instance_callback: (editor) => {
-      console.log('TinyMCE init_instance_callback 触发, editor id:', editor.id)
       setTimeout(() => {
         if (!isEditorReady) {
-          console.log('init_instance_callback: isEditorReady 仍为 false，尝试设置内容')
           const content = props.modelValue.content || ''
           if (content) {
             editor.setContent(content)
@@ -268,14 +262,11 @@ export function useNoteEditor(props, emit, editorElRef) {
       })
 
       editor.on('init', () => {
-        console.log('TinyMCE init 事件触发')
-
         const initializeContent = (retryCount = 0) => {
           const maxRetries = 5
 
           try {
             const content = displayContent.value || ''
-            console.log('正在设置内容到编辑器，内容长度:', content.length, '(isSecret:', props.isSecret, ', hasDecrypted:', !!decryptedContent.value, ')')
 
             editor.setContent(content)
             editor.getBody().innerHTML = content || '<p><br></p>'
@@ -284,16 +275,13 @@ export function useNoteEditor(props, emit, editorElRef) {
             setTimeout(() => {
               const actualContent = editor.getContent()
               const bodyContent = editor.getBody().innerHTML
-              console.log('验证 - getContent 长度:', actualContent.length, 'body 内容长度:', bodyContent.length)
 
               if (content.length > 0 && actualContent.length < 10 && retryCount < maxRetries) {
-                console.warn(`内容设置失败，第 ${retryCount + 1} 次重试...`)
                 setTimeout(() => initializeContent(retryCount + 1), 300)
                 return
               }
 
               isEditorReady = true
-              console.log('编辑器初始化完成，isEditorReady =', isEditorReady)
               emit('ready', editor)
             }, 100)
           } catch (e) {
@@ -309,7 +297,6 @@ export function useNoteEditor(props, emit, editorElRef) {
 
       const handleContentChange = () => {
         if (!isEditorReady) {
-          console.log('编辑器尚未准备好，忽略内容变化事件')
           return
         }
         isUserEditing = true
@@ -388,7 +375,6 @@ export function useNoteEditor(props, emit, editorElRef) {
       } else {
         const content = props.modelValue.content || ''
         localTitle.value = props.modelValue.title || ''
-        console.log('笔记切换，更新编辑器内容，新笔记 ID:', newId, '内容长度:', content.length)
         editorInstance.setContent(content)
         editorInstance.setDirty(false)
       }
@@ -412,10 +398,6 @@ export function useNoteEditor(props, emit, editorElRef) {
     if (newContent && editorInstance && isEditorReady) {
       const currentContent = editorInstance.getContent()
       if (!currentContent || currentContent === props.modelValue.content) {
-        console.log('[Vault] displayContent updated, setting decrypted content to editor', {
-          newLength: newContent.length,
-          currentLength: currentContent.length
-        })
         editorInstance.setContent(newContent)
         editorInstance.setDirty(false)
       }
@@ -425,19 +407,15 @@ export function useNoteEditor(props, emit, editorElRef) {
   watch(() => props.modelValue.content, (newContent, oldContent) => {
     if (editorInstance && newContent !== oldContent) {
       if (!isEditorReady) {
-        console.log('编辑器尚未准备好，跳过 watch 更新')
         return
       }
 
       if (newContent && newContent.length > 0) {
         const currentEditorContent = editorInstance.getContent()
         if (!currentEditorContent || currentEditorContent === oldContent || currentEditorContent === '') {
-          console.log('外部内容更新，同步到编辑器，新内容长度:', newContent.length)
           editorInstance.setContent(newContent)
           editorInstance.setDirty(false)
         }
-      } else {
-        console.log('忽略空内容更新，保持编辑器现有内容')
       }
     }
   })
@@ -471,6 +449,10 @@ export function useNoteEditor(props, emit, editorElRef) {
     displayTitle,
     displayContent,
     isKeyValid,
+    dek,
+    tryRecoverKeyFromSession,
+    decryptedTitle,
+    decryptedContent,
     initEditor,
     destroyEditor,
     getContent,

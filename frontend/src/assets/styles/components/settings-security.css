@@ -1,0 +1,187 @@
+.form-section {
+  padding: 24px;
+  border-radius: 8px;
+  transition: all 0.3s;
+}
+
+.form-section:nth-of-type(odd) {
+  background-color: #fff;
+}
+
+.form-section:nth-of-type(even) {
+  background-color: #f9f9fa;
+}
+
+.form-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 16px;
+}
+
+.form-section-title i {
+  margin-right: 8px;
+  color: #409eff;
+}
+
+.security-status {
+  max-width: 600px;
+}
+
+.security-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.form-hint {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.twofa-method-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.twofa-method-card {
+  padding: 24px;
+  border: 2px solid #dcdfe6;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.twofa-method-card:hover {
+  border-color: #409eff;
+  box-shadow: 0 2px 12px rgba(64, 158, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.twofa-method-card i {
+  font-size: 48px;
+  color: #409eff;
+  margin-bottom: 12px;
+}
+
+.twofa-method-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  color: #303133;
+}
+
+.twofa-method-card p {
+  margin: 0;
+  font-size: 13px;
+  color: #909399;
+}
+
+.qr-code-section {
+  text-align: center;
+}
+
+.qr-code-container {
+  display: inline-block;
+  padding: 16px;
+  background: white;
+  border: 2px solid #dcdfe6;
+  border-radius: 8px;
+}
+
+.qr-code-container img {
+  display: block;
+  width: 200px;
+  height: 200px;
+}
+
+.backup-codes-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.backup-code {
+  padding: 12px;
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  text-align: center;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+/* 美化输入框样式 */
+.settings-security :deep(.el-input__inner) {
+  border-radius: 6px;
+}
+
+.settings-security :deep(.el-input__wrapper) {
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+  transition: all 0.3s;
+}
+
+.settings-security :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #c0c4cc inset;
+}
+
+.settings-security :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px #409eff inset;
+}
+
+/* 美化按钮样式 */
+.settings-security :deep(.el-button) {
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+.settings-security :deep(.el-button:hover:not(.is-disabled)) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 美化对话框样式 */
+.settings-security :deep(.el-dialog) {
+  border-radius: 12px;
+}
+
+.settings-security :deep(.el-dialog__header) {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 20px;
+}
+
+.settings-security :deep(.el-dialog__title) {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.settings-security :deep(.el-dialog__body) {
+  padding: 20px;
+}
+
+/* 美化表单样式 */
+.settings-security :deep(.el-form-item__label) {
+  font-weight: 500;
+  color: #606266;
+}
+
+/* 图标样式 */
+.settings-security :deep(.el-input__prefix) {
+  display: flex;
+  align-items: center;
+}
+
+.settings-security :deep(.el-input__prefix i) {
+  color: #909399;
+}

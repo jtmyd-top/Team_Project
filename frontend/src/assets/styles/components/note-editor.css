@@ -4,6 +4,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  flex: 1;
 }
 
 .encryption-indicator {
@@ -48,13 +49,6 @@
   text-align: center;
 }
 
-.editor-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 600px;
-}
-
 .title-input {
   width: 100%;
   font-size: 32px;
@@ -65,6 +59,7 @@
   margin-bottom: 20px;
   outline: none;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .title-input::placeholder {
@@ -72,44 +67,35 @@
   opacity: 0.5;
 }
 
-.editor-wrapper {
-  flex: 1;
-  min-height: 600px;
-  border: 1px solid var(--k-border, #e0e0e0);
-  border-radius: 8px;
-  overflow: hidden;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 修复 TinyMCE iframe 的 position: absolute 导致的高度塌陷 */
-.editor-wrapper :deep(.tox-tinymce) {
-  height: 100% !important;
-  min-height: 600px;
+/* TinyMCE 编辑器样式 */
+.note-editor :deep(.tox-tinymce) {
+  flex: 1 !important;
+  min-height: 500px;
+  border: 1px solid var(--k-border, #e0e0e0) !important;
+  border-radius: 8px !important;
   display: flex !important;
   flex-direction: column !important;
 }
 
-.editor-wrapper :deep(.tox-editor-container) {
+.note-editor :deep(.tox-editor-container) {
   flex: 1 !important;
   display: flex !important;
   flex-direction: column !important;
 }
 
-.editor-wrapper :deep(.tox-sidebar-wrap) {
+.note-editor :deep(.tox-sidebar-wrap) {
   flex: 1 !important;
   display: flex !important;
   flex-direction: column !important;
 }
 
-.editor-wrapper :deep(.tox-edit-area) {
+.note-editor :deep(.tox-edit-area) {
   flex: 1 !important;
   display: flex !important;
   flex-direction: column !important;
 }
 
-.editor-wrapper :deep(.tox-edit-area__iframe) {
+.note-editor :deep(.tox-edit-area__iframe) {
   position: static !important;
   flex: 1 !important;
 }

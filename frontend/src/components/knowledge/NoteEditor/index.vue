@@ -47,7 +47,7 @@
     </div>
 
     <!-- 编辑器（已解密或非加密笔记时显示） -->
-    <div v-if="!isInitializing && (!isSecret || isKeyValid)" class="editor-content">
+    <template v-if="!isInitializing && (!isSecret || isKeyValid)">
       <input
         v-model="localTitle"
         @input="updateTitle"
@@ -55,10 +55,8 @@
         placeholder="笔记标题"
         :disabled="isSecret && isDecrypting"
       />
-      <div class="editor-wrapper">
-        <textarea ref="editorElRef"></textarea>
-      </div>
-    </div>
+      <textarea ref="editorElRef"></textarea>
+    </template>
 
     <!-- 加密笔记未解锁提示 -->
     <div v-else-if="isSecret && !isKeyValid && !isInitializing" class="locked-prompt">
@@ -73,7 +71,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
 import { ElTag, ElIcon } from 'element-plus'
 import { useNoteEditor } from '@composables/useNoteEditor'
@@ -111,6 +109,10 @@ const {
   displayTitle,
   displayContent,
   isKeyValid,
+  dek,
+  tryRecoverKeyFromSession,
+  decryptedTitle,
+  decryptedContent,
   initEditor,
   destroyEditor,
   getContent,

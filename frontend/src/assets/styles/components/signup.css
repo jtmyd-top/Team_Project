@@ -1,0 +1,497 @@
+/* ========== 背景容器 ========== */
+.auth-container {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* 渐变网格覆盖 */
+.auth-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 20% 80%, rgba(240, 147, 251, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(168, 85, 247, 0.2) 0%, transparent 50%);
+  opacity: 0.8;
+  z-index: 1;
+}
+
+/* 浮动光球 */
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.orb-1 {
+  width: 500px;
+  height: 500px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6), rgba(168, 85, 247, 0.6));
+  top: -10%;
+  left: -10%;
+  animation: orbFloat1 20s ease-in-out infinite;
+}
+
+.orb-2 {
+  width: 400px;
+  height: 400px;
+  background: linear-gradient(135deg, rgba(240, 147, 251, 0.5), rgba(245, 87, 108, 0.5));
+  bottom: -10%;
+  right: -10%;
+  animation: orbFloat2 18s ease-in-out infinite 7s;
+}
+
+.orb-3 {
+  width: 350px;
+  height: 350px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(102, 126, 234, 0.4));
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: orbFloat3 22s ease-in-out infinite 14s;
+}
+
+@keyframes orbFloat1 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(50px, -50px);
+  }
+  66% {
+    transform: translate(-50px, 50px);
+  }
+}
+
+@keyframes orbFloat2 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(-60px, 40px);
+  }
+  66% {
+    transform: translate(40px, -60px);
+  }
+}
+
+@keyframes orbFloat3 {
+  0%, 100% {
+    transform: translate(-50%, -50%);
+  }
+  33% {
+    transform: translate(calc(-50% + 30px), calc(-50% - 40px));
+  }
+  66% {
+    transform: translate(calc(-50% - 40px), calc(-50% + 30px));
+  }
+}
+
+/* ========== 毛玻璃卡片 ========== */
+.auth-card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 520px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 32px;
+  overflow: hidden;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: cardEntrance 0.8s ease-out;
+}
+
+@keyframes cardEntrance {
+  from {
+    opacity: 1;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+}
+
+.auth-card:hover {
+  transform: translateY(-5px) scale(1.01);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ========== 卡片头部 ========== */
+.auth-header {
+  background: transparent;
+  padding: 40px 30px;
+  text-align: center;
+  color: white;
+  position: relative;
+}
+
+.auth-logo {
+  font-size: 3rem;
+  margin-bottom: 20px;
+}
+
+.auth-title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0 0 10px 0;
+}
+
+.auth-subtitle {
+  font-size: 1.1rem;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.auth-body {
+  padding: 40px 30px;
+}
+
+.auth-form {
+  margin-top: 20px;
+}
+
+.auth-button {
+  width: 100%;
+  height: 50px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+.login-link {
+  text-align: center;
+  margin-top: 20px;
+  color: #666;
+}
+
+.login-link-text {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+  margin-left: 5px;
+}
+
+.login-link-text:hover {
+  color: #764ba2;
+}
+
+/* 字段提示样式 */
+.field-hint {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  margin-top: 5px;
+  margin-left: 4px;
+  font-style: italic;
+}
+
+/* 字段错误样式 */
+.field-error {
+  color: #f56c6c;
+  font-size: 0.85rem;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 验证规则样式 - 统一为灰白色 */
+.validation-rules {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.validation-rule {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+  transition: color 0.3s ease;
+}
+
+.rule-valid {
+  color: #4caf50;
+}
+
+.rule-invalid {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 内联验证错误样式 - 确保文字在红色边框内 */
+.inline-validation-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(245, 108, 108, 0.1);
+  border: 1px solid rgba(245, 108, 108, 0.3);
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.inline-validation-error .error-icon {
+  color: #f56c6c;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.inline-validation-error .error-text {
+  color: #f56c6c;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  flex: 1;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+/* 输入框容器样式 */
+.input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* 带错误状态的输入框 */
+.input-wrapper :deep(.el-input.has-error .el-input__wrapper) {
+  box-shadow: 0 0 0 1px rgba(245, 108, 108, 0.5) inset;
+}
+
+/* 密码强度样式 */
+.password-strength {
+  margin-top: 8px;
+}
+
+.strength-bars {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.strength-bar {
+  flex: 1;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  transition: background-color 0.3s ease;
+}
+
+.strength-weak {
+  background: #f56c6c;
+}
+
+.strength-medium {
+  background: #e6a23c;
+}
+
+.strength-strong {
+  background: #67c23a;
+}
+
+.strength-very-strong {
+  background: #4caf50;
+}
+
+.strength-text {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.strength-0 { color: #999; }
+.strength-1 { color: #f56c6c; }
+.strength-2 { color: #e6a23c; }
+.strength-3 { color: #67c23a; }
+.strength-4 { color: #4caf50; }
+
+/* 验证码区域 */
+.captcha-section {
+  margin-bottom: 20px;
+}
+
+/* 邮箱验证码样式 */
+.email-code-container {
+  display: flex;
+  gap: 10px;
+}
+
+.email-code-input {
+  flex: 1;
+}
+
+.email-code-button {
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+
+/* 服务条款样式 */
+.terms-checkbox {
+  margin-top: 10px;
+}
+
+.terms-link {
+  color: #667eea;
+  text-decoration: none;
+}
+
+.terms-link:hover {
+  text-decoration: underline;
+}
+
+/* 服务器错误样式 */
+.server-errors {
+  margin-bottom: 20px;
+}
+
+/* 提示框样式 */
+.prompt-content {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.prompt-icon {
+  font-size: 3rem;
+  margin-bottom: 15px;
+}
+
+.prompt-icon.success {
+  color: #67c23a;
+}
+
+.prompt-icon.error {
+  color: #f56c6c;
+}
+
+.prompt-message {
+  font-size: 1.1rem;
+  color: #333;
+  margin: 0;
+}
+
+/* 完全隐藏Element Plus的错误信息，避免重复显示 */
+.auth-form :deep(.el-form-item__error) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 修复全局overflow冲突 - 使用更强的选择器确保验证提示能够显示 */
+.auth-form :deep(.el-form-item) {
+  overflow: visible !important;
+}
+
+.auth-form :deep(.el-form-item__content) {
+  overflow: visible !important;
+  position: relative !important;
+}
+
+.auth-form .custom-validation {
+  display: block !important;
+  visibility: visible !important;
+  overflow: visible !important;
+  position: relative !important;
+  z-index: 99999 !important;
+  opacity: 1 !important;
+  height: auto !important;
+  max-height: none !important;
+  pointer-events: auto !important;
+  transform: none !important;
+}
+
+.auth-form .custom-validation .validation-rule {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* 额外的兜底样式 - 针对所有可能的情况 */
+.auth-card :deep(.el-form-item),
+.auth-card :deep(.el-form-item__content) {
+  overflow: visible !important;
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+  .auth-container {
+    padding: 10px;
+  }
+
+  .auth-header {
+    padding: 30px 20px;
+  }
+
+  .auth-body {
+    padding: 30px 20px;
+  }
+
+  .auth-title {
+    font-size: 1.75rem;
+  }
+
+  .email-code-container {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .email-code-button {
+    min-width: auto;
+  }
+
+  .validation-rules {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .auth-button {
+    height: 45px;
+    font-size: 1rem;
+  }
+}
