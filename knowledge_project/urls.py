@@ -99,5 +99,10 @@ urlpatterns = [
     path('api/vault/send-email-code/', views.vault_send_email_code, name='vault_send_email_code'),
     path('api/vault/notes/', views.vault_notes_list, name='vault_notes_list'),
 
+    # ==================== 战情室 Dashboard ====================
+    path('dashboard/', views.dashboard_view, name='dashboard'),
+    path('api/dashboard/stats/', views.dashboard_stats_api, name='dashboard_stats_api'),
+    path('api/ban_ip/', views.ban_ip_api, name='ban_ip_api'),
+
     #path("logout/", views.logout_view, name="logout"),
 ]

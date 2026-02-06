@@ -69,6 +69,8 @@ export default defineConfig({
         'knowledge-list': path.resolve(__dirname, 'src/entries/knowledge-list.js'),
         // 主题管理器
         'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
+        // 战情室大屏
+        'dashboard': path.resolve(__dirname, 'src/entries/dashboard.js'),
       },
       output: {
         format: 'es',  // 主格式为 ES 模块
@@ -91,6 +93,10 @@ export default defineConfig({
             // Element Plus 单独打包
             if (id.includes('element-plus')) {
               return 'element-plus';
+            }
+            // ECharts 单独打包
+            if (id.includes('echarts') || id.includes('zrender')) {
+              return 'echarts-vendor';
             }
             // Vue 相关库单独打包
             if (id.includes('vue') || id.includes('pinia')) {

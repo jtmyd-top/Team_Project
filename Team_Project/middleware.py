@@ -1,12 +1,67 @@
 """
-Django 中间件 - 用于设置安全响应头和保密柜锁定检查
+Django 中间件 - 用于设置安全响应头、IP 封禁和保密柜锁定检查
 """
 import logging
 import json
 from django.http import JsonResponse, HttpResponse
 from django.template.loader import render_to_string
+from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
+
+
+class IPBanMiddleware:
+    """
+    IP 封禁中间件
+
+    检查请求 IP 是否在 Redis 黑名单中（key: banned_ip:<ip>）。
+    如果命中，直接返回 403 拒绝访问。
+
+    放在 MIDDLEWARE 列表靠前位置，在认证之前拦截，
+    这样被封禁的 IP 连登录页面都无法加载。
+    """
+
+    # 允许被封禁 IP 访问的路径（避免完全白屏）
+    EXEMPT_PREFIXES = [
+        '/static/',
+    ]
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        logger.info("IPBanMiddleware initialized")
+
+    def __call__(self, request):
+        ip = self._get_client_ip(request)
+
+        # 跳过静态资源
+        for prefix in self.EXEMPT_PREFIXES:
+            if request.path.startswith(prefix):
+                return self.get_response(request)
+
+        if ip and cache.get(f'banned_ip:{ip}'):
+            logger.warning(f"IPBanMiddleware: blocked request from banned IP {ip} to {request.path}")
+            if request.path.startswith('/api/') or 'application/json' in request.headers.get('Accept', ''):
+                return JsonResponse({
+                    'status': 'error',
+                    'message': '您的 IP 已被封禁，禁止访问。',
+                }, status=403)
+            return HttpResponse(
+                '<h1>403 Forbidden</h1><p>您的 IP 已被封禁，禁止访问。</p>',
+                status=403,
+                content_type='text/html; charset=utf-8',
+            )
+
+        return self.get_response(request)
+
+    def _get_client_ip(self, request):
+        """获取客户端真实 IP（支持 Nginx 代理透传）"""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0].strip()
+        x_real_ip = request.META.get('HTTP_X_REAL_IP')
+        if x_real_ip:
+            return x_real_ip.strip()
+        return request.META.get('REMOTE_ADDR')
 
 
 class ContentSecurityPolicyMiddleware:

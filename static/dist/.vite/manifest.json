@@ -7,24 +7,31 @@
     "file": "chunks/apiService-Codkj7Mw.js",
     "name": "apiService"
   },
-  "_element-plus-!~{001}~.js": {
-    "file": "assets/element.css",
-    "src": "_element-plus-!~{001}~.js"
+  "_echarts-vendor-CCzsHhNE.js": {
+    "file": "chunks/echarts-vendor-CCzsHhNE.js",
+    "name": "echarts-vendor",
+    "imports": [
+      "_vendor-wzGsUuS6.js"
+    ]
   },
-  "_element-plus-DH9MpWH9.js": {
-    "file": "chunks/element-plus-DH9MpWH9.js",
+  "_element-plus-!~{003}~.js": {
+    "file": "assets/element.css",
+    "src": "_element-plus-!~{003}~.js"
+  },
+  "_element-plus-DLjSzb6o.js": {
+    "file": "chunks/element-plus-DLjSzb6o.js",
     "name": "element-plus",
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_vendor-S3dOTKTB.js"
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/element.css"
     ]
   },
-  "_index-!~{005}~.js": {
+  "_index-!~{006}~.js": {
     "file": "assets/index.css",
-    "src": "_index-!~{005}~.js"
+    "src": "_index-!~{006}~.js"
   },
   "_index-YegUEGnG.js": {
     "file": "chunks/index-YegUEGnG.js",
@@ -43,13 +50,28 @@
       "_vue-vendor-MyggWDWC.js"
     ]
   },
-  "_vendor-S3dOTKTB.js": {
-    "file": "chunks/vendor-S3dOTKTB.js",
+  "_vendor-wzGsUuS6.js": {
+    "file": "chunks/vendor-wzGsUuS6.js",
     "name": "vendor"
   },
   "_vue-vendor-MyggWDWC.js": {
     "file": "chunks/vue-vendor-MyggWDWC.js",
     "name": "vue-vendor"
+  },
+  "src/entries/dashboard.js": {
+    "file": "dashboard.js",
+    "name": "dashboard",
+    "src": "src/entries/dashboard.js",
+    "isEntry": true,
+    "imports": [
+      "_vue-vendor-MyggWDWC.js",
+      "_element-plus-DLjSzb6o.js",
+      "_echarts-vendor-CCzsHhNE.js",
+      "_vendor-wzGsUuS6.js"
+    ],
+    "css": [
+      "assets/dashboard.css"
+    ]
   },
   "src/entries/forgot-password.js": {
     "file": "forgot-password.js",
@@ -58,9 +80,9 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DH9MpWH9.js",
+      "_element-plus-DLjSzb6o.js",
       "_index-YegUEGnG.js",
-      "_vendor-S3dOTKTB.js"
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/forgot.css"
@@ -73,9 +95,9 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DH9MpWH9.js",
+      "_element-plus-DLjSzb6o.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
-      "_vendor-S3dOTKTB.js"
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/home.css"
@@ -88,8 +110,8 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DH9MpWH9.js",
-      "_vendor-S3dOTKTB.js",
+      "_element-plus-DLjSzb6o.js",
+      "_vendor-wzGsUuS6.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "_index-YegUEGnG.js"
     ],
@@ -104,10 +126,10 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DH9MpWH9.js",
+      "_element-plus-DLjSzb6o.js",
       "_apiService-Codkj7Mw.js",
       "_index-YegUEGnG.js",
-      "_vendor-S3dOTKTB.js"
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/login.css"
@@ -138,9 +160,9 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DH9MpWH9.js",
+      "_element-plus-DLjSzb6o.js",
       "_usePasswordStrength-CaVHztiB.js",
-      "_vendor-S3dOTKTB.js"
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/reset.css"
@@ -155,8 +177,8 @@
       "_vue-vendor-MyggWDWC.js",
       "_apiService-Codkj7Mw.js",
       "_index-YegUEGnG.js",
-      "_element-plus-DH9MpWH9.js",
-      "_vendor-S3dOTKTB.js"
+      "_element-plus-DLjSzb6o.js",
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/settings.css"
@@ -169,11 +191,11 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DH9MpWH9.js",
+      "_element-plus-DLjSzb6o.js",
       "_apiService-Codkj7Mw.js",
       "_index-YegUEGnG.js",
       "_usePasswordStrength-CaVHztiB.js",
-      "_vendor-S3dOTKTB.js"
+      "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/signup.css"

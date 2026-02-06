@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load static_files %}
+
+{% block title %}战情室 - 系统监控{% endblock %}
+
+{% block head_extra %}
+{% vite_dev_client %}
+{% is_vite_dev as vite_dev %}
+{% if not vite_dev %}
+<link href="{% static 'dist/assets/dashboard.css' %}" rel="stylesheet">
+{% endif %}
+<style>
+  /* 隐藏默认导航和页面元素以实现全屏大屏 */
+  header, .page-loader, .scroll-progress-bar, .particles { display: none !important; }
+  main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+  body { background: #0a0e27 !important; overflow-x: hidden; }
+  html { background: #0a0e27 !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="dashboard-app"></div>
+{% endblock %}
+
+{% block scripts %}
+{% load static_files %}
+{% is_vite_dev as vite_dev %}
+{% if vite_dev %}
+<script type="module" src="http://localhost:5173/src/entries/dashboard.js"></script>
+{% else %}
+<script type="module" src="{% static 'dist/dashboard.js' %}"></script>
+{% endif %}
+{% endblock %}

@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from .models import Folder, Note
-from .utilt import get_sidebar_cache_key
+from .utilt import get_sidebar_cache_key, log_action
 # 【新增】導入安全檢查函數
 from .views import check_note_secret_operation_permission
 
@@ -94,6 +94,8 @@ def folder_list_api(request):
             order=max_order + 1
         )
 
+        log_action(user, folder, 1, f'创建文件夹「{folder.name}」')
+
         return JsonResponse({
             'id': folder.id,
             'name': folder.name,
@@ -165,6 +167,8 @@ def folder_detail_api(request, folder_id):
 
         folder.save()
 
+        log_action(user, folder, 2, f'修改文件夹「{folder.name}」')
+
         return JsonResponse({
             'id': folder.id,
             'name': folder.name,
@@ -174,21 +178,33 @@ def folder_detail_api(request, folder_id):
 
     elif request.method == 'DELETE':
         # 【修复】将文件夹移入回收站，而不是直接删除
+        # 统计受影响的子文件夹和笔记数量
+        descendants = list(folder.get_descendants())
+        child_folder_count = len(descendants)
+        note_count = folder.notes_in_folder.count()
+        for child in descendants:
+            note_count += child.notes_in_folder.count()
+
         # 将文件夹及其所有子文件夹标记为已删除
         folder.move_to_trash()
 
         # 递归将所有子文件夹也移入回收站
-        for child in folder.get_descendants():
+        for child in descendants:
             child.move_to_trash()
 
         # 同时将文件夹内的所有笔记移入回收站
         folder.notes_in_folder.update(is_trashed=True)
 
         # 递归将子文件夹内的笔记也移入回收站
-        for child in folder.get_descendants():
+        for child in descendants:
             child.notes_in_folder.update(is_trashed=True)
 
         cache.delete(get_sidebar_cache_key(user.id))
+
+        detail = f'移入回收站「{folder.name}」'
+        if child_folder_count > 0 or note_count > 0:
+            detail += f'（含 {child_folder_count} 个子文件夹、{note_count} 篇笔记）'
+        log_action(user, folder, 3, detail)
 
         return JsonResponse({'status': 'success', 'message': '文件夹已移入回收站'})
 
@@ -496,6 +512,8 @@ def restore_folder_api(request, folder_id):
 
     cache.delete(get_sidebar_cache_key(user.id))
 
+    log_action(user, folder, 2, f'从回收站恢复文件夹「{folder.name}」及其内容')
+
     return JsonResponse({
         'status': 'success',
         'message': '文件夹及内容已恢复'
@@ -509,6 +527,21 @@ def permanent_delete_folder_api(request, folder_id):
     user = request.user
     folder = get_object_or_404(Folder, id=folder_id, owner=user, is_trashed=True)
 
+    # 统计受影响的内容（删除前记录）
+    folder_name = folder.name
+
+    def count_recursive(f):
+        notes = f.notes_in_folder.count()
+        folders = 0
+        for child in f.children.all():
+            folders += 1
+            cn, cf = count_recursive(child)
+            notes += cn
+            folders += cf
+        return notes, folders
+
+    note_count, child_folder_count = count_recursive(folder)
+
     # 递归删除所有子文件夹和笔记
     def delete_folder_recursive(folder_to_delete):
         # 先删除所有笔记
@@ -518,6 +551,12 @@ def permanent_delete_folder_api(request, folder_id):
             delete_folder_recursive(child)
         # 最后删除文件夹本身
         folder_to_delete.delete()
+
+    # 先记录日志（删除后对象不存在了）
+    detail = f'永久删除文件夹「{folder_name}」'
+    if child_folder_count > 0 or note_count > 0:
+        detail += f'（含 {child_folder_count} 个子文件夹、{note_count} 篇笔记）'
+    log_action(user, folder, 3, detail)
 
     delete_folder_recursive(folder)
 
@@ -586,10 +625,12 @@ def trash_note_api(request, note_id):
     """将笔记移入回收站"""
     user = request.user
     note = get_object_or_404(Note, id=note_id, author=user)
-    
+
     note.move_to_trash()
     cache.delete(get_sidebar_cache_key(user.id))
-    
+
+    log_action(user, note, 3, f'移入回收站「{note.title}」')
+
     return JsonResponse({
         'status': 'success',
         'message': '笔记已移入回收站'
@@ -602,10 +643,12 @@ def restore_note_api(request, note_id):
     """从回收站恢复笔记"""
     user = request.user
     note = get_object_or_404(Note, id=note_id, author=user)
-    
+
     note.restore_from_trash()
     cache.delete(get_sidebar_cache_key(user.id))
-    
+
+    log_action(user, note, 2, f'从回收站恢复「{note.title}」')
+
     return JsonResponse({
         'status': 'success',
         'message': '笔记已恢复'
@@ -618,10 +661,13 @@ def permanent_delete_note_api(request, note_id):
     """永久删除笔记"""
     user = request.user
     note = get_object_or_404(Note, id=note_id, author=user, is_trashed=True)
-    
+
+    note_title = note.title
+    log_action(user, note, 3, f'永久删除笔记「{note_title}」')
+
     note.delete()
     cache.delete(get_sidebar_cache_key(user.id))
-    
+
     return JsonResponse({
         'status': 'success',
         'message': '笔记已永久删除'
