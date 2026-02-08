@@ -346,12 +346,18 @@ def send_operation_2fa_email(user, operation_type='general'):
 VAULT_ACCESS_WINDOW = 30 * 60
 
 # 保密柜验证失败惩罚配置
-VAULT_FAIL_THRESHOLDS = [
-    # (失败次数, 锁定秒数)
-    (3, 60),       # 第3次失败：锁定1分钟
-    (5, 86400),    # 第5次失败：锁定24小时（全域锁定）
-    
-]
+# 【重构】三级风控：设备级、用户级、IP级 分离计数
+VAULT_DEVICE_FAIL_THRESHOLD = 3   # 设备级：3次失败锁定该设备1分钟
+VAULT_USER_FAIL_THRESHOLD = 5     # 用户级：5次失败冻结账户24小时
+VAULT_IP_FAIL_THRESHOLD = 10      # IP级：10次失败自动封禁IP
+
+# 锁定时长配置
+VAULT_DEVICE_LOCK_SECONDS = 60    # 设备级锁定1分钟
+VAULT_USER_LOCK_SECONDS = 86400   # 用户级锁定24小时
+
+# 三级风控配置（信任设备相关）
+DEVICE_FAIL_THRESHOLD = 3   # 设备级：3次失败撤销信任
+IP_FAIL_THRESHOLD = 10      # IP级：10次失败自动封禁
 
 # 需要CAPTCHA的失败次数阈值
 VAULT_CAPTCHA_THRESHOLD = 3
@@ -398,7 +404,7 @@ def get_vault_fail_key(user_id_or_request):
 
 def get_vault_lock_key(user_id_or_request):
     """
-    获取保密柜锁定状态的缓存key
+    获取保密柜锁定状态的缓存key（设备级）
     【修复】使用 session_key 而不是 user_id，确保不同设备有独立的锁定状态
 
     Args:
@@ -413,6 +419,25 @@ def get_vault_lock_key(user_id_or_request):
         return f'vault_lock:{user_id_or_request}'
 
 
+def get_vault_user_fail_key(user_id):
+    """
+    获取保密柜用户级失败计数的缓存key（账户全局）
+    用于统计用户在所有设备上的总失败次数
+    """
+    if hasattr(user_id, 'id'):
+        user_id = user_id.id
+    return f'vault_user_fail:{user_id}'
+
+
+def get_vault_user_lock_key(user_id):
+    """
+    获取保密柜用户级锁定状态的缓存key（账户全局锁定）
+    """
+    if hasattr(user_id, 'id'):
+        user_id = user_id.id
+    return f'vault_user_lock:{user_id}'
+
+
 def get_vault_fail_count(user_id):
     """
     获取保密柜验证失败次数
@@ -424,75 +449,215 @@ def get_vault_fail_count(user_id):
     return cache.get(cache_key, 0)
 
 
-def increment_vault_fail_count(user_id):
+def increment_vault_fail_count(user_id, request=None, device_token=None):
     """
-    增加保密柜验证失败次数，并根据次数决定是否锁定
+    增加保密柜验证失败次数，实现三级风控分离计数
+
+    【三级风控逻辑】
+    1. 设备级 (session_key): 每个设备独立3次机会，超过则锁定该设备1分钟
+    2. 用户级 (user_id): 账户全局5次机会，超过则冻结账户24小时
+    3. IP级 (ip_address): 10次失败自动封禁IP
+
+    Args:
+        user_id: 用户ID或request对象
+        request: HttpRequest对象（用于获取IP和设备信息）
+        device_token: 信任设备令牌
 
     Returns:
-        (fail_count: int, lock_seconds: int, require_captcha: bool)
+        dict: {
+            'device_fail_count': int,  # 设备级失败次数
+            'user_fail_count': int,    # 用户级失败次数
+            'device_locked': bool,     # 设备是否被锁定
+            'user_locked': bool,       # 账户是否被锁定
+            'lock_seconds': int,       # 锁定秒数
+            'require_captcha': bool,   # 是否需要验证码
+        }
     """
-    fail_key = get_vault_fail_key(user_id)
-    lock_key = get_vault_lock_key(user_id)
+    from .models import AccessLog, TrustedDevice
 
-    # 获取当前失败次数
-    current_count = cache.get(fail_key, 0)
-    new_count = current_count + 1
+    # 获取用户ID
+    actual_user_id = user_id.id if hasattr(user_id, 'id') else user_id
 
-    # 更新失败次数（15分钟过期）
-    cache.set(fail_key, new_count, timeout=900)
+    # === 1. 设备级计数（基于 session_key）===
+    device_fail_key = get_vault_fail_key(request if request else user_id)
+    device_lock_key = get_vault_lock_key(request if request else user_id)
 
-    # 检查是否需要锁定
-    lock_seconds = 0
-    for threshold, seconds in VAULT_FAIL_THRESHOLDS:
-        if new_count >= threshold:
-            lock_seconds = seconds
+    device_current = cache.get(device_fail_key, 0)
+    device_new_count = device_current + 1
+    cache.set(device_fail_key, device_new_count, timeout=900)  # 15分钟过期
 
-    # 如果需要锁定，设置锁定状态
-    if lock_seconds > 0:
-        lock_expire_time = int(time.time()) + lock_seconds
-        cache.set(lock_key, lock_expire_time, timeout=lock_seconds)
-        logger.warning(f"用户 {user_id} 保密柜验证失败 {new_count} 次，锁定 {lock_seconds} 秒")
+    # 设备级锁定检查
+    device_locked = False
+    device_lock_seconds = 0
+    if device_new_count >= VAULT_DEVICE_FAIL_THRESHOLD:
+        device_locked = True
+        device_lock_seconds = VAULT_DEVICE_LOCK_SECONDS
+        lock_expire_time = int(time.time()) + device_lock_seconds
+        cache.set(device_lock_key, lock_expire_time, timeout=device_lock_seconds)
+        logger.warning(f"设备级锁定: 用户 {actual_user_id}, 设备失败 {device_new_count} 次, 锁定 {device_lock_seconds} 秒")
 
-    # 检查是否需要CAPTCHA
-    require_captcha = new_count >= VAULT_CAPTCHA_THRESHOLD
+    # === 2. 用户级计数（基于 user_id，全局）===
+    user_fail_key = get_vault_user_fail_key(actual_user_id)
+    user_lock_key = get_vault_user_lock_key(actual_user_id)
 
-    return new_count, lock_seconds, require_captcha
+    user_current = cache.get(user_fail_key, 0)
+    user_new_count = user_current + 1
+    cache.set(user_fail_key, user_new_count, timeout=3600)  # 1小时过期
+
+    # 用户级锁定检查（账户冻结）
+    user_locked = False
+    user_lock_seconds = 0
+    if user_new_count >= VAULT_USER_FAIL_THRESHOLD:
+        user_locked = True
+        user_lock_seconds = VAULT_USER_LOCK_SECONDS
+        lock_expire_time = int(time.time()) + user_lock_seconds
+        cache.set(user_lock_key, lock_expire_time, timeout=user_lock_seconds)
+        logger.warning(f"用户级锁定: 用户 {actual_user_id}, 账户总失败 {user_new_count} 次, 冻结 {user_lock_seconds} 秒")
+
+    # 最终锁定时间取最大值
+    lock_seconds = max(device_lock_seconds, user_lock_seconds)
+
+    # 是否需要CAPTCHA（设备级3次后需要）
+    require_captcha = device_new_count >= VAULT_CAPTCHA_THRESHOLD
+
+    # === 3. IP级风控 + 持久化记录 ===
+    if request:
+        ip_address = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+        if ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+
+        # 获取用户标识
+        user_identifier = 'anonymous'
+        if hasattr(user_id, 'username'):
+            user_identifier = user_id.username
+        elif hasattr(request, 'user') and request.user.is_authenticated:
+            user_identifier = request.user.username
+        else:
+            user_identifier = str(actual_user_id)
+
+        # 持久化记录到 AccessLog
+        AccessLog.record_vault_fail(
+            user_identifier=user_identifier,
+            ip_address=ip_address,
+            details=f'设备失败: {device_new_count}次, 账户总失败: {user_new_count}次'
+        )
+
+        # 信任设备风控
+        if device_token:
+            device = TrustedDevice.get_by_token(device_token)
+            if device:
+                revoked = device.increment_fail()
+                if revoked:
+                    logger.warning(f"设备信任已撤销: {device_token[:16]}..., 用户: {user_identifier}")
+
+        # IP级风控
+        check_and_ban_ip(ip_address, user_identifier)
+
+    # 返回详细结果（兼容旧调用方式）
+    return device_new_count, lock_seconds, require_captcha
 
 
-def reset_vault_fail_count(user_id):
+def check_and_ban_ip(ip_address, user_identifier='anonymous'):
+    """
+    检查IP级失败计数，达到阈值自动封禁
+
+    Args:
+        ip_address: IP地址
+        user_identifier: 用户标识（用于日志记录）
+    """
+    from .models import AccessLog
+
+    # 查询24小时内该IP的总失败数
+    total_fails = AccessLog.get_ip_fail_count(ip_address, hours=24)
+
+    if total_fails >= IP_FAIL_THRESHOLD:
+        ban_key = f'banned_ip:{ip_address}'
+        if not cache.get(ban_key):
+            # 封禁24小时
+            cache.set(ban_key, {
+                'reason': f'自动封禁: 24小时内{total_fails}次验证失败',
+                'banned_at': int(time.time()),
+                'user': user_identifier
+            }, timeout=86400)
+
+            # 记录封禁日志
+            AccessLog.objects.create(
+                user_identifier=user_identifier,
+                ip_address=ip_address,
+                action='ip_banned',
+                details=f'自动封禁: 24小时内累计{total_fails}次验证失败'
+            )
+
+            logger.warning(f"IP {ip_address} 已被自动封禁: 24小时内{total_fails}次验证失败")
+
+
+def reset_vault_fail_count(user_id, request=None):
     """
     重置保密柜验证失败次数（验证成功后调用）
+    【升级】同时重置设备级和用户级计数
     """
-    fail_key = get_vault_fail_key(user_id)
-    lock_key = get_vault_lock_key(user_id)
+    # 重置设备级计数
+    fail_key = get_vault_fail_key(request if request else user_id)
+    lock_key = get_vault_lock_key(request if request else user_id)
     cache.delete(fail_key)
     cache.delete(lock_key)
-    logger.info(f"用户 {user_id} 保密柜验证成功，重置失败计数")
+
+    # 重置用户级计数
+    actual_user_id = user_id.id if hasattr(user_id, 'id') else user_id
+    user_fail_key = get_vault_user_fail_key(actual_user_id)
+    user_lock_key = get_vault_user_lock_key(actual_user_id)
+    cache.delete(user_fail_key)
+    cache.delete(user_lock_key)
+
+    logger.info(f"用户 {actual_user_id} 保密柜验证成功，重置设备级和用户级失败计数")
 
 
-def check_vault_locked(user_id):
+def check_vault_locked(user_id, request=None):
     """
-    检查保密柜是否被锁定
+    检查保密柜是否被锁定（三级检查）
+
+    【三级检查顺序】
+    1. 用户级锁定（账户冻结）- 优先级最高
+    2. 设备级锁定（当前设备）
 
     Returns:
-        (is_locked: bool, remaining_seconds: int, fail_count: int)
+        (is_locked: bool, remaining_seconds: int, fail_count: int, lock_level: str)
+        lock_level: 'user' | 'device' | None
     """
-    lock_key = get_vault_lock_key(user_id)
-    fail_key = get_vault_fail_key(user_id)
+    actual_user_id = user_id.id if hasattr(user_id, 'id') else user_id
 
-    lock_expire_time = cache.get(lock_key)
-    fail_count = cache.get(fail_key, 0)
+    # 1. 检查用户级锁定（账户冻结）
+    user_lock_key = get_vault_user_lock_key(actual_user_id)
+    user_fail_key = get_vault_user_fail_key(actual_user_id)
+    user_lock_expire = cache.get(user_lock_key)
+    user_fail_count = cache.get(user_fail_key, 0)
 
-    if lock_expire_time is None:
-        return False, 0, fail_count
+    if user_lock_expire is not None:
+        remaining = user_lock_expire - int(time.time())
+        if remaining > 0:
+            return True, remaining, user_fail_count
+        else:
+            # 锁定已过期，清除计数器，重新开始
+            cache.delete(user_lock_key)
+            cache.delete(user_fail_key)
 
-    remaining = lock_expire_time - int(time.time())
-    if remaining <= 0:
-        # 锁定已过期，清除锁定状态
-        cache.delete(lock_key)
-        return False, 0, fail_count
+    # 2. 检查设备级锁定
+    device_lock_key = get_vault_lock_key(request if request else user_id)
+    device_fail_key = get_vault_fail_key(request if request else user_id)
+    device_lock_expire = cache.get(device_lock_key)
+    device_fail_count = cache.get(device_fail_key, 0)
 
-    return True, remaining, fail_count
+    if device_lock_expire is not None:
+        remaining = device_lock_expire - int(time.time())
+        if remaining > 0:
+            return True, remaining, device_fail_count
+        else:
+            # 锁定已过期，清除计数器，重新开始
+            cache.delete(device_lock_key)
+            cache.delete(device_fail_key)
+
+    # 未锁定，返回设备级失败计数
+    return False, 0, device_fail_count
 
 
 def send_vault_security_alert(user, fail_count, ip_address=None):
@@ -753,7 +918,7 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
         }
 
     # 检查是否被锁定
-    is_locked, lock_remaining, fail_count = check_vault_locked(user.id)
+    is_locked, lock_remaining, fail_count = check_vault_locked(user.id, request)  # 【修复】传入 request
     if is_locked:
         return {
             'success': False,
@@ -809,7 +974,7 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
 
     if success:
         # 验证成功，重置失败计数并授予访问权限
-        reset_vault_fail_count(user.id)
+        reset_vault_fail_count(user.id, request)  # 【修复】传入 request
         expire_time = grant_vault_access(request, window_seconds=window_seconds)  # 【修改】传 window_seconds
         remaining = get_vault_access_remaining(request)
         return {
@@ -825,7 +990,7 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
         }
 
     # 验证失败，增加失败计数
-    new_fail_count, lock_seconds, require_captcha = increment_vault_fail_count(user.id)
+    new_fail_count, lock_seconds, require_captcha = increment_vault_fail_count(user.id, request)  # 【修复】传入 request
 
     # 获取客户端IP
     ip_address = get_client_ip(request)

@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django_ckeditor_5',  # 只保留这一个
+    'captcha',  # django-simple-captcha
 ]
 
 
@@ -56,7 +57,7 @@ ROOT_URLCONF = 'Team_Project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'templates')], # 建议添加一个项目级的模板目录
+        'DIRS': [],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -177,6 +178,16 @@ CLOUDFLARE_TURNSTILE_SITE_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SITE_KEY')
 CLOUDFLARE_TURNSTILE_SECRET_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SECRET_KEY')
 # 开发环境可设置 TURNSTILE_ENABLED=false 跳过验证（用于网络无法访问 Cloudflare 的情况）
 TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', 'true').lower() in ['true', '1', 't', 'yes']
+
+# --- django-simple-captcha Configuration ---
+CAPTCHA_IMAGE_SIZE = (120, 50)
+CAPTCHA_FONT_SIZE = 32
+CAPTCHA_LENGTH = 4
+CAPTCHA_TIMEOUT = 5  # 验证码有效期（分钟）
+CAPTCHA_NOISE_FUNCTIONS = ('captcha.helpers.noise_dots',)
+CAPTCHA_CHALLENGE_FUNCT = 'captcha.helpers.random_char_challenge'
+# 验证码方案选择: 'turnstile', 'simple_captcha', 'auto' (自动降级)
+CAPTCHA_BACKEND = os.getenv('CAPTCHA_BACKEND', 'auto')
 
 # --- 指定使用我们自己下载的、包含高级功能的 JS 文件 ---
 CKEDITOR_5_CUSTOM_JS_URL = 'ckeditor5/ckeditor.js'

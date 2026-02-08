@@ -57,6 +57,7 @@ export function useLogin(captchaWidgetRef) {
   const twoFaLoading = ref(false)
   const twoFaMethod = ref('totp')
   const useBackupCode = ref(false)
+  const trustDevice = ref(false)  // 信任设备选项
   const countdown = ref(0)
   const resendLoading = ref(false)
   const temporaryToken = ref('')
@@ -200,7 +201,8 @@ export function useLogin(captchaWidgetRef) {
 
       const response = await window.apiService.auth.verify2FA({
         code: twoFaForm.code,
-        use_backup_code: useBackupCode.value,
+        use_backup: useBackupCode.value,
+        trust_device: trustDevice.value,  // 传递信任设备选项
         temporary_token: temporaryToken.value
       })
 
@@ -311,6 +313,7 @@ export function useLogin(captchaWidgetRef) {
     require2fa.value = false
     twoFaForm.code = ''
     useBackupCode.value = false
+    trustDevice.value = false  // 重置信任设备选项
     countdown.value = 0
     refreshCaptcha()
   }
@@ -340,6 +343,7 @@ export function useLogin(captchaWidgetRef) {
     twoFaLoading,
     twoFaMethod,
     useBackupCode,
+    trustDevice,
     countdown,
     resendLoading,
     onCaptchaChange,

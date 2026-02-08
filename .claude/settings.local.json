@@ -44,7 +44,9 @@
       "Bash(for file in \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\settings\"/*.vue)",
       "Bash(done)",
       "Bash(for file in \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\common\"/*.vue \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\common\"/*/*.vue)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(if:*)",
+      "Bash(.venvScriptspip install django-simple-captcha)"
     ],
     "deny": [],
     "ask": []

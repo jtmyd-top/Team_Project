@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>{{ site_title }} - 管理后台登录</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #F8FAFC;
+            position: relative;
+            overflow: hidden;
+        }
+        body.dark { background: #0F172A; color: #F8FAFC; }
+
+        /* 浮动光球 */
+        .bg-orbs { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            mix-blend-mode: multiply;
+            animation: blob 7s infinite;
+        }
+        body.dark .orb { mix-blend-mode: screen; }
+        .orb-1 { top: -10%; left: -10%; width: 50%; height: 50%; background: rgba(196, 181, 253, 0.4); }
+        body.dark .orb-1 { background: rgba(139, 92, 246, 0.2); }
+        .orb-2 { bottom: -10%; right: -10%; width: 50%; height: 50%; background: rgba(251, 207, 232, 0.4); animation-delay: 2s; }
+        body.dark .orb-2 { background: rgba(236, 72, 153, 0.2); }
+        .orb-3 { top: 20%; right: 20%; width: 30%; height: 30%; background: rgba(191, 219, 254, 0.4); animation-delay: 4s; }
+        body.dark .orb-3 { background: rgba(59, 130, 246, 0.2); }
+
+        @keyframes blob {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+
+        /* 登录卡片 */
+        .login-card {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 420px;
+            background: white;
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+        body.dark .login-card {
+            background: #1E293B;
+            border: 1px solid rgba(71, 85, 105, 0.5);
+        }
+        .login-card:hover { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1); }
+        body.dark .login-card:hover { border-color: rgba(100, 116, 139, 1); }
+
+        /* 品牌区 */
+        .brand { text-align: center; margin-bottom: 32px; }
+        .brand-icon {
+            font-size: 48px;
+            background: linear-gradient(135deg, #5b6cf9, #7e5bef);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 16px;
+        }
+        .brand h1 { font-size: 28px; font-weight: 700; color: #1E293B; margin-bottom: 8px; }
+        body.dark .brand h1 { color: white; }
+        .brand p { font-size: 14px; color: #64748B; }
+        body.dark .brand p { color: #94A3B8; }
+
+        /* 表单 */
+        .form-group { margin-bottom: 20px; position: relative; }
+        .form-input {
+            width: 100%;
+            padding: 14px 16px 14px 48px;
+            background: #F1F5F9;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            font-size: 15px;
+            transition: all 0.2s;
+        }
+        body.dark .form-input {
+            background: rgba(30, 41, 59, 0.5);
+            border-color: #334155;
+            color: white;
+        }
+        .form-input:focus {
+            outline: none;
+            background: white;
+            border-color: rgba(99, 102, 241, 0.5);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        body.dark .form-input:focus {
+            background: #1E293B;
+            border-color: #6366F1;
+        }
+        .form-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94A3B8;
+            font-size: 20px;
+        }
+        .form-group:focus-within .form-icon { color: #6366F1; }
+
+        /* 验证码 */
+        .captcha-container { margin-bottom: 20px; }
+        .captcha-flex {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .captcha-img {
+            height: 50px;
+            border: 2px solid #E2E8F0;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        body.dark .captcha-img { border-color: #334155; }
+        .captcha-input {
+            flex: 1;
+            padding: 12px 16px;
+            background: #F1F5F9;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            font-size: 15px;
+        }
+        body.dark .captcha-input {
+            background: rgba(30, 41, 59, 0.5);
+            border-color: #334155;
+            color: white;
+        }
+        .captcha-input:focus {
+            outline: none;
+            background: white;
+            border-color: #6366F1;
+        }
+        body.dark .captcha-input:focus { background: #1E293B; }
+        .refresh-btn {
+            padding: 12px;
+            background: #F1F5F9;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        body.dark .refresh-btn { background: #334155; color: #CBD5E1; }
+        .refresh-btn:hover { background: #E2E8F0; }
+        body.dark .refresh-btn:hover { background: #475569; }
+
+        /* 按钮 */
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #5b6cf9, #7e5bef);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(91, 108, 249, 0.3);
+        }
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(91, 108, 249, 0.4);
+        }
+
+        /* 错误提示 */
+        .error-box {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-radius: 12px;
+            color: #DC2626;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        body.dark .error-box {
+            background: rgba(220, 38, 38, 0.2);
+            border-color: rgba(220, 38, 38, 0.5);
+            color: #FCA5A5;
+        }
+
+        /* 安全提示 */
+        .info-box {
+            margin-top: 24px;
+            padding: 12px;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #1E40AF;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        body.dark .info-box {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: rgba(59, 130, 246, 0.5);
+            color: #93C5FD;
+        }
+
+        /* 深色模式按钮 */
+        .dark-toggle {
+            position: fixed;
+            bottom: 32px;
+            right: 32px;
+            z-index: 50;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid #E2E8F0;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        body.dark .dark-toggle {
+            background: rgba(30, 41, 59, 0.8);
+            border-color: #334155;
+            color: #CBD5E1;
+        }
+        .dark-toggle:hover {
+            background: white;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+        body.dark .dark-toggle:hover { background: #334155; }
+        .dark-toggle svg {
+            width: 20px;
+            height: 20px;
+            transition: transform 0.5s;
+        }
+        .dark-toggle:hover svg { transform: rotate(180deg); }
+    </style>
+</head>
+<body>
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="login-card">
+        <div class="brand">
+            <div class="brand-icon">🛡️</div>
+            <h1>管理后台</h1>
+            <p>{{ site_header }}</p>
+        </div>
+
+        {% if error_message %}
+        <div class="error-box">
+            <span>⚠️</span>
+            <span>{{ error_message }}</span>
+        </div>
+        {% endif %}
+
+        <form method="post" id="loginForm">
+            {% csrf_token %}
+            <input type="hidden" name="turnstile_token" id="turnstileToken" value=""/>
+
+            <div class="form-group">
+                <span class="form-icon">👤</span>
+                <input name="username" class="form-input" placeholder="请输入用户名" type="text" required/>
+            </div>
+
+            <div class="form-group">
+                <span class="form-icon">🔒</span>
+                <input name="password" class="form-input" placeholder="请输入密码" type="password" required/>
+            </div>
+
+            <div class="captcha-container">
+                <div id="turnstileWidget" style="display: none;">
+                    <div id="turnstileBox"></div>
+                </div>
+
+                <div id="simpleCaptchaWidget" style="display: none;">
+                    <div class="captcha-flex">
+                        <img id="captchaImage" src="" alt="验证码" class="captcha-img" onclick="refreshCaptcha()"/>
+                        <input type="text" name="captcha_1" id="captchaInput" placeholder="验证码" class="captcha-input" maxlength="4"/>
+                        <input type="hidden" name="captcha_0" id="captchaKey" value=""/>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn">登录 →</button>
+        </form>
+
+        <div class="info-box">
+            <span>ℹ️</span>
+            <span>管理后台已启用增强安全保护：人机验证 + 两因素认证。首次登录需设置 2FA。</span>
+        </div>
+    </div>
+
+    <button class="dark-toggle" onclick="toggleDarkMode()">
+        <svg fill="currentColor" viewBox="0 0 20 20">
+            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
+        </svg>
+    </button>
+
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+    <script>
+        function toggleDarkMode() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('darkMode', document.body.classList.contains('dark'));
+        }
+
+        if (localStorage.getItem('darkMode') === 'true' ||
+            (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.body.classList.add('dark');
+        }
+
+        const captchaBackend = '{{ captcha_backend|default:"auto" }}';
+        const turnstileSiteKey = '{{ turnstile_site_key }}';
+        let turnstileRendered = false;
+
+        function initCaptcha() {
+            if (captchaBackend === 'simple_captcha') {
+                showSimpleCaptcha();
+            } else if (captchaBackend === 'turnstile' && turnstileSiteKey) {
+                showTurnstile();
+            } else {
+                if (turnstileSiteKey) {
+                    showTurnstile();
+                } else {
+                    showSimpleCaptcha();
+                }
+            }
+        }
+
+        function showTurnstile() {
+            document.getElementById('turnstileWidget').style.display = 'block';
+            document.getElementById('simpleCaptchaWidget').style.display = 'none';
+            renderTurnstile();
+        }
+
+        let turnstileWidgetId = null;
+
+        function renderTurnstile() {
+            if (turnstileRendered) return;
+            if (typeof turnstile === 'undefined') {
+                setTimeout(renderTurnstile, 200);
+                return;
+            }
+            turnstileWidgetId = turnstile.render('#turnstileBox', {
+                sitekey: turnstileSiteKey,
+                callback: function(token) {
+                    document.getElementById('turnstileToken').value = token;
+                }
+            });
+            turnstileRendered = true;
+        }
+
+        function showSimpleCaptcha() {
+            document.getElementById('turnstileWidget').style.display = 'none';
+            document.getElementById('simpleCaptchaWidget').style.display = 'block';
+            refreshCaptcha();
+        }
+
+        // 表单提交时确保获取最新 token
+        document.addEventListener('DOMContentLoaded', function() {
+            initCaptcha();
+            document.getElementById('loginForm').addEventListener('submit', function(e) {
+                // 如果是 Turnstile 模式，确保 token 存在
+                if (turnstileWidgetId !== null) {
+                    var token = turnstile.getResponse(turnstileWidgetId);
+                    if (token) {
+                        document.getElementById('turnstileToken').value = token;
+                    }
+                }
+            });
+        });
+
+        function refreshCaptcha() {
+            fetch('/captcha/refresh/', {
+                method: 'GET',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('captchaImage').src = data.image_url;
+                document.getElementById('captchaKey').value = data.key;
+            })
+            .catch(error => console.error('刷新验证码失败:', error));
+        }
+    </script>
+</body>
+</html>

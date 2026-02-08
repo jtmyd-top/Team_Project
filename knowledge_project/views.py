@@ -2759,11 +2759,21 @@ def verify_2fa_login(request):
 
     code = data.get('code', '').strip()
     use_backup = data.get('use_backup', False)  # 是否使用备用码
+    trust_device = data.get('trust_device', False)  # 是否信任此设备
 
     # 从session获取待验证的用户ID
     pending_user_id = request.session.get('pending_2fa_user_id')
     if not pending_user_id:
         return JsonResponse({'error': '会话已过期，请重新登录'}, status=400)
+
+    # 检查 2FA 失败次数
+    attempt_key = f'login_2fa_attempts:{pending_user_id}'
+    attempts = cache.get(attempt_key, 0)
+    if attempts >= 5:
+        # 清除 2FA session
+        request.session.pop('pending_2fa_user_id', None)
+        request.session.pop('pending_2fa_method', None)
+        return JsonResponse({'error': '验证码错误次数过多，请5分钟后重新登录'}, status=429)
 
     try:
         user = User.objects.get(id=pending_user_id)
@@ -2784,6 +2794,7 @@ def verify_2fa_login(request):
             profile.backup_codes.remove(code_hash)
             profile.save(update_fields=['backup_codes'])
         else:
+            cache.set(attempt_key, attempts + 1, timeout=300)
             return JsonResponse({'error': '备用验证码错误'}, status=400)
 
     elif profile.two_fa_method == 'totp':
@@ -2793,6 +2804,7 @@ def verify_2fa_login(request):
 
         totp = pyotp.TOTP(profile.totp_secret)
         if not totp.verify(code, valid_window=1):
+            cache.set(attempt_key, attempts + 1, timeout=300)
             return JsonResponse({'error': '验证码错误'}, status=400)
 
     elif profile.two_fa_method == 'email':
@@ -2808,6 +2820,7 @@ def verify_2fa_login(request):
             return JsonResponse({'error': '验证码已过期'}, status=400)
 
         if session_code != code:
+            cache.set(attempt_key, attempts + 1, timeout=300)
             return JsonResponse({'error': '验证码错误'}, status=400)
 
         # 清除已使用的邮箱验证码
@@ -2815,6 +2828,9 @@ def verify_2fa_login(request):
             del request.session['2fa_email_code']
         if '2fa_email_timestamp' in request.session:
             del request.session['2fa_email_timestamp']
+
+    # 2FA验证成功，清除失败计数
+    cache.delete(attempt_key)
 
     # 2FA验证成功，构建登录方式描述
     login_method_detail = "两因素认证 (验证码)"
@@ -2836,11 +2852,29 @@ def verify_2fa_login(request):
     if 'pending_2fa_method' in request.session:
         del request.session['pending_2fa_method']
 
-    return JsonResponse({
+    # 构建响应
+    response_data = {
         'success': True,
         'message': '登录成功',
         'require_2fa': False
-    })
+    }
+
+    # 处理信任设备请求
+    if trust_device and not use_backup:  # 使用备用码时不允许创建信任设备
+        from .models import TrustedDevice
+        device = TrustedDevice.create_device(user, request)
+        response = JsonResponse(response_data)
+        response.set_cookie(
+            'trust_device_token',
+            device.device_token,
+            max_age=30 * 24 * 3600,  # 30天
+            httponly=True,
+            samesite='Lax',
+            secure=request.is_secure()
+        )
+        return response
+
+    return JsonResponse(response_data)
 
 
 @require_http_methods(["POST"])
@@ -3439,6 +3473,54 @@ def reset_password_view(request, user_id, token):
             reset_token.is_used = True
             reset_token.save(update_fields=['is_used'])
 
+            # 清除所有 vault 锁定和失败计数（设备级 + 用户级 + IP级）
+            from django.core.cache import cache as _cache
+
+            # 1. 用户级：直接按 user_id 清除
+            for prefix in ['vault_user_lock', 'vault_user_fail', 'vault_fail', 'vault_lock']:
+                _cache.delete(f'{prefix}:{user.id}')
+
+            # 2. 设备级：通过 Redis 模式匹配清除 session-based 的 vault key
+            try:
+                from django_redis import get_redis_connection
+                conn = get_redis_connection('default')
+                for pattern in ['*vault_fail*', '*vault_lock*']:
+                    for k in conn.keys(pattern):
+                        conn.delete(k)
+            except Exception:
+                pass
+
+            # 3. IP级：清除当前IP及用户关联IP的封禁
+            try:
+                from .models import AccessLog
+                from .decorators import get_client_ip
+
+                # 获取当前请求IP
+                current_ip = get_client_ip(request)
+                ips_to_clear = {current_ip} if current_ip else set()
+
+                # 查找该用户关联的所有IP（从AccessLog中）
+                user_ips = AccessLog.objects.filter(
+                    user_identifier=user.username,
+                    action='vault_fail'
+                ).values_list('ip_address', flat=True).distinct()
+                ips_to_clear.update(user_ips)
+
+                # 清除所有关联IP的封禁和失败记录
+                for ip in ips_to_clear:
+                    if ip:
+                        _cache.delete(f'banned_ip:{ip}')
+
+                # 清除该用户的AccessLog失败记录（重置IP级计数）
+                AccessLog.objects.filter(
+                    user_identifier=user.username,
+                    action__in=['vault_fail', 'ip_banned']
+                ).delete()
+
+                logger.info(f"密码重置: 已清除用户 {user.username} 的IP级限制, IPs: {ips_to_clear}")
+            except Exception as e:
+                logger.error(f"密码重置: 清除IP级限制失败: {e}")
+
             # 【重要】解除保密柜锁定
             from .signals import on_password_reset
             on_password_reset(user)
@@ -3968,9 +4050,64 @@ def login_api(request):
         if not user.is_active:
             return JsonResponse({'error': '账户已被禁用'}, status=400)
 
+        # === 检查账户是否被冻结 ===
+        user_lock_key = f'vault_user_lock:{user.id}'
+        user_lock_expire = cache.get(user_lock_key)
+        if user_lock_expire:
+            remaining = user_lock_expire - int(time.time())
+            if remaining > 0:
+                remaining_minutes = remaining // 60
+                return JsonResponse({
+                    'error': f'账户已被冻结，请在 {remaining_minutes} 分钟后重试'
+                }, status=403)
+
+        # === 检查 IP 是否被封禁 ===
+        ip_address = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+        if ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+        ban_key = f'banned_ip:{ip_address}'
+        if cache.get(ban_key):
+            return JsonResponse({
+                'error': '您的 IP 已被封禁，请联系管理员'
+            }, status=403)
+
         # 检查是否启用了2FA
         profile = getattr(user, 'profile', None)
         if profile and profile.two_fa_enabled:
+            # === 检查信任设备令牌 ===
+            from .models import TrustedDevice
+            trust_token = request.COOKIES.get('trust_device_token')
+            if trust_token:
+                device = TrustedDevice.get_by_token(trust_token)
+                if device and device.user_id == user.id:
+                    # 信任设备有效，跳过2FA，直接登录
+                    login(request, user)
+
+                    # 获取当前IP并续期
+                    ip_address = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+                    if ',' in ip_address:
+                        ip_address = ip_address.split(',')[0].strip()
+                    device.renew(ip_address)
+
+                    # 发送登录通知
+                    CustomLoginView().send_login_notification(request, user, login_method="信任设备免2FA登录")
+
+                    # 构建响应并续期cookie
+                    response = JsonResponse({
+                        'success': True,
+                        'message': '登录成功（信任设备）',
+                        'require_2fa': False
+                    })
+                    response.set_cookie(
+                        'trust_device_token',
+                        device.device_token,
+                        max_age=30 * 24 * 3600,  # 30天
+                        httponly=True,
+                        samesite='Lax',
+                        secure=request.is_secure()
+                    )
+                    return response
+
             # 将用户ID临时存入session，等待2FA验证
             request.session['pending_2fa_user_id'] = user.id
             request.session['pending_2fa_method'] = profile.two_fa_method
@@ -4218,7 +4355,7 @@ def vault_lock_status(request):
     from .decorators import check_vault_locked
 
     user = request.user
-    is_locked, remaining_seconds, fail_count = check_vault_locked(user.id)
+    is_locked, remaining_seconds, fail_count = check_vault_locked(user.id, request)  # 【修复】传入 request
 
     return JsonResponse({
         'is_locked': is_locked,
@@ -4584,26 +4721,67 @@ def dashboard_stats_api(request):
             cache.set('dashboard_assets', assets_data, 300)
             data['assets'] = assets_data
 
-    # ---- vault_alerts: 保密柜安全告警 ----
+    # ---- vault_alerts: 保密柜安全告警（从数据库持久化读取） ----
     if section in ('vault_alerts', 'all'):
-        from .decorators import check_vault_locked
-        from django.contrib.auth.models import User as AuthUser
+        from .models import AccessLog
+        from .decorators import get_vault_user_lock_key, get_vault_user_fail_key, VAULT_USER_FAIL_THRESHOLD
+        from django.db.models import Sum, Max
+        from datetime import timedelta
 
         alerts = []
         try:
-            for u in AuthUser.objects.filter(is_active=True):
-                is_locked, remaining, fail_count = check_vault_locked(u.id)
-                if fail_count > 0 or is_locked:
-                    severity = 'critical' if is_locked else (
-                        'warning' if fail_count >= 3 else 'info'
-                    )
+            now = timezone.now()
+            cutoff = now - timedelta(hours=24)
+
+            # 从 AccessLog 聚合24小时内的 vault_fail 记录
+            aggregated = AccessLog.objects.filter(
+                action='vault_fail',
+                created_at__gte=cutoff
+            ).values('user_identifier', 'ip_address').annotate(
+                total_count=Sum('count'),
+                last_time=Max('updated_at')
+            ).order_by('-total_count')
+
+            for item in aggregated:
+                total = item['total_count'] or 0
+                ip = item['ip_address']
+                username = item['user_identifier']
+
+                if total > 0:
+                    # 检查用户级锁定状态
+                    user_locked = False
+                    try:
+                        from django.contrib.auth.models import User as AuthUser
+                        user_obj = AuthUser.objects.filter(username=username).first()
+                        if user_obj:
+                            user_lock_key = get_vault_user_lock_key(user_obj.id)
+                            user_lock_expire = cache.get(user_lock_key)
+                            if user_lock_expire and user_lock_expire > int(time.time()):
+                                user_locked = True
+                    except:
+                        pass
+
+                    # 严重程度判断：用户级锁定 > 5次失败 > 3次失败
+                    if user_locked:
+                        severity = 'critical'
+                    elif total >= VAULT_USER_FAIL_THRESHOLD:
+                        severity = 'critical'
+                    elif total >= 3:
+                        severity = 'warning'
+                    else:
+                        severity = 'info'
+
                     alerts.append({
-                        'user': u.username,
-                        'fail_count': fail_count,
-                        'is_locked': is_locked,
-                        'remaining_seconds': remaining,
+                        'user': username,
+                        'ip': ip,
+                        'fail_count': total,
+                        'time': item['last_time'].strftime('%m-%d %H:%M') if item['last_time'] else '',
                         'severity': severity,
+                        'is_banned': cache.get(f'banned_ip:{ip}') is not None,
+                        'user_locked': user_locked,  # 新增：用户级锁定状态
                     })
+
+            # 按严重程度排序
             alerts.sort(
                 key=lambda x: (
                     0 if x['severity'] == 'critical' else (
@@ -4838,45 +5016,44 @@ def dashboard_stats_api(request):
 
         data['service_health'] = services
 
-    # ---- error_logs: 系统异常日志流 ----
+    # ---- error_logs: 系统异常日志流（优先从LogEntry读取最近10条） ----
     if section in ('error_logs', 'all'):
         try:
             import os
             from django.conf import settings
+            from django.contrib.admin.models import LogEntry
             error_log_list = []
+            source = 'logentry'
 
-            # 尝试读取 django_error.log
-            log_file = os.path.join(settings.BASE_DIR, 'django_error.log')
-            if os.path.exists(log_file):
-                with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-                    lines = f.readlines()
-                    last_lines = lines[-50:] if len(lines) > 50 else lines
-                    for line in last_lines:
-                        line = line.strip()
-                        if line:
-                            error_log_list.append(line)
+            # 优先从 LogEntry 读取最近10条操作记录
+            action_labels = {1: 'ADD', 2: 'CHANGE', 3: 'DELETE'}
+            recent = LogEntry.objects.select_related('user', 'content_type').order_by('-action_time')[:10]
+            for log in recent:
+                action = action_labels.get(log.action_flag, 'UNKNOWN')
+                msg = log.change_message or log.object_repr
+                user_name = log.user.username if log.user else 'system'
+                error_log_list.append(
+                    f"[{log.action_time.strftime('%m-%d %H:%M:%S')}] "
+                    f"{action} by {user_name}: {msg}"
+                )
 
-            # 补充：从 LogEntry 获取最近的全部业务操作
+            # 如果 LogEntry 为空，回退到错误日志文件
             if not error_log_list:
-                from django.contrib.admin.models import LogEntry
-                from datetime import timedelta
-                now = timezone.now()
-                action_labels = {1: 'ADD', 2: 'CHANGE', 3: 'DELETE'}
-                recent = LogEntry.objects.filter(
-                    action_time__gte=now - timedelta(days=3),
-                ).select_related('user', 'content_type').order_by('-action_time')[:50]
-                for log in recent:
-                    action = action_labels.get(log.action_flag, 'UNKNOWN')
-                    msg = log.change_message or log.object_repr
-                    error_log_list.append(
-                        f"[{log.action_time.strftime('%m-%d %H:%M:%S')}] "
-                        f"{action} by {log.user.username}: {msg}"
-                    )
+                log_file = os.path.join(settings.BASE_DIR, 'django_error.log')
+                if os.path.exists(log_file):
+                    source = 'file'
+                    with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                        lines = f.readlines()
+                        last_lines = lines[-10:] if len(lines) > 10 else lines
+                        for line in last_lines:
+                            line = line.strip()
+                            if line:
+                                error_log_list.append(line)
 
             data['error_logs'] = {
                 'logs': error_log_list,
                 'total': len(error_log_list),
-                'source': 'file' if os.path.exists(log_file) else 'logentry',
+                'source': source,
             }
         except Exception as e:
             logger.error(f"Dashboard error_logs error: {e}")

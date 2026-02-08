@@ -651,6 +651,171 @@ class LoginNotification(models.Model):
         return f'{self.user.username} - {self.get_reason_display()} - {self.sent_at.strftime("%Y-%m-%d %H:%M")}'
 
 
+class AccessLog(models.Model):
+    """安全访问日志 - 持久化保密柜失败记录，按用户+IP聚合24小时"""
+    ACTION_CHOICES = [
+        ('vault_fail', '保密柜失败'),
+        ('login_fail', '登录失败'),
+        ('ip_banned', 'IP封禁'),
+        ('device_revoked', '设备信任撤销'),
+    ]
+
+    user_identifier = models.CharField("用户/账号", max_length=150, db_index=True)
+    ip_address = models.GenericIPAddressField("来源IP", db_index=True)
+    action = models.CharField("行为", max_length=20, choices=ACTION_CHOICES, default='vault_fail', db_index=True)
+    count = models.IntegerField("聚合频次", default=1)
+    details = models.TextField("详细信息", blank=True)
+    created_at = models.DateTimeField("发生时间", auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField("最后更新", auto_now=True)
+
+    class Meta:
+        verbose_name = '安全访问日志'
+        verbose_name_plural = '安全访问日志'
+        indexes = [
+            models.Index(fields=['user_identifier', 'ip_address', 'action']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user_identifier} - {self.ip_address} - {self.get_action_display()} x{self.count}'
+
+    @classmethod
+    def record_vault_fail(cls, user_identifier, ip_address, details=None):
+        """记录失败，自动聚合24小时内同用户+IP"""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        cutoff = timezone.now() - timedelta(hours=24)
+
+        # 查找24小时内同用户+IP的现有记录
+        existing = cls.objects.filter(
+            user_identifier=user_identifier,
+            ip_address=ip_address,
+            action='vault_fail',
+            created_at__gte=cutoff
+        ).first()
+
+        if existing:
+            existing.count += 1
+            if details:
+                existing.details = details
+            existing.save(update_fields=['count', 'details', 'updated_at'])
+            return existing
+        else:
+            return cls.objects.create(
+                user_identifier=user_identifier,
+                ip_address=ip_address,
+                action='vault_fail',
+                count=1,
+                details=details or ''
+            )
+
+    @classmethod
+    def get_ip_fail_count(cls, ip_address, hours=24):
+        """获取指定IP在时间窗口内的总失败次数"""
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Sum
+
+        cutoff = timezone.now() - timedelta(hours=hours)
+        result = cls.objects.filter(
+            ip_address=ip_address,
+            action='vault_fail',
+            created_at__gte=cutoff
+        ).aggregate(total=Sum('count'))
+
+        return result['total'] or 0
+
+
+class TrustedDevice(models.Model):
+    """信任设备 - 管理免2FA的设备令牌，30天滚动续期"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='trusted_devices', verbose_name='用户')
+    device_token = models.CharField("加密令牌", max_length=128, unique=True, db_index=True)
+    user_agent = models.CharField("UA标识", max_length=500)
+    ip_address = models.GenericIPAddressField("首次IP")
+    last_login_ip = models.GenericIPAddressField("最近IP", null=True, blank=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    last_used_at = models.DateTimeField("最后使用", auto_now=True)
+    expires_at = models.DateTimeField("过期时间", db_index=True)
+    fail_count = models.IntegerField("设备级失败计数", default=0)
+    is_revoked = models.BooleanField("已撤销", default=False, db_index=True)
+    revoked_reason = models.CharField("撤销原因", max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = '信任设备'
+        verbose_name_plural = '信任设备'
+        indexes = [
+            models.Index(fields=['user', 'is_revoked']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        status = '已撤销' if self.is_revoked else ('已过期' if not self.is_valid() else '有效')
+        return f'{self.user.username} - {self.user_agent[:50]}... - {status}'
+
+    def is_valid(self):
+        """检查设备是否有效（未撤销且未过期）"""
+        from django.utils import timezone
+        return not self.is_revoked and self.expires_at > timezone.now()
+
+    def renew(self, ip):
+        """滚动续期30天"""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        self.last_login_ip = ip
+        self.expires_at = timezone.now() + timedelta(days=30)
+        self.save(update_fields=['last_login_ip', 'last_used_at', 'expires_at'])
+
+    def increment_fail(self):
+        """增加失败计数，>=3时自动撤销"""
+        self.fail_count += 1
+        if self.fail_count >= 3:
+            self.is_revoked = True
+            self.revoked_reason = f'连续{self.fail_count}次验证失败'
+            # 记录撤销日志
+            AccessLog.objects.create(
+                user_identifier=self.user.username,
+                ip_address=self.last_login_ip or self.ip_address,
+                action='device_revoked',
+                details=f'设备令牌: {self.device_token[:16]}..., 原因: {self.revoked_reason}'
+            )
+        self.save(update_fields=['fail_count', 'is_revoked', 'revoked_reason'])
+        return self.is_revoked
+
+    @classmethod
+    def create_device(cls, user, request):
+        """创建新信任设备"""
+        import secrets
+        from django.utils import timezone
+        from datetime import timedelta
+
+        token = secrets.token_urlsafe(64)
+        user_agent = request.META.get('HTTP_USER_AGENT', 'Unknown')[:500]
+        ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+        if ',' in ip:
+            ip = ip.split(',')[0].strip()
+
+        return cls.objects.create(
+            user=user,
+            device_token=token,
+            user_agent=user_agent,
+            ip_address=ip,
+            expires_at=timezone.now() + timedelta(days=30)
+        )
+
+    @classmethod
+    def get_by_token(cls, token):
+        """根据token获取有效设备"""
+        try:
+            device = cls.objects.select_related('user').get(device_token=token)
+            if device.is_valid():
+                return device
+            return None
+        except cls.DoesNotExist:
+            return None
+
+
 # ---------------- 头像抓取逻辑 ----------------
 def _http_get(url):
     try:

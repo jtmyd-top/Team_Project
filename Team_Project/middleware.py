@@ -24,6 +24,11 @@ class IPBanMiddleware:
     # 允许被封禁 IP 访问的路径（避免完全白屏）
     EXEMPT_PREFIXES = [
         '/static/',
+        '/forgot-password/',
+        '/api/forgot-password/',
+        '/api/reset-password/',
+        '/reset-password/',
+        '/captcha/',
     ]
 
     def __init__(self, get_response):
@@ -220,6 +225,7 @@ class VaultLockMiddleware:
         '/api/user/',
         '/protected_uploads/',
         '/admin/',  # Django 管理后台
+        '/dashboard/',  # 战情室
     ]
 
     def __init__(self, get_response):
@@ -299,22 +305,33 @@ class VaultLockMiddleware:
         return False
 
     def _is_user_locked(self, user_id):
-        """检查用户是否被锁定"""
+        """
+        检查用户是否被锁定（三级检查）
+
+        检查顺序：
+        1. 用户级冻结 (vault_user_lock) - 账户全局冻结
+        2. 设备级锁定 (vault_lock) - 当前设备锁定
+        """
         from django.core.cache import cache
         import time
 
-        lock_key = f'vault_lock:{user_id}'
-        lock_expire_time = cache.get(lock_key)
+        current_time = int(time.time())
 
-        if lock_expire_time is None:
-            return False
+        # 1. 检查用户级冻结（账户全局）
+        user_lock_key = f'vault_user_lock:{user_id}'
+        user_lock_expire = cache.get(user_lock_key)
+        if user_lock_expire and user_lock_expire > current_time:
+            logger.debug(f"用户 {user_id} 账户被冻结，剩余 {user_lock_expire - current_time} 秒")
+            return True
 
-        # 检查锁定是否已过期
-        if lock_expire_time <= int(time.time()):
-            cache.delete(lock_key)
-            return False
+        # 2. 检查设备级锁定
+        device_lock_key = f'vault_lock:{user_id}'
+        device_lock_expire = cache.get(device_lock_key)
+        if device_lock_expire and device_lock_expire > current_time:
+            logger.debug(f"用户 {user_id} 设备被锁定，剩余 {device_lock_expire - current_time} 秒")
+            return True
 
-        return True
+        return False
 
     def _is_api_request(self, request):
         """判断是否是 API 请求"""

@@ -157,6 +157,14 @@
             </button>
           </div>
 
+          <!-- 信任设备选项 -->
+          <div class="trust-device-section" v-if="!useBackupCode">
+            <el-checkbox v-model="trustDevice" class="trust-checkbox">
+              信任此浏览器 30 天
+            </el-checkbox>
+            <div class="trust-hint">勾选后，30天内登录将跳过两因素认证</div>
+          </div>
+
           <!-- 操作按钮区 -->
           <div class="twofa-actions">
             <!-- 主按钮：验证 -->
@@ -221,6 +229,7 @@ const {
   twoFaLoading,
   twoFaMethod,
   useBackupCode,
+  trustDevice,
   countdown,
   resendLoading,
   onCaptchaChange,

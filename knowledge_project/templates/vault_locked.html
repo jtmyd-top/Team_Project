@@ -1,405 +1,272 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>账户已锁定 - 安全保护</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>账户安全保护已启动</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet"/>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
+            font-family: 'Noto Sans SC', sans-serif;
             min-height: 100vh;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            overflow: hidden;
+            flex-direction: column;
+            background: #f5f7f8;
+            color: #1F2937;
+            transition: all 0.3s;
+        }
+        body.dark { background: #0f1923; color: #F3F4F6; }
+
+        /* 导航栏 */
+        nav {
+            width: 100%; padding: 24px 32px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: relative; z-index: 10;
+        }
+        nav a {
+            font-size: 14px; font-weight: 500; color: #6B7280;
+            text-decoration: none; transition: color 0.2s;
+        }
+        body.dark nav a { color: #9CA3AF; }
+        nav a:hover { color: #359EFF; }
+        .nav-links { display: flex; gap: 32px; }
+        .theme-btn {
+            padding: 8px; border-radius: 50%; border: none; cursor: pointer;
+            background: transparent; color: #6B7280; transition: all 0.2s;
+        }
+        body.dark .theme-btn { color: #9CA3AF; }
+        .theme-btn:hover { background: #f3f4f6; }
+        body.dark .theme-btn:hover { background: #1f2937; }
+
+        /* 背景渐变 */
+        .bg-gradient {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            position: relative; padding: 0 16px 80px;
+            background: radial-gradient(circle at top left, #EBE9FF 0%, transparent 40%),
+                        radial-gradient(circle at bottom right, #FFEBF2 0%, transparent 40%),
+                        linear-gradient(180deg, #FFFFFF 0%, #F8F9FE 100%);
+        }
+        body.dark .bg-gradient {
+            background: radial-gradient(circle at top left, #2d2b55 0%, transparent 40%),
+                        radial-gradient(circle at bottom right, #4a2635 0%, transparent 40%),
+                        linear-gradient(180deg, #1a1b2e 0%, #11121f 100%);
+        }
+        .bg-orb {
+            position: absolute; border-radius: 50%; filter: blur(100px);
+            pointer-events: none;
+        }
+        .bg-orb-1 { top: -10%; left: -10%; width: 50%; height: 50%; background: rgba(53,158,255,0.1); }
+        body.dark .bg-orb-1 { background: rgba(53,158,255,0.2); }
+        .bg-orb-2 { bottom: -10%; right: -10%; width: 50%; height: 50%; background: rgba(255,182,193,0.3); }
+        body.dark .bg-orb-2 { background: rgba(255,100,150,0.15); }
+
+        /* 卡片 */
+        .card {
+            position: relative; z-index: 10; width: 100%; max-width: 440px;
+            background: white; border-radius: 16px; padding: 40px;
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.05);
+            border: 1px solid rgba(255,255,255,0.5);
+        }
+        body.dark .card {
+            background: #252640; border-color: rgba(255,255,255,0.05);
         }
 
-        /* 背景动画 */
-        .bg-animation {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            z-index: 0;
+        /* 头部 */
+        .header { text-align: center; margin-bottom: 32px; }
+        .header-icon {
+            width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 24px;
+            background: #FEF2F2; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 20px rgba(239,68,68,0.2);
         }
+        body.dark .header-icon { background: rgba(239,68,68,0.15); }
+        .header-icon .material-icons-round { font-size: 32px; color: #EF4444; }
+        .header h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+        .header p { font-size: 14px; color: #6B7280; }
+        body.dark .header p { color: #9CA3AF; }
 
-        .bg-animation::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(245, 108, 108, 0.1) 0%, transparent 50%);
-            animation: pulse-bg 8s ease-in-out infinite;
+        /* 警告框 */
+        .alert-box {
+            background: #FEF2F2; border: 1px solid rgba(239,68,68,0.15);
+            border-radius: 12px; padding: 16px; margin-bottom: 32px;
+            display: flex; align-items: flex-start; gap: 12px;
         }
+        body.dark .alert-box { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.2); }
+        .alert-box .material-icons-round { color: #EF4444; font-size: 20px; margin-top: 2px; }
+        .alert-title { font-size: 14px; font-weight: 600; color: #EF4444; margin-bottom: 4px; }
+        .alert-text { font-size: 12px; color: #6B7280; line-height: 1.6; }
+        body.dark .alert-text { color: #9CA3AF; }
 
-        @keyframes pulse-bg {
-            0%, 100% { transform: scale(1); opacity: 0.5; }
-            50% { transform: scale(1.2); opacity: 0.8; }
+        /* 详情列表 */
+        .details-label {
+            font-size: 11px; font-weight: 700; color: #6B7280;
+            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; padding-left: 4px;
         }
-</style>
+        body.dark .details-label { color: #9CA3AF; }
+        .detail-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px; border-radius: 8px; transition: background 0.2s;
+        }
+        .detail-item:hover { background: #f9fafb; }
+        body.dark .detail-item:hover { background: rgba(255,255,255,0.05); }
+        .detail-left { display: flex; align-items: center; gap: 12px; }
+        .detail-icon {
+            width: 32px; height: 32px; border-radius: 50%;
+            background: #f3f4f6; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        body.dark .detail-icon { background: rgba(255,255,255,0.08); }
+        .detail-item:hover .detail-icon { background: rgba(53,158,255,0.1); }
+        .detail-item:hover .detail-icon .material-icons-round { color: #359EFF; }
+        .detail-icon .material-icons-round { font-size: 16px; color: #6B7280; }
+        body.dark .detail-icon .material-icons-round { color: #9CA3AF; }
+        .detail-name { font-size: 14px; font-weight: 500; }
+        .detail-value { font-size: 12px; color: #6B7280; }
+        body.dark .detail-value { color: #9CA3AF; }
+        .badge-red {
+            font-size: 12px; font-weight: 500; color: #EF4444;
+            background: #FEF2F2; padding: 4px 10px; border-radius: 4px;
+        }
+        body.dark .badge-red { background: rgba(239,68,68,0.15); color: #FCA5A5; }
+
+        /* 按钮 */
+        .primary-btn {
+            width: 100%; padding: 14px; border: none; border-radius: 12px;
+            font-size: 15px; font-weight: 600; cursor: pointer;
+            background: linear-gradient(135deg, #6B73D6, #8B5CF6);
+            color: white; display: flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 8px 24px rgba(107,115,214,0.3);
+            transition: all 0.2s; text-decoration: none; margin-top: 32px;
+        }
+        .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(107,115,214,0.4); }
+        .primary-btn:active { transform: scale(0.98); }
+        .support-link {
+            display: flex; align-items: center; justify-content: center; gap: 4px;
+            margin-top: 16px; font-size: 14px; font-weight: 500;
+            color: #359EFF; text-decoration: none; transition: color 0.2s;
+        }
+        body.dark .support-link { color: #818CF8; }
+        .support-link:hover { color: #5d65c3; }
+
+        /* 浮动按钮 */
+        .fab-group {
+            position: fixed; bottom: 32px; right: 32px;
+            display: flex; flex-direction: column; gap: 16px;
+        }
+        .fab {
+            width: 40px; height: 40px; border-radius: 50%; border: none;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .fab-grid { background: white; color: #F9A8D4; }
+        body.dark .fab-grid { background: #252640; }
+        .fab-lang { background: #FCE7F3; color: #EC4899; }
+        body.dark .fab-lang { background: rgba(236,72,153,0.2); }
+        .fab:hover { transform: translateY(-2px); }
+    </style>
 </head>
 <body>
-    <div class="bg-animation"></div>
-    <div class="lock-container">
-        <!-- 锁定图标 -->
-        <div class="lock-icon-wrapper">
-            <div class="lock-icon">
-                <i class="fas fa-shield-halved"></i>
-            </div>
-            <div class="pulse-ring"></div>
-            <div class="pulse-ring delay"></div>
-        </div>
+    <nav>
+        <div></div>
+        <button class="theme-btn" onclick="toggleDark()">
+            <span class="material-icons-round">brightness_4</span>
+        </button>
+    </nav>
 
-        <!-- 标题 -->
-        <h1 class="lock-title">账户安全保护已启动</h1>
+    <main class="bg-gradient">
+        <div class="bg-orb bg-orb-1"></div>
+        <div class="bg-orb bg-orb-2"></div>
 
-        <!-- 副标题 -->
-        <p class="lock-subtitle">
-            <i class="fas fa-exclamation-triangle"></i>
-            检测到多次验证失败，账户已被临时锁定
-        </p>
-
-        <!-- 信息卡片 -->
-        <div class="info-card">
-            <div class="info-header">
-                <i class="fas fa-info-circle"></i>
-                <span>锁定详情</span>
-            </div>
-            <div class="info-content">
-                <div class="info-item">
-                    <i class="fas fa-clock"></i>
-                    <div class="info-text">
-                        <span class="info-label">锁定状态</span>
-                        <span class="info-value status-locked">全域锁定中</span>
-                    </div>
+        <div class="card">
+            <div class="header">
+                <div class="header-icon">
+                    <span class="material-icons-round">gpp_maybe</span>
                 </div>
-                <div class="info-item">
-                    <i class="fas fa-ban"></i>
-                    <div class="info-text">
-                        <span class="info-label">访问限制</span>
-                        <span class="info-value">所有数据操作已禁用</span>
-                    </div>
-                </div>
-                <div class="info-item">
-                    <i class="fas fa-shield-alt"></i>
-                    <div class="info-text">
-                        <span class="info-label">保护措施</span>
-                        <span class="info-value">防止数据泄露与篡改</span>
+                <h1>账户安全保护已启动</h1>
+                <p>Account Security Protection Activated</p>
+            </div>
+
+            <div class="alert-box">
+                <span class="material-icons-round">lock_clock</span>
+                <div>
+                    <div class="alert-title">账户暂时被锁定</div>
+                    <div class="alert-text">
+                        由于检测到多次登录失败，为保护您的账户安全，系统已自动限制访问。请在锁定时间结束后重试或重置密码。
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- 解锁说明 -->
-        <div class="unlock-section">
-            <h3 class="unlock-title">
-                <i class="fas fa-key"></i>
-                如何解除锁定？
-            </h3>
-            <p class="unlock-description">
-                为确保账户安全，请通过重置密码来验证您的身份并解除锁定状态。
-            </p>
-            <a href="/forgot-password/" class="unlock-btn">
-                <i class="fas fa-unlock-alt"></i>
+            <div class="details-label">锁定详情 (Lock Details)</div>
+            <div style="margin-bottom: 8px;">
+                <div class="detail-item">
+                    <div class="detail-left">
+                        <div class="detail-icon"><span class="material-icons-round">wifi_off</span></div>
+                        <span class="detail-name">访问限制</span>
+                    </div>
+                    <span class="badge-red">已生效</span>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-left">
+                        <div class="detail-icon"><span class="material-icons-round">shield</span></div>
+                        <span class="detail-name">保护机制</span>
+                    </div>
+                    <span class="detail-value">暴力破解防护</span>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-left">
+                        <div class="detail-icon"><span class="material-icons-round">schedule</span></div>
+                        <span class="detail-name">解锁时间</span>
+                    </div>
+                    <span class="detail-value" id="countdown">计算中...</span>
+                </div>
+            </div>
+
+            <a href="/accounts/logout/?next=/forgot-password/" class="primary-btn">
+                <span class="material-icons-round">lock_reset</span>
                 <span>重置密码解除锁定</span>
-                <i class="fas fa-arrow-right"></i>
+            </a>
+            <a href="#" class="support-link">
+                <span class="material-icons-round" style="font-size:18px;">support_agent</span>
+                联系客服支持
             </a>
         </div>
+    </main>
 
-        <!-- 底部提示 -->
-        <div class="footer-hint">
-            <i class="fas fa-question-circle"></i>
-            <span>如果这不是您的操作，请立即联系管理员</span>
-        </div>
+    <div class="fab-group">
+        <button class="fab fab-grid"><span class="material-icons-round">grid_view</span></button>
+        <button class="fab fab-lang"><span class="material-icons-round">translate</span></button>
     </div>
 
-    <style>
-        .lock-container {
-            position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 480px;
-            padding: 48px 32px;
-            text-align: center;
+    <script>
+        function toggleDark() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('darkMode', document.body.classList.contains('dark'));
+        }
+        if (localStorage.getItem('darkMode') === 'true' ||
+            (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.body.classList.add('dark');
         }
 
-        /* 锁定图标 */
-        .lock-icon-wrapper {
-            position: relative;
-            width: 120px;
-            height: 120px;
-            margin: 0 auto 32px;
-        }
-
-        .lock-icon {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #f56c6c 0%, #e74c3c 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 10px 40px rgba(245, 108, 108, 0.4);
-            z-index: 2;
-        }
-
-        .lock-icon i {
-            font-size: 42px;
-            color: white;
-        }
-
-        .pulse-ring {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            border: 2px solid rgba(245, 108, 108, 0.5);
-            animation: pulse-ring 2s ease-out infinite;
-        }
-
-        .pulse-ring.delay {
-            animation-delay: 1s;
-        }
-
-        @keyframes pulse-ring {
-            0% {
-                width: 100px;
-                height: 100px;
-                opacity: 1;
+        // 倒计时
+        (function() {
+            var remaining = {{ remaining_seconds|default:900 }};
+            var el = document.getElementById('countdown');
+            function update() {
+                if (remaining <= 0) {
+                    el.textContent = '已解锁';
+                    setTimeout(function() { location.reload(); }, 1000);
+                    return;
+                }
+                var m = Math.floor(remaining / 60);
+                var s = remaining % 60;
+                el.textContent = '剩余 ' + m + ':' + (s < 10 ? '0' : '') + s;
+                remaining--;
+                setTimeout(update, 1000);
             }
-            100% {
-                width: 160px;
-                height: 160px;
-                opacity: 0;
-            }
-        }
-
-        /* 标题 */
-        .lock-title {
-            font-size: 28px;
-            font-weight: 700;
-            color: #fff;
-            margin-bottom: 12px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        .lock-subtitle {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 20px;
-            background: rgba(245, 108, 108, 0.15);
-            border: 1px solid rgba(245, 108, 108, 0.3);
-            border-radius: 30px;
-            color: #f56c6c;
-            font-size: 14px;
-            margin-bottom: 32px;
-        }
-
-        .lock-subtitle i {
-            animation: shake 0.5s ease-in-out infinite;
-        }
-
-        @keyframes shake {
-            0%, 100% { transform: rotate(0deg); }
-            25% { transform: rotate(-10deg); }
-            75% { transform: rotate(10deg); }
-        }
-
-        /* 信息卡片 */
-        .info-card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            overflow: hidden;
-            margin-bottom: 32px;
-            backdrop-filter: blur(10px);
-        }
-
-        .info-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 16px 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        .info-header i {
-            color: #409eff;
-        }
-
-        .info-content {
-            padding: 8px 0;
-        }
-
-        .info-item {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            padding: 14px 20px;
-            transition: background 0.2s ease;
-        }
-
-        .info-item:hover {
-            background: rgba(255, 255, 255, 0.03);
-        }
-
-        .info-item > i {
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 14px;
-        }
-
-        .info-text {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 4px;
-        }
-
-        .info-label {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-        }
-
-        .info-value {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.9);
-            font-weight: 500;
-        }
-
-        .status-locked {
-            color: #f56c6c;
-        }
-
-        /* 解锁部分 */
-        .unlock-section {
-            background: linear-gradient(135deg, rgba(64, 158, 255, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%);
-            border: 1px solid rgba(64, 158, 255, 0.2);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 24px;
-        }
-
-        .unlock-title {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            color: #fff;
-            margin-bottom: 12px;
-        }
-
-        .unlock-title i {
-            color: #409eff;
-        }
-
-        .unlock-description {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.6);
-            line-height: 1.6;
-            margin-bottom: 20px;
-        }
-
-        .unlock-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            padding: 14px 32px;
-            background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-            border: none;
-            border-radius: 12px;
-            color: white;
-            font-size: 15px;
-            font-weight: 600;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 24px rgba(64, 158, 255, 0.3);
-        }
-
-        .unlock-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 12px 32px rgba(64, 158, 255, 0.4);
-        }
-
-        .unlock-btn i:last-child {
-            transition: transform 0.3s ease;
-        }
-
-        .unlock-btn:hover i:last-child {
-            transform: translateX(4px);
-        }
-
-        /* 底部提示 */
-        .footer-hint {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.4);
-        }
-
-        .footer-hint i {
-            font-size: 14px;
-        }
-
-        /* 响应式 */
-        @media (max-width: 520px) {
-            .lock-container {
-                padding: 32px 20px;
-            }
-
-            .lock-title {
-                font-size: 22px;
-            }
-
-            .lock-subtitle {
-                font-size: 12px;
-                padding: 8px 16px;
-            }
-
-            .info-item {
-                padding: 12px 16px;
-            }
-
-            .unlock-btn {
-                width: 100%;
-                justify-content: center;
-            }
-        }
-    </style>
+            update();
+        })();
+    </script>
 </body>
 </html>

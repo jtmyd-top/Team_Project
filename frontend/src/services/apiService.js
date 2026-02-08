@@ -31,12 +31,13 @@ async function postRequest(url, body) {
     body: JSON.stringify(body),
   });
 
+  // 先读取文本，避免 body stream already read 错误
+  const text = await response.text();
   let data;
   try {
-    data = await response.json();
+    data = JSON.parse(text);
   } catch (e) {
-    // 如果不是JSON格式，可能是HTML错误页面
-    const text = await response.text();
+    // 非JSON响应（HTML错误页面等）
     if (response.status === 404) {
       throw new Error('API端点不存在 (404)');
     } else if (response.status === 403) {
@@ -49,7 +50,6 @@ async function postRequest(url, body) {
   }
 
   if (!response.ok) {
-    // 创建一个包含更多信息的错误对象
     const error = new Error('请求失败');
     error.response = {
       status: response.status,
@@ -73,12 +73,12 @@ async function getRequest(url, params = {}) {
     headers: csrfHeader,
   });
 
+  // 先读取文本，避免 body stream already read 错误
+  const text = await response.text();
   let data;
   try {
-    data = await response.json();
+    data = JSON.parse(text);
   } catch (e) {
-    // 如果不是JSON格式，可能是HTML错误页面
-    const text = await response.text();
     if (response.status === 404) {
       throw new Error('API端点不存在 (404)');
     } else if (response.status === 403) {
@@ -91,8 +91,6 @@ async function getRequest(url, params = {}) {
   }
 
   if (!response.ok) {
-    // 创建一个包含更多信息的错误对象
-    // 优先使用 error 字段，如果没有则使用 message
     const errorMessage = data.error || data.message || '请求失败';
     const error = new Error(errorMessage);
     error.response = {

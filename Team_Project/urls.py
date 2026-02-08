@@ -18,15 +18,22 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from knowledge_project.admin_auth import secure_admin_site
+
+# 将默认 admin 的已注册模型复制到安全 admin
+for model, model_admin in admin.site._registry.items():
+    if model not in secure_admin_site._registry:
+        secure_admin_site._registry[model] = model_admin
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('admin/', secure_admin_site.urls),  # 使用安全增强的 Admin
     # 核心修复：确保包含了Django内置的认证URL
     # 这会自动为我们添加 /accounts/login/, /accounts/logout/ 等所有必需的URL
     path('accounts/', include('django.contrib.auth.urls')),
     # 将我们自己app的URL包含进来
     path('', include('knowledge_project.urls')),
     path("ckeditor5/", include('django_ckeditor_5.urls'), name="ck_editor_5_upload_file"),
+    path('captcha/', include('captcha.urls')),  # django-simple-captcha
 ]
 # --- 【核心新增代码】---
 # 只有在 DEBUG 模式下，才让 Django 开发服务器来处理媒体文件

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>{{ title }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #F8FAFC;
+            position: relative;
+            overflow: hidden;
+        }
+        body.dark { background: #0F172A; color: #F8FAFC; }
+        .bg-orbs { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+        .orb { position: absolute; border-radius: 50%; filter: blur(100px); mix-blend-mode: multiply; animation: blob 7s infinite; }
+        body.dark .orb { mix-blend-mode: screen; }
+        .orb-1 { top: -10%; left: -10%; width: 50%; height: 50%; background: rgba(196, 181, 253, 0.4); }
+        body.dark .orb-1 { background: rgba(139, 92, 246, 0.2); }
+        .orb-2 { bottom: -10%; right: -10%; width: 50%; height: 50%; background: rgba(251, 207, 232, 0.4); animation-delay: 2s; }
+        body.dark .orb-2 { background: rgba(236, 72, 153, 0.2); }
+        .orb-3 { top: 20%; right: 20%; width: 30%; height: 30%; background: rgba(191, 219, 254, 0.4); animation-delay: 4s; }
+        body.dark .orb-3 { background: rgba(59, 130, 246, 0.2); }
+        @keyframes blob {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+        .card {
+            position: relative; z-index: 10; width: 100%; max-width: 480px;
+            background: white; border-radius: 24px; padding: 40px;
+            box-shadow: 0 20px 40px -15px rgba(0,0,0,0.05); transition: all 0.3s;
+        }
+        body.dark .card { background: #1E293B; border: 1px solid rgba(71,85,105,0.5); }
+        .card:hover { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); }
+        .brand { text-align: center; margin-bottom: 32px; }
+        .brand-icon {
+            width: 64px; height: 64px; margin: 0 auto 16px;
+            background: linear-gradient(135deg, #10B981, #059669);
+            border-radius: 16px; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 8px 16px rgba(16,185,129,0.3);
+        }
+        .brand-icon span { font-size: 32px; color: white; }
+        .brand h1 { font-size: 24px; font-weight: 700; color: #1E293B; margin-bottom: 8px; }
+        body.dark .brand h1 { color: white; }
+        .brand p { font-size: 14px; color: #64748B; }
+        body.dark .brand p { color: #94A3B8; }
+        .user-badge {
+            display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+            background: rgba(16,185,129,0.1); color: #059669;
+            padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+        }
+        body.dark .user-badge { background: rgba(16,185,129,0.2); color: #34D399; }
+        .warning-box {
+            margin-bottom: 24px; padding: 16px;
+            background: #FFFBEB; border: 1px solid #FCD34D; border-radius: 12px;
+            color: #92400E; font-size: 13px; line-height: 1.6;
+        }
+        body.dark .warning-box { background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #FCD34D; }
+        .codes-box {
+            margin-bottom: 24px; padding: 24px;
+            background: #F8FAFC; border: 2px dashed #CBD5E1; border-radius: 16px;
+        }
+        body.dark .codes-box { background: rgba(30,41,59,0.5); border-color: #475569; }
+        .codes-title {
+            text-align: center; font-weight: 600; color: #374151; margin-bottom: 16px; font-size: 15px;
+        }
+        body.dark .codes-title { color: #CBD5E1; }
+        .codes-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+        }
+        .code-item {
+            padding: 12px; text-align: center;
+            background: white; border-radius: 10px;
+            font-family: monospace; font-size: 16px; font-weight: 700;
+            color: #1E293B; letter-spacing: 2px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        }
+        body.dark .code-item { background: #1E293B; color: #F1F5F9; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+        .primary-btn {
+            width: 100%; padding: 14px; border: none; border-radius: 12px;
+            font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+            background: linear-gradient(135deg, #10B981, #059669); color: white;
+            box-shadow: 0 4px 12px rgba(16,185,129,0.3);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            text-decoration: none;
+        }
+        .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16,185,129,0.4); color: white; }
+        .secondary-btn {
+            width: 100%; padding: 12px; margin-bottom: 12px;
+            background: transparent; color: #64748B; font-size: 14px;
+            border: 1px solid #E2E8F0; border-radius: 12px; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        body.dark .secondary-btn { color: #94A3B8; border-color: #334155; }
+        .secondary-btn:hover { background: #F1F5F9; }
+        body.dark .secondary-btn:hover { background: #334155; }
+        .dark-toggle {
+            position: fixed; bottom: 32px; right: 32px; z-index: 50; padding: 12px;
+            background: rgba(255,255,255,0.8); backdrop-filter: blur(10px);
+            border: 1px solid #E2E8F0; border-radius: 50%; cursor: pointer;
+            transition: all 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        body.dark .dark-toggle { background: rgba(30,41,59,0.8); border-color: #334155; color: #CBD5E1; }
+        .dark-toggle:hover { background: white; box-shadow: 0 8px 20px rgba(0,0,0,0.15); }
+        body.dark .dark-toggle:hover { background: #334155; }
+        .dark-toggle svg { width: 20px; height: 20px; transition: transform 0.5s; }
+        .dark-toggle:hover svg { transform: rotate(180deg); }
+        @media print {
+            body { background: white !important; }
+            .bg-orbs, .dark-toggle, .primary-btn, .secondary-btn { display: none !important; }
+            .card { box-shadow: none; max-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-orbs"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
+
+    <div class="card">
+        <div class="brand">
+            <div class="brand-icon"><span>✅</span></div>
+            <h1>{{ title }}</h1>
+            <p>您的两因素认证已成功启用</p>
+            <span class="user-badge">🛡️ {{ username }}</span>
+        </div>
+
+        <div class="warning-box">
+            ⚠️ <strong>重要！</strong>请将以下备用验证码保存在安全的地方。如果您无法使用身份验证器，可以使用这些备用码登录。<strong>每个备用码只能使用一次。</strong>
+        </div>
+
+        <div class="codes-box">
+            <div class="codes-title">🔑 备用验证码</div>
+            <div class="codes-grid">
+                {% for code in backup_codes %}
+                <div class="code-item">{{ code }}</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <button class="secondary-btn" onclick="window.print()">🖨️ 打印备用码</button>
+        <a href="/admin/" class="primary-btn">➡️ 进入管理后台</a>
+    </div>
+
+    <button class="dark-toggle" onclick="toggleDarkMode()">
+        <svg fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+    </button>
+
+    <script>
+        function toggleDarkMode() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('darkMode', document.body.classList.contains('dark'));
+        }
+        if (localStorage.getItem('darkMode') === 'true' ||
+            (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.body.classList.add('dark');
+        }
+    </script>
+</body>
+</html>

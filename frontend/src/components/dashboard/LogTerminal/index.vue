@@ -1,8 +1,13 @@
 <template>
   <div class="db-card log-terminal">
-    <div class="db-card-title">
-      <i class="fas fa-terminal"></i> 系统日志流
-      <span class="log-source-tag" v-if="logData">{{ logData.source === 'file' ? 'FILE' : 'DB' }}</span>
+    <div class="db-card-title" style="justify-content: space-between;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <i class="fas fa-terminal"></i> 系统日志流
+        <span class="log-source-tag" v-if="logData">{{ logData.source === 'file' ? 'FILE' : 'DB' }}</span>
+      </div>
+      <a href="/admin/admin/logentry/" target="_blank" style="font-size: 12px; color: var(--db-cyan); text-decoration: none; white-space: nowrap;">
+        <i class="fas fa-external-link-alt"></i> 查看全部
+      </a>
     </div>
     <div class="log-terminal-body" ref="terminalRef">
       <div
@@ -51,7 +56,11 @@ watch(logs, () => {
   nextTick(autoScroll)
 }, { deep: true })
 
-onMounted(() => {
+onMounted(async () => {
+  // 初始化时立即获取历史日志
+  if (!logData.value?.logs?.length) {
+    await store.fetchSlowSections()
+  }
   scrollTimer = setInterval(autoScroll, 3000)
 })
 
