@@ -23,12 +23,18 @@ urlpatterns = [
     path('api/notes/<int:note_id>/delete/', views.delete_note_api, name='delete_note_api'),
     path('api/notes/<int:note_id>/toggle-secret/', views.toggle_secret_api, name='toggle_secret_api'),
     path('notes/public/<uuid:public_id>/', views.public_note_view, name='public_note_view'),
+    path('api/notes/<int:note_id>/comments/', views.note_comments_api, name='note_comments_api'),
+    path('api/notes/<int:note_id>/comments/create/', views.note_comment_create_api, name='note_comment_create_api'),
+    path('api/comments/<int:comment_id>/delete/', views.note_comment_delete_api, name='note_comment_delete_api'),
     # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
     path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),
     # --- 【新增】图片上传的 API 路由 ---
     path('api/upload/image/', views.image_upload_view, name='image_upload_view'),
     re_path(r'^protected_uploads/(?P<file_path>.*)$', views.protected_media_view, name='protected_media_view'),
     path('api/public-notes/', views.public_notes_api, name='public_notes_api'),
+    path('api/notes/history/', views.note_history_api, name='note_history_api'),
+    path('api/notes/record-history/', views.record_note_history_api, name='record_note_history_api'),
+    path('api/home-stats/', views.home_stats_api, name='home_stats_api'),
     path("settings/", views.settings_view, name="settings"),
     path("upload-avatar/", views.upload_avatar, name="upload_avatar"),
     path("update-profile/", views.update_profile, name="update_profile"),
@@ -50,6 +56,19 @@ urlpatterns = [
 
     # ==================== 主题设置 API ====================
     path('api/theme-settings/', views.theme_settings, name='theme_settings'),
+
+    # ==================== 私信功能 API ====================
+    path('messages/', views.messages_view, name='messages'),
+    path('api/messages/send/', views.send_message_api, name='send_message_api'),
+    path('api/messages/get/', views.get_messages_api, name='get_messages_api'),
+    path('api/messages/conversations/', views.get_message_conversations_api, name='get_message_conversations_api'),
+    path('api/messages/preference/', views.get_message_preference_api, name='get_message_preference_api'),
+    path('api/messages/preference/update/', views.update_message_preference_api, name='update_message_preference_api'),
+    path('api/users/<int:user_id>/profile/', views.get_user_public_profile_api, name='get_user_public_profile_api'),
+    path('api/users/search/', views.search_users_api, name='search_users_api'),
+    path('api/users/block/', views.block_user_api, name='block_user_api'),
+    path('api/users/unblock/', views.unblock_user_api, name='unblock_user_api'),
+    path('api/users/blocked/', views.get_blocked_users_api, name='get_blocked_users_api'),
 
     # ==================== Turnstile API ====================
     path('api/turnstile/config/', views.turnstile_config, name='turnstile_config'),

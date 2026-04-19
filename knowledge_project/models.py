@@ -303,7 +303,7 @@ class Profile(models.Model):
         validators=[MaxLengthValidator(160)],
         verbose_name="个人简介"
     )
-    banner_image = models.ImageField(
+    banner_image = models.FileField(
         upload_to=user_avatar_path,  # 复用头像路径函数
         null=True,
         blank=True,
@@ -913,6 +913,71 @@ def create_user_profile(sender, instance, created, **kwargs):
             # 继续执行，vault 初始化失败不应该阻止用户创建
 
 
+# ---------------- 笔记评论模型 ----------------
+class NoteComment(models.Model):
+    """公开笔记的讨论评论"""
+    note = models.ForeignKey(
+        Note,
+        on_delete=models.CASCADE,
+        related_name='comments',
+        verbose_name="所属笔记"
+    )
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='note_comments',
+        verbose_name="评论者"
+    )
+    content = models.TextField(max_length=2000, verbose_name="评论内容")
+    parent = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='replies',
+        verbose_name="回复的评论"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="评论时间")
+
+    class Meta:
+        verbose_name = "笔记评论"
+        verbose_name_plural = "笔记评论"
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.author.username} 评论了 《{self.note.title}》"
+
+
+# ============ 笔记浏览历史模型 ============
+class NoteHistory(models.Model):
+    """用户浏览笔记的历史记录"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='note_history',
+        verbose_name="用户"
+    )
+    note = models.ForeignKey(
+        Note,
+        on_delete=models.CASCADE,
+        related_name='view_history',
+        verbose_name="笔记"
+    )
+    viewed_at = models.DateTimeField(auto_now=True, verbose_name="浏览时间")
+
+    class Meta:
+        verbose_name = "笔记浏览历史"
+        verbose_name_plural = "笔记浏览历史"
+        ordering = ['-viewed_at']
+        unique_together = ('user', 'note')
+        indexes = [
+            models.Index(fields=['user', '-viewed_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} 浏览了 《{self.note.title}》"
+
+
 @receiver(post_save, sender=Note)
 def auto_generate_tags_for_note(sender, instance, created, **kwargs):
     if not created or not instance.content:
@@ -925,3 +990,116 @@ def auto_generate_tags_for_note(sender, instance, created, **kwargs):
     for keyword in keywords:
         tag, _ = Tag.objects.get_or_create(name=keyword)
         instance.tags.add(tag)
+
+
+# ============ 私信功能模型 ============
+class Message(models.Model):
+    """用户之间的私信"""
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='sent_messages',
+        verbose_name="发送者"
+    )
+    recipient = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='received_messages',
+        verbose_name="接收者"
+    )
+    content = models.TextField(max_length=5000, verbose_name="消息内容")
+    is_read = models.BooleanField(default=False, verbose_name="已读")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="发送时间")
+    read_at = models.DateTimeField(null=True, blank=True, verbose_name="读取时间")
+
+    class Meta:
+        verbose_name = "私信"
+        verbose_name_plural = "私信"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['sender', 'recipient', '-created_at']),
+            models.Index(fields=['recipient', 'is_read']),
+        ]
+
+    def __str__(self):
+        return f"{self.sender.username} → {self.recipient.username}"
+
+
+class MessagePreference(models.Model):
+    """用户的私信偏好设置"""
+    MESSAGE_MODE_CHOICES = [
+        ('all', '所有已登录用户'),
+        ('followers_only', '仅关注者'),
+        ('disabled', '禁用私信'),
+    ]
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='message_preference',
+        verbose_name="用户"
+    )
+    allow_messages = models.BooleanField(default=False, verbose_name="允许接收私信")
+    message_mode = models.CharField(
+        max_length=20,
+        choices=MESSAGE_MODE_CHOICES,
+        default='all',
+        verbose_name="私信模式"
+    )
+    show_read_status = models.BooleanField(default=True, verbose_name="显示已读状态")
+    auto_reply_enabled = models.BooleanField(default=False, verbose_name="启用自动回复")
+    auto_reply_text = models.TextField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="自动回复内容"
+    )
+    notify_new_message = models.BooleanField(default=True, verbose_name="邮件通知新私信")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "私信偏好设置"
+        verbose_name_plural = "私信偏好设置"
+
+    def __str__(self):
+        return f"{self.user.username} 的私信设置"
+
+
+class UserBlocklist(models.Model):
+    """用户屏蔽列表"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='blocked_users',
+        verbose_name="屏蔽者"
+    )
+    blocked_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='blocked_by',
+        verbose_name="被屏蔽用户"
+    )
+    reason = models.CharField(
+        max_length=500,
+        blank=True,
+        verbose_name="屏蔽原因"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="屏蔽时间")
+
+    class Meta:
+        verbose_name = "用户屏蔽"
+        verbose_name_plural = "用户屏蔽"
+        unique_together = ('user', 'blocked_user')
+        indexes = [
+            models.Index(fields=['user', 'blocked_user']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} 屏蔽了 {self.blocked_user.username}"
+
+
+@receiver(post_save, sender=User)
+def create_message_preference(sender, instance, created, **kwargs):
+    """自动为新用户创建私信偏好设置"""
+    if created:
+        MessagePreference.objects.get_or_create(user=instance)
