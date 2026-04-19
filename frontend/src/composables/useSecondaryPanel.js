@@ -16,7 +16,7 @@ export function useSecondaryPanel(props, emit) {
   const vaultStore = useVaultStore()
 
   // 【关键】在组件顶部统一调用一次，确保整个组件使用同一个实例
-  const { dek, isKeyValid, verify2FAAndGetKey, tryRecoverKeyFromSession } = useVaultEncryption()
+  const { tryRecoverKeyFromSession } = useVaultEncryption()
   const { encryptContent, decryptContent } = useClientCrypto()
 
   // ==================== 响应式状态 ====================
@@ -150,39 +150,28 @@ export function useSecondaryPanel(props, emit) {
   })
 
   // ==================== 监听器 ====================
-  // 【新增】监听 DEK 变化，当保密柜解锁时重新解密回收站笔记
+  // 【新增】监听保密柜解锁状态变化，触发回收站笔记标题的重新解密/清除
   watch(
-    () => dek.value,
-    () => {
-      // 当 DEK 变化时，重新尝试解密回收站笔记
-      if (sidebarStore.activeModule === 'trash' && dek.value) {
-        console.log('[SecondaryPanel] DEK updated, retrying trash note decryption')
-        sidebarStore.currentNotes.forEach(note => {
+    () => vaultStore.isUnlocked,
+    async (unlocked) => {
+      if (unlocked && sidebarStore.activeModule === 'trash') {
+        console.log('[SecondaryPanel] Vault unlocked, retrying trash note decryption')
+        for (const note of sidebarStore.currentNotes) {
           if (note.is_secret && note.title && !note.decryptedTitle) {
             try {
-              const plainTitle = decryptContent(note.title, dek.value)
+              const plainTitle = await decryptContent(note.title)
               note.decryptedTitle = plainTitle
               console.log('[SecondaryPanel] ✅ Title decrypted after unlock:', note.id)
             } catch (e) {
               console.warn('[SecondaryPanel] Failed to decrypt after unlock:', note.id)
             }
           }
-        })
-      }
-    }
-  )
-
-  // 【新增】监听当 DEK 变为不可用时，清除所有 decryptedTitle（强制显示占位符）
-  watch(
-    () => isKeyValid.value,
-    (valid) => {
-      if (!valid) {
-        console.log('[SecondaryPanel] DEK became unavailable, clearing decryptedTitles for force-masked display')
-        // 清除所有已设置的 decryptedTitle，强制显示占位符
+        }
+      } else if (!unlocked) {
+        console.log('[SecondaryPanel] Vault locked, clearing decryptedTitles')
         sidebarStore.currentNotes.forEach(note => {
           if (note.is_secret && note.decryptedTitle) {
             note.decryptedTitle = undefined
-            console.log('[SecondaryPanel] Cleared decryptedTitle for:', note.id)
           }
         })
       }
@@ -194,45 +183,24 @@ export function useSecondaryPanel(props, emit) {
     () => ({
       notes: sidebarStore.currentNotes,
       isTrash: sidebarStore.activeModule === 'trash',
-      dek: dek.value,
-      vaultDek: vaultStore.dek
+      unlocked: vaultStore.isUnlocked
     }),
-    ({ notes, isTrash, dek: dekValue, vaultDek }) => {
-      if (!isTrash) {
-        console.log('[SecondaryPanel] Watch triggered but not in trash, activeModule:', sidebarStore.activeModule)
-        return  // 只在回收站中处理
-      }
+    async ({ notes, isTrash, unlocked }) => {
+      if (!isTrash) return
 
-      console.log('[SecondaryPanel] Watch triggered in trash, notes count:', notes.length, 'DEK available:', !!(dekValue || vaultDek), 'isKeyValid:', isKeyValid.value)
+      for (const note of notes) {
+        if (note.decryptedTitle) continue
+        if (!note.is_secret || !note.title) continue
 
-      // 对回收站中的保密笔记进行标题解密
-      notes.forEach(note => {
-        console.log('[SecondaryPanel] Processing note:', note.id, 'is_secret:', note.is_secret, 'decryptedTitle:', !!note.decryptedTitle)
-
-        // 跳过已经解密过的笔记
-        if (note.decryptedTitle) {
-          return
-        }
-
-        if (note.is_secret && note.title) {
-          // 尝试使用 dek.value 或 vaultStore.dek 解密
-          const dekToUse = dekValue || vaultDek
-
-          if (dekToUse) {
-            try {
-              const plainTitle = decryptContent(note.title, dekToUse)
-              note.decryptedTitle = plainTitle  // 保存解密后的标题
-              console.log('[SecondaryPanel] ✅ Title decrypted for trash note:', note.id, plainTitle.substring(0, 20))
-            } catch (e) {
-              console.warn('[SecondaryPanel] ❌ Failed to decrypt trash note title:', note.id, e.message)
-              // 解密失败，不设置 decryptedTitle，前端会显示模糊展示
-            }
-          } else {
-            console.log('[SecondaryPanel] ⚠️ No DEK available for trash note:', note.id, '- will show masked title')
-            // 没有 DEK，NoteListItem 会显示模糊展示
+        if (unlocked) {
+          try {
+            const plainTitle = await decryptContent(note.title)
+            note.decryptedTitle = plainTitle
+          } catch (e) {
+            console.warn('[SecondaryPanel] ❌ Failed to decrypt trash note title:', note.id, e.message)
           }
         }
-      })
+      }
     },
     { deep: true, immediate: true }
   )
@@ -315,7 +283,7 @@ export function useSecondaryPanel(props, emit) {
       sidebarStore.enterTrashedFolder(item.id)
     } else {
       // 【关键修复】如果是加密笔记且未解锁，先触发解锁流程
-      if (item.is_secret && !isKeyValid.value && !vaultStore.dek) {
+      if (item.is_secret && !vaultStore.isUnlocked) {
         console.log('[SecondaryPanel] Encrypted note in trash clicked without DEK, triggering unlock')
         window.dispatchEvent(new CustomEvent('request-vault-unlock', {
           detail: { fromTrash: true, noteId: item.id }
@@ -650,16 +618,16 @@ export function useSecondaryPanel(props, emit) {
   // ==================== 保密柜相关 ====================
   /**
    * 加密笔记内容并保存
+   * 使用 vaultStore.encrypt（内部走 Web Crypto + 非导出 CryptoKey），调用前需确保 vault 已解锁
    * @param {Object} note - 笔记对象
-   * @param {string} dekValue - DEK（数据加密密钥，Base64编码）
    */
-  async function performEncryption(note, dekValue) {
+  async function performEncryption(note) {
     if (!note || !note.id) {
       throw new Error('笔记对象无效')
     }
 
-    if (!dekValue || typeof dekValue !== 'string' || dekValue.trim() === '') {
-      throw new Error('DEK 不可用或格式无效: ' + (dekValue ? '格式错误' : '为空'))
+    if (!vaultStore.isUnlocked) {
+      throw new Error('保密柜未解锁，无法加密')
     }
 
     try {
@@ -667,9 +635,7 @@ export function useSecondaryPanel(props, emit) {
       console.log(`[Vault] Loading latest note data for ID: ${note.id}`)
       const fetchResp = await fetch(`/api/notes/${note.id}/`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
       })
 
       if (!fetchResp.ok) {
@@ -680,7 +646,6 @@ export function useSecondaryPanel(props, emit) {
       let plainTitle = noteData.title || ''
       let plainContent = noteData.content || ''
 
-      // 验证内容
       if (!plainContent || plainContent.trim() === '') {
         throw new Error('笔记内容为空，无法加密')
       }
@@ -692,22 +657,15 @@ export function useSecondaryPanel(props, emit) {
       console.log('[Vault] performEncryption: Ready to encrypt', {
         noteId: note.id,
         plainTitleLength: plainTitle.length,
-        plainContentLength: plainContent.length,
-        dekLength: dekValue.length
+        plainContentLength: plainContent.length
       })
 
-      // 【关键】同时加密 title 和 content
-      const encryptedTitle = encryptContent(plainTitle, dekValue)
-      const encryptedContent = encryptContent(plainContent, dekValue)
+      // 【关键】同时加密 title 和 content（异步）
+      const encryptedTitle = await encryptContent(plainTitle)
+      const encryptedContent = await encryptContent(plainContent)
 
       const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
-      console.log('[Vault] performEncryption: Saving encrypted data...', {
-        encryptedTitleLength: encryptedTitle.length,
-        encryptedContentLength: encryptedContent.length
-      })
-
-      // 【关键】保存加密后的 title 和 content 到数据库
       const updateResponse = await fetch(`/api/notes/${note.id}/`, {
         method: 'PATCH',
         headers: {
@@ -725,14 +683,7 @@ export function useSecondaryPanel(props, emit) {
         throw new Error('保存加密内容失败: ' + (errorData.message || '后端错误'))
       }
 
-      const updateResult = await updateResponse.json()
-      console.log('[Vault] performEncryption: Encrypted data saved successfully', {
-        plainTitleLength: plainTitle.length,
-        encryptedTitleLength: encryptedTitle.length,
-        plainContentLength: plainContent.length,
-        encryptedContentLength: encryptedContent.length,
-        serverResponse: updateResult
-      })
+      console.log('[Vault] performEncryption: Encrypted data saved successfully')
     } catch (e) {
       console.error('[Vault] performEncryption error:', e)
       throw e
@@ -740,58 +691,27 @@ export function useSecondaryPanel(props, emit) {
   }
 
   /**
-   * 获取可用的 DEK
-   * 优先从 vaultStore 获取，然后从 useVaultEncryption 获取
+   * 等待保密柜解锁（用于 Branch B：用户先触发加密，再弹 2FA）
+   * @returns {Promise<boolean>} 是否在超时前解锁成功
    */
-  function getAvailableDEK() {
-    // 优先使用 vaultStore 中的 DEK（因为验证成功后会更新这里）
-    if (vaultStore.dek && vaultStore.keyExpireTime && vaultStore.keyExpireTime > Date.now()) {
-      console.log('[Vault] Using DEK from vaultStore')
-      return vaultStore.dek
-    }
-
-    // 其次使用 composable 中的 DEK
-    if (dek.value && isKeyValid.value) {
-      console.log('[Vault] Using DEK from useVaultEncryption')
-      return dek.value
-    }
-
-    return null
-  }
-
-  /**
-   * 等待 DEK 被更新
-   * 验证成功后，DEK 会被更新，这个函数会等待其更新
-   * @returns {Promise<string>} DEK 值或 null
-   */
-  async function waitForDEK(timeout = 5000) {
+  async function waitForUnlock(timeout = 5000) {
     return new Promise((resolve) => {
-      // 检查 vaultStore 中的 DEK（优先）
-      if (vaultStore.dek && vaultStore.keyExpireTime && vaultStore.keyExpireTime > Date.now()) {
-        resolve(vaultStore.dek)
+      if (vaultStore.isUnlocked) {
+        resolve(true)
         return
       }
 
-      // 检查 useVaultEncryption 中的 DEK
-      if (dek.value && isKeyValid.value) {
-        resolve(dek.value)
-        return
-      }
-
-      // 定期检查，直到 DEK 被更新
-      const checkInterval = setInterval(() => {
-        const availableDEK = getAvailableDEK()
-        if (availableDEK) {
-          clearInterval(checkInterval)
+      const unsubscribe = vaultStore.onLockStateChange((state) => {
+        if (state === 'unlock') {
           clearTimeout(timeoutHandle)
-          resolve(availableDEK)
+          unsubscribe()
+          resolve(true)
         }
-      }, 100)
+      })
 
-      // 超时保护
       const timeoutHandle = setTimeout(() => {
-        clearInterval(checkInterval)
-        resolve(null) // 超时，返回 null
+        unsubscribe()
+        resolve(false)
       }, timeout)
     })
   }
@@ -838,38 +758,29 @@ export function useSecondaryPanel(props, emit) {
    * 包含两个分支的智能逻辑
    */
   async function executeEncryptAndSave(note) {
-    const availableDEK = getAvailableDEK()
-
-    if (availableDEK) {
+    if (vaultStore.isUnlocked) {
       // ========== 分支 A: Smart Pass（已解锁）==========
-      // DEK 已有效，直接加密，无需弹窗
-      console.log('[Vault] Branch A: Smart Pass - Using existing key')
+      console.log('[Vault] Branch A: Smart Pass - Vault already unlocked')
       try {
-        await performEncryption(note, availableDEK)
+        await performEncryption(note)
         ElMessage.success('加入保密柜成功！内容已加密')
-        // 刷新数据显示
         await refreshVaultData(note)
       } catch (e) {
         console.error('[Vault] Smart Pass encryption failed:', e)
         ElMessage.error('加密失败: ' + e.message)
-        // 撤销 is_secret 标志
         await revertSecretFlag(note)
       }
     } else {
       // ========== 分支 B: Require Auth（未解锁）==========
-      // 没有有效 DEK，需要弹窗验证
       console.log('[Vault] Branch B: Require Auth - Need 2FA verification')
 
       // 撤销 is_secret 标志，因为加密还未完成
       await revertSecretFlag(note)
 
-      // 定义待处理的加密操作
+      // 定义待处理的加密操作（验证成功后执行）
       const encryptOperation = async () => {
-        // 等待 vaultStore 或 useVaultEncryption 中的 DEK 被更新
-        // （验证成功后会触发 'vault-verification-success' 事件）
-        const dekForEncryption = await waitForDEK()
-
-        if (!dekForEncryption) {
+        const unlocked = await waitForUnlock()
+        if (!unlocked) {
           throw new Error('未能获取有效的加密密钥')
         }
 
@@ -886,45 +797,26 @@ export function useSecondaryPanel(props, emit) {
           throw new Error('重新标记为保密笔记失败')
         }
 
-        // 执行加密
-        await performEncryption(note, dekForEncryption)
+        await performEncryption(note)
       }
 
-      // 保存待处理操作到 vaultStore
       vaultStore.setPendingOperation(note.id, note.content, encryptOperation)
 
       // 弹出 2FA 验证对话框
       sidebarStore.vaultVerifyDialogVisible = true
 
-      // 监听验证成功事件
-      const handleVerifySuccess = async (event) => {
+      // 监听验证成功事件：此时 vault 已被 dialog 内部解锁，直接执行 pending operation
+      const handleVerifySuccess = async () => {
         try {
-          // 【关键修复】从事件中提取 DEK 和 expireTime
-          const { dek: dekFromEvent, expireTime } = event.detail || {}
-
-          if (dekFromEvent && expireTime) {
-            console.log('[Vault] Received DEK from verification event, saving to store...', {
-              dekLength: dekFromEvent.length,
-              expireTime
-            })
-            // 保存 DEK 到 vaultStore（这样后续的解密和加密都能使用）
-            vaultStore.setDEK(dekFromEvent, expireTime)
-          } else {
-            console.warn('[Vault] Event missing DEK or expireTime:', { dek: !!dekFromEvent, expireTime })
-          }
-
           await vaultStore.executePendingOperation()
           ElMessage.success('加入保密柜成功！内容已加密')
-          // 刷新数据
           await refreshVaultData(note)
         } catch (e) {
           console.error('[Vault] Failed to execute pending operation:', e)
           ElMessage.error('加密失败: ' + e.message)
           vaultStore.clearPendingOperation()
-          // 尝试撤销 is_secret 标志
           await revertSecretFlag(note)
         }
-        // 移除监听
         window.removeEventListener('vault-verification-success', handleVerifySuccess)
       }
 
@@ -988,15 +880,13 @@ export function useSecondaryPanel(props, emit) {
         if (wasSecret) {
           console.log('[Vault] Moving note out of vault, will decrypt and save plaintext...')
 
-          // 确保 DEK 可用
-          let dekToUse = dek.value
-          if (!dekToUse || !isKeyValid.value) {
-            console.log('[Vault] DEK not available, attempting to recover...')
-            const recovered = await tryRecoverKeyFromSession()
-            dekToUse = dek.value
+          // 确保 vault 已解锁
+          if (!vaultStore.isUnlocked) {
+            console.log('[Vault] Vault locked, attempting to recover...')
+            await tryRecoverKeyFromSession()
 
-            if (!dekToUse || !isKeyValid.value) {
-              console.error('[Vault] Cannot get DEK for decryption')
+            if (!vaultStore.isUnlocked) {
+              console.error('[Vault] Cannot get key for decryption')
               ElMessage.error('无法获取解密密钥，请先进行 2FA 验证')
               // 恢复 is_secret 标记
               await fetch(`/api/notes/${note.id}/toggle-secret/`, {
@@ -1013,33 +903,28 @@ export function useSecondaryPanel(props, emit) {
 
           console.log('[Vault] Attempting to decrypt...', {
             titleLength: decryptedTitle.length,
-            contentLength: decryptedContent.length,
-            dekLength: dekToUse.length
+            contentLength: decryptedContent.length
           })
 
           try {
-            // 尝试解密 title
             if (decryptedTitle) {
               try {
-                const result = await decryptContent(decryptedTitle, dekToUse)
+                const result = await decryptContent(decryptedTitle)
                 console.log('[Vault] Title decrypted successfully, length:', result.length)
                 decryptedTitle = result
               } catch (e) {
                 console.warn('[Vault] Title decryption failed, treating as plaintext:', e.message)
-                // title 可能本身就是明文（加入保密柜时没有加密成功）
                 decryptedTitle = currentNote.title || ''
               }
             }
 
-            // 尝试解密 content
             if (decryptedContent) {
               try {
-                const result = await decryptContent(decryptedContent, dekToUse)
+                const result = await decryptContent(decryptedContent)
                 console.log('[Vault] Content decrypted successfully, length:', result.length)
                 decryptedContent = result
               } catch (e) {
                 console.warn('[Vault] Content decryption failed, treating as plaintext:', e.message)
-                // content 可能本身就是明文（加入保密柜时没有加密成功）
                 decryptedContent = currentNote.content || ''
               }
             }

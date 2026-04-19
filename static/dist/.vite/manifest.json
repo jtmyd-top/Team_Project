@@ -3,8 +3,8 @@
     "file": "chunks/_plugin-vue_export-helper-DlAUqK2U.js",
     "name": "_plugin-vue_export-helper"
   },
-  "_apiService-FcoK2h5u.js": {
-    "file": "chunks/apiService-FcoK2h5u.js",
+  "_apiService-DkAlA41s.js": {
+    "file": "chunks/apiService-DkAlA41s.js",
     "name": "apiService"
   },
   "_echarts-vendor-CCzsHhNE.js": {
@@ -18,44 +18,51 @@
     "file": "assets/element.css",
     "src": "_element-plus-!~{003}~.js"
   },
-  "_element-plus-DLjSzb6o.js": {
-    "file": "chunks/element-plus-DLjSzb6o.js",
+  "_element-plus-3zH3XlIy.js": {
+    "file": "chunks/element-plus-3zH3XlIy.js",
     "name": "element-plus",
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
+      "_vue-vendor-BycGvb3a.js",
       "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/element.css"
     ]
   },
-  "_index-!~{006}~.js": {
+  "_index-!~{007}~.js": {
     "file": "assets/index.css",
-    "src": "_index-!~{006}~.js"
+    "src": "_index-!~{007}~.js"
   },
-  "_index-YegUEGnG.js": {
-    "file": "chunks/index-YegUEGnG.js",
+  "_index-CgMDa5Ej.js": {
+    "file": "chunks/index-CgMDa5Ej.js",
     "name": "index",
     "imports": [
-      "_vue-vendor-MyggWDWC.js"
+      "_vue-vendor-BycGvb3a.js"
     ],
     "css": [
       "assets/index.css"
     ]
   },
-  "_usePasswordStrength-CaVHztiB.js": {
-    "file": "chunks/usePasswordStrength-CaVHztiB.js",
+  "_usePasswordStrength-CtF29Ab7.js": {
+    "file": "chunks/usePasswordStrength-CtF29Ab7.js",
     "name": "usePasswordStrength",
     "imports": [
-      "_vue-vendor-MyggWDWC.js"
+      "_vue-vendor-BycGvb3a.js"
+    ]
+  },
+  "_user-CYVfXQjS.js": {
+    "file": "chunks/user-CYVfXQjS.js",
+    "name": "user",
+    "imports": [
+      "_vue-vendor-BycGvb3a.js"
     ]
   },
   "_vendor-wzGsUuS6.js": {
     "file": "chunks/vendor-wzGsUuS6.js",
     "name": "vendor"
   },
-  "_vue-vendor-MyggWDWC.js": {
-    "file": "chunks/vue-vendor-MyggWDWC.js",
+  "_vue-vendor-BycGvb3a.js": {
+    "file": "chunks/vue-vendor-BycGvb3a.js",
     "name": "vue-vendor"
   },
   "src/entries/dashboard.js": {
@@ -64,8 +71,8 @@
     "src": "src/entries/dashboard.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
       "_echarts-vendor-CCzsHhNE.js",
       "_vendor-wzGsUuS6.js",
       "__plugin-vue_export-helper-DlAUqK2U.js"
@@ -80,9 +87,9 @@
     "src": "src/entries/forgot-password.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
-      "_index-YegUEGnG.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
+      "_index-CgMDa5Ej.js",
       "_vendor-wzGsUuS6.js"
     ],
     "css": [
@@ -95,8 +102,8 @@
     "src": "src/entries/home.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "_vendor-wzGsUuS6.js"
     ],
@@ -110,11 +117,11 @@
     "src": "src/entries/knowledge-list.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
       "_vendor-wzGsUuS6.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
-      "_index-YegUEGnG.js"
+      "_index-CgMDa5Ej.js"
     ],
     "css": [
       "assets/knowledge.css"
@@ -126,14 +133,30 @@
     "src": "src/entries/login.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
-      "_apiService-FcoK2h5u.js",
-      "_index-YegUEGnG.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
+      "_apiService-DkAlA41s.js",
+      "_index-CgMDa5Ej.js",
       "_vendor-wzGsUuS6.js"
     ],
     "css": [
       "assets/login.css"
+    ]
+  },
+  "src/entries/messages.js": {
+    "file": "messages.js",
+    "name": "messages",
+    "src": "src/entries/messages.js",
+    "isEntry": true,
+    "imports": [
+      "_vue-vendor-BycGvb3a.js",
+      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_user-CYVfXQjS.js",
+      "_element-plus-3zH3XlIy.js",
+      "_vendor-wzGsUuS6.js"
+    ],
+    "css": [
+      "assets/messages.css"
     ]
   },
   "src/entries/public-note-entry.js": {
@@ -160,9 +183,9 @@
     "src": "src/entries/reset-password.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
-      "_usePasswordStrength-CaVHztiB.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
+      "_usePasswordStrength-CtF29Ab7.js",
       "_vendor-wzGsUuS6.js"
     ],
     "css": [
@@ -175,10 +198,11 @@
     "src": "src/entries/settings.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_apiService-FcoK2h5u.js",
-      "_index-YegUEGnG.js",
-      "_element-plus-DLjSzb6o.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_apiService-DkAlA41s.js",
+      "_user-CYVfXQjS.js",
+      "_index-CgMDa5Ej.js",
+      "_element-plus-3zH3XlIy.js",
       "_vendor-wzGsUuS6.js"
     ],
     "css": [
@@ -191,11 +215,11 @@
     "src": "src/entries/signup.js",
     "isEntry": true,
     "imports": [
-      "_vue-vendor-MyggWDWC.js",
-      "_element-plus-DLjSzb6o.js",
-      "_apiService-FcoK2h5u.js",
-      "_index-YegUEGnG.js",
-      "_usePasswordStrength-CaVHztiB.js",
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
+      "_apiService-DkAlA41s.js",
+      "_index-CgMDa5Ej.js",
+      "_usePasswordStrength-CtF29Ab7.js",
       "_vendor-wzGsUuS6.js"
     ],
     "css": [

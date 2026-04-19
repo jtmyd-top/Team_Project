@@ -71,7 +71,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
 import { ElTag, ElIcon } from 'element-plus'
 import { useNoteEditor } from '@composables/useNoteEditor'
@@ -109,7 +109,6 @@ const {
   displayTitle,
   displayContent,
   isKeyValid,
-  dek,
   tryRecoverKeyFromSession,
   decryptedTitle,
   decryptedContent,
@@ -129,22 +128,20 @@ onMounted(async () => {
 
   try {
     if (props.isSecret) {
-      console.log('[Vault] NoteEditor: Secret note detected, checking DEK...', {
-        isKeyValid: isKeyValid.value,
-        hasDek: !!dek.value
+      console.log('[Vault] NoteEditor: Secret note detected, checking vault...', {
+        isKeyValid: isKeyValid.value
       })
 
-      if (!isKeyValid.value || !dek.value) {
-        console.log('[Vault] NoteEditor: DEK not available, attempting to recover from session')
+      if (!isKeyValid.value) {
+        console.log('[Vault] NoteEditor: Vault locked, attempting to recover from session')
         const recovered = await tryRecoverKeyFromSession()
         console.log('[Vault] NoteEditor: Recovery attempt completed', {
           recovered,
-          isKeyValidAfter: isKeyValid.value,
-          hasDekAfter: !!dek.value
+          isKeyValidAfter: isKeyValid.value
         })
       }
 
-      if (isKeyValid.value && dek.value && props.modelValue.content) {
+      if (isKeyValid.value && props.modelValue.content) {
         console.log('[Vault] NoteEditor: Starting decryption...')
         await decryptNoteContent()
         console.log('[Vault] NoteEditor: Decryption completed', {
@@ -152,9 +149,8 @@ onMounted(async () => {
           decryptedContentLength: decryptedContent.value.length
         })
       } else {
-        console.warn('[Vault] NoteEditor: Cannot decrypt - missing DEK or content', {
+        console.warn('[Vault] NoteEditor: Cannot decrypt - vault locked or no content', {
           isKeyValid: isKeyValid.value,
-          hasDek: !!dek.value,
           hasContent: !!props.modelValue.content
         })
       }
@@ -166,7 +162,9 @@ onMounted(async () => {
   const checkTinyMCE = () => {
     if (window.tinymce) {
       isInitializing.value = false
-      initEditor()
+      // 等一帧让 <textarea v-if> 渲染出来，否则 editorElRef.value 还是 null，
+      // initEditor 内部会因 !editorElRef.value 静默 return，编辑器不挂载
+      nextTick(() => initEditor())
     } else {
       setTimeout(checkTinyMCE, 100)
     }

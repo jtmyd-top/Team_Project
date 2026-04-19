@@ -1,8 +1,8 @@
 import { ref, watch, onMounted, nextTick, computed } from 'vue'
 import DOMPurify from 'dompurify'
 import { useCodeEnhancer } from './useCodeEnhancer'
-import { useVaultEncryption } from './useVaultEncryption'
 import { useClientCrypto } from './useClientCrypto'
+import { useVaultStore } from '@/stores/vault'
 
 /**
  * NoteViewer 组件的业务逻辑
@@ -16,7 +16,8 @@ export function useNoteViewer(props) {
   const decryptedContent = ref('')
 
   // 使用加密组合式
-  const { isKeyValid, dek } = useVaultEncryption()
+  const vaultStore = useVaultStore()
+  const isKeyValid = computed(() => vaultStore.isUnlocked)
   const { decryptContent: decryptClientContent } = useClientCrypto()
 
   // 使用代码块增强功能
@@ -132,28 +133,37 @@ export function useNoteViewer(props) {
   /**
    * 解密加密笔记的内容
    */
+  let latestDecryptRequestId = 0
   async function decryptContent() {
     if (!props.isSecret || !props.content || !props.noteId) {
       return
     }
 
-    if (!isKeyValid.value || !dek.value) {
+    if (!vaultStore.isUnlocked) {
       decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
       return
     }
+
+    const requestId = ++latestDecryptRequestId
+    const capturedNoteId = props.noteId
+    const capturedContent = props.content
 
     isDecrypting.value = true
     decryptError.value = ''
 
     try {
-      const plaintext = await decryptClientContent(props.content, dek.value)
+      const plaintext = await decryptClientContent(capturedContent)
+      if (requestId !== latestDecryptRequestId || capturedNoteId !== props.noteId) return
       decryptedContent.value = plaintext
       renderContent(plaintext)
     } catch (e) {
+      if (requestId !== latestDecryptRequestId || capturedNoteId !== props.noteId) return
       decryptError.value = '解密失败: ' + e.message
       decryptedContent.value = ''
     } finally {
-      isDecrypting.value = false
+      if (requestId === latestDecryptRequestId) {
+        isDecrypting.value = false
+      }
     }
   }
 
@@ -177,6 +187,9 @@ export function useNoteViewer(props) {
   watch(() => isKeyValid.value, (valid) => {
     if (valid && props.isSecret && props.content && !decryptedContent.value) {
       decryptContent()
+    } else if (!valid && props.isSecret) {
+      // 锁定时立即清明文
+      decryptedContent.value = ''
     }
   })
 

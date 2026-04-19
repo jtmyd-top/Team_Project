@@ -1,63 +1,66 @@
 import { ref, watch, onMounted } from 'vue'
-import { useVaultEncryption } from '@/composables/useVaultEncryption'
+import { useVaultStore } from '@/stores/vault'
 
 export function useEncryptedNoteContent(props) {
-  const { isKeyValid, decryptNoteFromBackend } = useVaultEncryption()
+  const vaultStore = useVaultStore()
 
   const decryptedContent = ref('')
   const isDecrypting = ref(false)
   const decryptError = ref('')
   const showVerifyPrompt = ref(false)
 
-  // 监听加密状态变化
+  // 监听 vault 解锁状态
   watch(
-    () => isKeyValid.value,
-    async (valid) => {
-      if (valid && props.isSecret && props.encryptedContent) {
+    () => vaultStore.isUnlocked,
+    async (unlocked) => {
+      if (unlocked && props.isSecret && props.encryptedContent) {
         await decryptContent()
-      } else if (!valid && props.isSecret) {
+      } else if (!unlocked && props.isSecret) {
         showVerifyPrompt.value = true
+        decryptedContent.value = ''
       }
     }
   )
 
-  // 挂载时检查
   onMounted(async () => {
     if (!props.isSecret) {
-      // 非加密笔记，直接显示
       decryptedContent.value = props.encryptedContent
       return
     }
 
-    if (isKeyValid.value) {
-      // 已有有效密钥，解密
+    if (vaultStore.isUnlocked) {
       await decryptContent()
     } else {
-      // 无效密钥，提示验证
       showVerifyPrompt.value = true
     }
   })
 
+  let latestRequestId = 0
   async function decryptContent() {
     if (!props.encryptedContent) return
+    if (!vaultStore.isUnlocked) {
+      showVerifyPrompt.value = true
+      return
+    }
 
+    const requestId = ++latestRequestId
     isDecrypting.value = true
     decryptError.value = ''
 
     try {
-      const result = await decryptNoteFromBackend(
-        props.encryptedContent,
-        props.noteId
-      )
-
+      const result = await vaultStore.decrypt(props.encryptedContent)
+      if (requestId !== latestRequestId) return
       decryptedContent.value = result
       showVerifyPrompt.value = false
     } catch (e) {
+      if (requestId !== latestRequestId) return
       console.error('Decryption error:', e)
       decryptError.value = e.message || '解密失败，请重试'
       showVerifyPrompt.value = true
     } finally {
-      isDecrypting.value = false
+      if (requestId === latestRequestId) {
+        isDecrypting.value = false
+      }
     }
   }
 

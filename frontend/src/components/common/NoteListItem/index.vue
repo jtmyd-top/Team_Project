@@ -99,8 +99,8 @@
         <button
           class="action-btn restore-btn"
           @click="handleRestore"
-          :disabled="note.is_secret && !isKeyValid && !vaultStore.dek"
-          :title="note.is_secret && !isKeyValid && !vaultStore.dek ? '需要先解锁保密柜' : '恢复'"
+          :disabled="note.is_secret && !vaultStore.isUnlocked"
+          :title="note.is_secret && !vaultStore.isUnlocked ? '需要先解锁保密柜' : '恢复'"
         >
           <i class="fas fa-undo"></i>
         </button>
@@ -109,8 +109,8 @@
         <button
           class="action-btn delete-btn"
           @click="handleDelete"
-          :disabled="note.is_secret && !isKeyValid && !vaultStore.dek"
-          :title="note.is_secret && !isKeyValid && !vaultStore.dek ? '需要先解锁保密柜' : '永久删除'"
+          :disabled="note.is_secret && !vaultStore.isUnlocked"
+          :title="note.is_secret && !vaultStore.isUnlocked ? '需要先解锁保密柜' : '永久删除'"
         >
           <i class="fas fa-trash-alt"></i>
         </button>
@@ -120,7 +120,6 @@
 </template>
 
 <script setup>
-import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useVaultStore } from '@/stores/vault'
 import { useNoteListItem } from '@/composables/useNoteListItem'
 
@@ -149,7 +148,6 @@ const props = defineProps({
 
 const emit = defineEmits(['click', 'favorite', 'trash', 'restore', 'delete', 'contextmenu', 'rename'])
 
-const { isKeyValid } = useVaultEncryption()
 const vaultStore = useVaultStore()
 
 const {

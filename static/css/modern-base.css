@@ -222,6 +222,9 @@ body {
   transition: var(--transition-colors);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  width: 100%;
 }
 
 /* 现代化布局容器 */
@@ -235,18 +238,18 @@ body {
 /* 现代化导航栏 */
 header {
   flex-shrink: 0;
-  background-color: var(--bg-primary);
-  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   box-shadow: var(--shadow-xs);
   transition: var(--transition-colors);
   width: 100%;
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
   z-index: 1000;
   overflow: visible;
 }
@@ -328,7 +331,6 @@ main {
   width: 100%;
   margin: 0;
   padding: 0;
-  padding-top: 0;
   background-color: var(--bg-primary);
   position: relative;
   z-index: 1;
@@ -503,22 +505,6 @@ body.compact-mode {
   --spacing-8: 28px;
 }
 
-/* 确保用户菜单不被其他元素遮挡 */
-body {
-  overflow-x: hidden;
-  overflow-y: auto; /* 确保垂直滚动正常 */
-  margin: 0; /* 移除外边距，让页面占满全屏 */
-  padding: 0; /* 移除内边距 */
-  width: 100%; /* 宽度占满 */
-  min-height: 100vh; /* 最小高度为视窗高度 */
-  padding: 0;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column; /* 垂直布局 */
-  width: calc(100% - 20px); /* 减去左右边距 */
-  min-height: calc(100vh - 20px); /* 减去上下边距 */
-}
-
 html {
   overflow-x: hidden;
   position: relative; /* 确保相对定位 */
@@ -647,6 +633,19 @@ main {
   color: var(--text-primary) !important;
 }
 
+/* 深色主题下导航栏毛玻璃效果 */
+[data-theme="dark"] header {
+  background: rgba(15, 23, 42, 0.75) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] header {
+    background: rgba(15, 23, 42, 0.75) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  }
+}
+
 /* 全局修复：确保下拉菜单相关容器不会裁剪菜单 */
 /* 注意：不要对所有 div 设置 overflow: visible，否则会破坏滚动功能 */
 header, nav, .user-menu, .nav-right {
@@ -654,10 +653,6 @@ header, nav, .user-menu, .nav-right {
 }
 
 /* 但是保留body的横向滚动限制 */
-body {
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-}
 
 /* 确保下拉菜单能够突破任何边界限制 */
 #userDropdown {

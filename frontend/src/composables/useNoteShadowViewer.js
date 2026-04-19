@@ -6,7 +6,6 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import DOMPurify from 'dompurify'
 import { useCodeEnhancer } from '@composables/useCodeEnhancer'
-import { useVaultEncryption } from '@composables/useVaultEncryption'
 import { useClientCrypto } from '@composables/useClientCrypto'
 import { useVaultStore } from '@/stores/vault'
 import { getShadowStyles, purifyConfig, TOC_THRESHOLD } from '@/components/knowledge/NoteShadowViewer/config.js'
@@ -18,7 +17,6 @@ export function useNoteShadowViewer(props) {
 
   // ==================== Composables ====================
   const { enhance: enhanceCodeBlocks } = useCodeEnhancer()
-  const { isKeyValid, dek } = useVaultEncryption()
   const { decryptContent, looksLikeEncrypted } = useClientCrypto()
   const vaultStore = useVaultStore()
 
@@ -38,19 +36,15 @@ export function useNoteShadowViewer(props) {
   let scrollParent = null
 
   // ==================== 计算属性 ====================
-  const hasAnyValidDek = computed(() => !!(dek.value || vaultStore.dek))
-
-  // 检查是否有有效的密钥（本地或 store 中）
-  const hasValidKey = computed(() => {
-    return isKeyValid.value || !!(vaultStore.dek && vaultStore.keyExpireTime && vaultStore.keyExpireTime > Date.now())
-  })
+  // 是否有有效的密钥（统一走 vaultStore.isUnlocked）
+  const hasValidKey = computed(() => vaultStore.isUnlocked)
 
   const displayContent = computed(() => {
     if (!props.isSecret) {
       return props.content
     }
 
-    if (!hasAnyValidDek.value) {
+    if (!hasValidKey.value) {
       return ''
     }
 
@@ -70,6 +64,7 @@ export function useNoteShadowViewer(props) {
   })
 
   // ==================== 解密逻辑 ====================
+  let latestDecryptRequestId = 0
   async function decryptNoteContent() {
     if (!props.isSecret || !props.content) {
       return
@@ -79,9 +74,7 @@ export function useNoteShadowViewer(props) {
       isSecret: props.isSecret,
       isTrashed: props.isTrashed,
       contentLength: props.content?.length || 0,
-      hasKeyValid: !!isKeyValid.value,
-      hasDek: !!dek.value,
-      hasVaultDek: !!vaultStore.dek
+      isUnlocked: vaultStore.isUnlocked
     })
 
     if (!looksLikeEncrypted(props.content)) {
@@ -90,27 +83,33 @@ export function useNoteShadowViewer(props) {
       return
     }
 
+    if (!vaultStore.isUnlocked) {
+      console.error('[Vault] Vault is locked, cannot decrypt')
+      decryptError.value = '缺少加密密钥，请重新验证'
+      return
+    }
+
+    const requestId = ++latestDecryptRequestId
+    const capturedNoteId = props.noteId
+    const capturedContent = props.content
+
     isDecrypting.value = true
     decryptError.value = ''
 
     try {
-      const dekToUse = dek.value || vaultStore.dek
-
-      if (!dekToUse) {
-        console.error('[Vault] No DEK available for decryption')
-        decryptError.value = '缺少加密密钥，请重新验证'
-        return
-      }
-
-      const plaintext = decryptContent(props.content, dekToUse)
+      const plaintext = await decryptContent(capturedContent)
+      // 竞态保护：如果期间切换了笔记或内容，丢弃本次结果
+      if (requestId !== latestDecryptRequestId || capturedNoteId !== props.noteId) return
       decryptedContent.value = plaintext
-
       console.log('[Vault] Content decrypted successfully')
     } catch (e) {
+      if (requestId !== latestDecryptRequestId || capturedNoteId !== props.noteId) return
       console.error('[Vault] 前端解密失败:', e)
       decryptError.value = '解密失败：' + e.message
     } finally {
-      isDecrypting.value = false
+      if (requestId === latestDecryptRequestId) {
+        isDecrypting.value = false
+      }
     }
   }
 
@@ -119,7 +118,7 @@ export function useNoteShadowViewer(props) {
     if (!shadowRoot.value) return
 
     const rawHtml = displayContent.value || ''
-    const hasValidDek = !!(dek.value || vaultStore.dek)
+    const hasValidDek = vaultStore.isUnlocked
     const needsVerification = props.isSecret && !hasValidDek
     const shouldUpdate = rawHtml !== cachedRawHtml || needsVerification || forceStyleUpdate
 

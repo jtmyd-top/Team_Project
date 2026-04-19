@@ -70,7 +70,9 @@ async function getRequest(url, params = {}) {
 
   const response = await fetch(fullUrl, {
     method: "GET",
-    headers: csrfHeader,
+    headers: {
+      "X-CSRFToken": getCsrfToken()
+    },
   });
 
   // 先读取文本，避免 body stream already read 错误
@@ -306,10 +308,12 @@ const apiService = {
     },
 
     /**
-     * 验证保密柜2FA
+     * 验证保密柜2FA（方案 C：需携带客户端 ECDH 临时公钥）
      */
-    verify(code, useBackup = false) {
-      return postRequest('/api/vault/verify/', { code, use_backup: useBackup });
+    verify(code, useBackup = false, clientPubB64 = null) {
+      const body = { code, use_backup: useBackup };
+      if (clientPubB64) body.client_pub = clientPubB64;
+      return postRequest('/api/vault/verify/', body);
     },
 
     /**

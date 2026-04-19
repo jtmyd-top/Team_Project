@@ -2,13 +2,15 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
+import { useVaultStore } from '@/stores/vault'
 import { ElMessage } from 'element-plus'
 
 export function useDragDropOverlay() {
   const sidebarStore = useSidebarStore()
+  const vaultStore = useVaultStore()
 
   // 加密相关
-  const { isKeyValid, dek, tryRecoverKeyFromSession, getCsrfToken } = useVaultEncryption()
+  const { isKeyValid, tryRecoverKeyFromSession, getCsrfToken } = useVaultEncryption()
   const { decryptContent, looksLikeEncrypted } = useClientCrypto()
 
   // 状态
@@ -112,7 +114,7 @@ export function useDragDropOverlay() {
 
         try {
           if (noteData.title && looksLikeEncrypted(noteData.title)) {
-            decryptedTitle = decryptContent(noteData.title, dek.value)
+            decryptedTitle = await decryptContent(noteData.title)
             console.log('[Vault] Title decrypted for move')
           }
         } catch (e) {
@@ -121,7 +123,7 @@ export function useDragDropOverlay() {
 
         try {
           if (noteData.content && looksLikeEncrypted(noteData.content)) {
-            decryptedContent = decryptContent(noteData.content, dek.value)
+            decryptedContent = await decryptContent(noteData.content)
             console.log('[Vault] Content decrypted for move')
           }
         } catch (e) {

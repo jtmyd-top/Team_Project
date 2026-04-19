@@ -151,11 +151,21 @@ export function getShadowStyles(isDark) {
     position: relative;
     max-width: 100%;
     box-sizing: border-box;
+    display: block;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: normal;
   }
 
   .note-content pre code {
     background: transparent;
     padding: 0;
+    border-radius: 0;
+    font-size: 0.875em;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: normal;
   }
 
   /* 代码块增强样式（来自 composable） */

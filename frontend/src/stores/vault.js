@@ -1,34 +1,42 @@
 /**
  * Vault Store - 保险柜状态管理
  *
- * 功能：
- * - 管理 DEK 缓存状态
- * - 管理待处理操作（加入保密柜需要验证时）
- * - 处理验证后的自动重试逻辑
+ * 职责：
+ * - 封装 vaultKey 闭包模块的调用（DEK 不再存于 Pinia 响应式状态）
+ * - 管理待处理操作、2FA 对话框可见性、vault 初始化状态
+ * - 通过 lockStateTick 订阅 vaultKey 的锁定事件，让 isUnlocked computed 响应式
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onScopeDispose } from 'vue'
+import * as vaultKey from '@/stores/vaultKey'
 
 export const useVaultStore = defineStore('vault', () => {
-  // ==================== State ====================
+  // 用于触发响应式 tick 的计数器：vaultKey 状态变化时递增
+  const lockStateTick = ref(0)
 
-  // DEK（数据加密密钥）缓存
-  const dek = ref(null)
-  const keyExpireTime = ref(null)
-
-  // 是否已解锁的计算属性
-  const isUnlocked = computed(() => {
-    return dek.value && keyExpireTime.value && keyExpireTime.value > Date.now()
+  const unsubscribe = vaultKey.onLockStateChange(() => {
+    lockStateTick.value++
   })
 
-  // 待处理操作：用户点击"加入保密柜"但需要先验证时
+  // Pinia store 长驻不卸载，但以防万一
+  onScopeDispose(() => {
+    try { unsubscribe() } catch (e) { /* noop */ }
+  })
+
+  // isUnlocked 依赖 tick，锁定/解锁时自动重算
+  const isUnlocked = computed(() => {
+    void lockStateTick.value
+    return vaultKey.hasKey()
+  })
+
+  const keyExpireTime = computed(() => {
+    void lockStateTick.value
+    return vaultKey.getExpireTime()
+  })
+
+  // 待处理操作（加入保密柜需要先验证时）
   const pendingOperation = ref(null)
-  // pendingOperation 结构：{
-  //   noteId: number,
-  //   noteContent: string,
-  //   callback: () => Promise<void>  // 验证成功后执行的回调
-  // }
 
   // 2FA 验证对话框的可见性
   const show2FADialog = ref(false)
@@ -41,77 +49,72 @@ export const useVaultStore = defineStore('vault', () => {
   // ==================== Actions ====================
 
   /**
-   * 保存 DEK 到本地存储
+   * 导入 DEK（base64），内部 importKey 成非导出 CryptoKey 存入闭包
+   * 【已弃用：方案 C 改用 beginHandshake + completeHandshake】
    */
-  function setDEK(dekValue, expireTime) {
-    dek.value = dekValue
-    keyExpireTime.value = expireTime
+  async function setDEK(dekBase64, ttlSeconds) {
+    await vaultKey.importDekBase64(dekBase64, ttlSeconds)
   }
 
   /**
-   * 清除 DEK（登出或密钥过期时调用）
+   * 方案 C：开始 ECDH 握手，得到客户端公钥和非导出临时私钥
    */
+  async function beginHandshake() {
+    return vaultKey.beginHandshake()
+  }
+
+  /**
+   * 方案 C：完成握手，解包服务端返回的 wrapped DEK 并写入闭包
+   */
+  async function completeHandshake(params, ttlSeconds) {
+    await vaultKey.completeHandshakeImport({ ...params, ttlSeconds })
+  }
+
   function clearDEK() {
-    dek.value = null
-    keyExpireTime.value = null
+    vaultKey.clearKey()
   }
 
-  /**
-   * 设置待处理操作
-   * 当用户需要先进行 2FA 验证才能完成加密时，先保存操作信息
-   */
+  function extendExpire(ttlSeconds) {
+    const ok = vaultKey.extendExpire(ttlSeconds)
+    if (ok) lockStateTick.value++
+    return ok
+  }
+
+  async function encrypt(plaintext) {
+    return vaultKey.encrypt(plaintext)
+  }
+
+  async function decrypt(ciphertextBase64) {
+    return vaultKey.decrypt(ciphertextBase64)
+  }
+
+  function onLockStateChange(fn) {
+    return vaultKey.onLockStateChange(fn)
+  }
+
   function setPendingOperation(noteId, noteContent, callback) {
-    pendingOperation.value = {
-      noteId,
-      noteContent,
-      callback
-    }
+    pendingOperation.value = { noteId, noteContent, callback }
   }
 
-  /**
-   * 清除待处理操作
-   */
   function clearPendingOperation() {
     pendingOperation.value = null
   }
 
-  /**
-   * 执行待处理操作
-   * 在用户完成 2FA 验证后调用此函数
-   */
   async function executePendingOperation() {
-    if (!pendingOperation.value) {
-      return false
-    }
-
+    if (!pendingOperation.value) return false
     try {
       await pendingOperation.value.callback()
       clearPendingOperation()
       return true
     } catch (e) {
       console.error('[Vault] Failed to execute pending operation:', e)
-      // 保留 pendingOperation，以便用户可以重试
       throw e
     }
   }
 
-  /**
-   * 显示 2FA 验证对话框
-   */
-  function show2FADialogModal() {
-    show2FADialog.value = true
-  }
+  function show2FADialogModal() { show2FADialog.value = true }
+  function hide2FADialogModal() { show2FADialog.value = false }
 
-  /**
-   * 隐藏 2FA 验证对话框
-   */
-  function hide2FADialogModal() {
-    show2FADialog.value = false
-  }
-
-  /**
-   * 获取 CSRF Token
-   */
   function getCsrfToken() {
     const cookieValue = document.cookie
       .split('; ')
@@ -120,64 +123,24 @@ export const useVaultStore = defineStore('vault', () => {
     return cookieValue || ''
   }
 
-  /**
-   * 懒加载初始化保密柜
-   * 如果用户已启用 2FA 但保密柜未初始化，尝试初始化
-   * 忽略"已初始化"的错误，作为成功处理
-   */
   async function checkAndInitVault() {
-    if (vaultInitializing.value) {
-      return // 避免并发请求
-    }
-
+    // 仅检查状态，不再自动 POST /api/vault/init/。
+    // vault_init 必须由用户显式动作（"创建保密柜"按钮）触发，避免页面加载就发非幂等的初始化请求。
+    if (vaultInitializing.value) return
     vaultInitializing.value = true
     vaultInitError.value = null
-
     try {
-      // 1. 获取保密柜状态
       const statusResponse = await fetch('/api/vault/status/', {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getCsrfToken()
-        }
+        headers: { 'Content-Type': 'application/json' }
       })
-
       const statusData = await statusResponse.json()
-
       if (!statusData.two_fa_enabled) {
-        // 用户未启用 2FA，不需要初始化
-        vaultInitialized.value = true
+        // 没开 2FA 视为不需要 vault；不去触发 init
+        vaultInitialized.value = false
         return
       }
-
-      // 2. 尝试初始化保密柜
-      const initResponse = await fetch('/api/vault/init/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getCsrfToken()
-        }
-      })
-
-      if (initResponse.ok) {
-        const initData = await initResponse.json()
-        if (initData.status === 'success') {
-          vaultInitialized.value = true
-        }
-      } else if (initResponse.status === 400) {
-        // 400 = 保密柜已初始化，忽略此错误
-        const errorData = await initResponse.json()
-        if (errorData.message && errorData.message.includes('已初始化')) {
-          vaultInitialized.value = true
-        } else {
-          vaultInitError.value = errorData.message
-        }
-      } else {
-        // 其他错误
-        const errorData = await initResponse.json()
-        vaultInitError.value = errorData.message || 'Failed to initialize vault'
-      }
+      vaultInitialized.value = !!statusData.vault_initialized
     } catch (e) {
       vaultInitError.value = e.message
     } finally {
@@ -185,27 +148,106 @@ export const useVaultStore = defineStore('vault', () => {
     }
   }
 
+  /**
+   * 显式初始化保密柜（只能由用户主动点击"创建"触发）
+   */
+  async function initVault() {
+    const initResponse = await fetch('/api/vault/init/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCsrfToken()
+      }
+    })
+    const data = await initResponse.json().catch(() => ({}))
+    if (initResponse.ok && data.status === 'success') {
+      vaultInitialized.value = true
+      return { success: true }
+    }
+    if (initResponse.status === 400 && data.message?.includes('已初始化')) {
+      vaultInitialized.value = true
+      return { success: true, alreadyInitialized: true }
+    }
+    return { success: false, message: data.message || '初始化失败' }
+  }
+
+  // ==================== 单例锁：自动恢复 DEK ====================
+  // 多个 composable 在 onMounted 同时调用 recoverKey 会并发轰炸 /api/vault/key/。
+  // Pinia store 是单例，把 in-flight Promise 放在闭包里，重复调用直接复用。
+  let fetchKeyPromise = null
+
+  /**
+   * 走握手从后端无感恢复 DEK。已解锁直接返回；in-flight 请求复用同一个 Promise。
+   */
+  async function recoverKey() {
+    if (isUnlocked.value) return true
+    if (fetchKeyPromise) return fetchKeyPromise
+
+    fetchKeyPromise = (async () => {
+      try {
+        const { clientPrivateKey, clientPubB64 } = await vaultKey.beginHandshake()
+        const response = await fetch('/api/vault/key/', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+          },
+          body: JSON.stringify({ client_pub: clientPubB64 })
+        })
+        if (!response.ok) return false
+        const data = await response.json()
+        const ttl = data.remaining_seconds || data.expire_time
+        if (data.server_pub && data.iv && data.ct && ttl) {
+          await vaultKey.completeHandshakeImport({
+            serverPubB64: data.server_pub,
+            ivB64: data.iv,
+            ctB64: data.ct,
+            clientPrivateKey,
+            ttlSeconds: ttl
+          })
+          return true
+        }
+        return false
+      } catch (e) {
+        console.warn('[Vault] recoverKey failed:', e)
+        return false
+      } finally {
+        fetchKeyPromise = null
+      }
+    })()
+
+    return fetchKeyPromise
+  }
+
   return {
     // State
-    dek,
-    keyExpireTime,
     pendingOperation,
     show2FADialog,
     vaultInitialized,
     vaultInitializing,
     vaultInitError,
 
-    // Computed
+    // Computed（代理 vaultKey 闭包）
     isUnlocked,
+    keyExpireTime,
 
     // Actions
     setDEK,
+    beginHandshake,
+    completeHandshake,
     clearDEK,
+    extendExpire,
+    encrypt,
+    decrypt,
+    onLockStateChange,
     setPendingOperation,
     clearPendingOperation,
     executePendingOperation,
     show2FADialogModal,
     hide2FADialogModal,
-    checkAndInitVault
+    checkAndInitVault,
+    initVault,
+    recoverKey
   }
 })

@@ -6,6 +6,7 @@
 import { ref, watch, nextTick, computed, onUnmounted } from 'vue'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
+import { useVaultStore } from '@/stores/vault'
 
 export function useNoteEditor(props, emit, editorElRef) {
   // ==================== 状态管理 ====================
@@ -15,8 +16,9 @@ export function useNoteEditor(props, emit, editorElRef) {
   let autoSaveTimer = null
 
   // 获取加密状态和解密工具
-  const { isKeyValid, dek, tryRecoverKeyFromSession } = useVaultEncryption()
+  const { isKeyValid, tryRecoverKeyFromSession } = useVaultEncryption()
   const { decryptContent } = useClientCrypto()
+  const vaultStore = useVaultStore()
 
   // 是否正在初始化
   const isInitializing = ref(false)
@@ -58,6 +60,7 @@ export function useNoteEditor(props, emit, editorElRef) {
   })
 
   // ==================== 解密逻辑 ====================
+  let latestEditorDecryptId = 0
   async function decryptNoteContent() {
     if (!props.isSecret) {
       return
@@ -67,10 +70,13 @@ export function useNoteEditor(props, emit, editorElRef) {
       return
     }
 
-    if (!isKeyValid.value || !dek.value) {
+    if (!vaultStore.isUnlocked) {
       decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
       return
     }
+
+    const requestId = ++latestEditorDecryptId
+    const capturedNoteId = props.modelValue.id
 
     isDecrypting.value = true
     decryptError.value = ''
@@ -78,27 +84,37 @@ export function useNoteEditor(props, emit, editorElRef) {
     try {
       if (props.modelValue.title) {
         try {
-          decryptedTitle.value = await decryptContent(props.modelValue.title, dek.value)
+          const title = await decryptContent(props.modelValue.title)
+          if (requestId !== latestEditorDecryptId || capturedNoteId !== props.modelValue.id) return
+          decryptedTitle.value = title
         } catch (e) {
+          if (requestId !== latestEditorDecryptId || capturedNoteId !== props.modelValue.id) return
           decryptedTitle.value = props.modelValue.title
         }
       }
 
       if (props.modelValue.content) {
         try {
-          decryptedContent.value = await decryptContent(props.modelValue.content, dek.value)
+          const content = await decryptContent(props.modelValue.content)
+          if (requestId !== latestEditorDecryptId || capturedNoteId !== props.modelValue.id) return
+          decryptedContent.value = content
         } catch (e) {
+          if (requestId !== latestEditorDecryptId || capturedNoteId !== props.modelValue.id) return
           decryptError.value = '解密失败，无法编辑此加密笔记'
           throw e
         }
       }
 
+      if (requestId !== latestEditorDecryptId || capturedNoteId !== props.modelValue.id) return
       localTitle.value = decryptedTitle.value || props.modelValue.title || ''
     } catch (e) {
+      if (requestId !== latestEditorDecryptId || capturedNoteId !== props.modelValue.id) return
       console.error('[Vault] Decryption error in editor:', e)
       decryptError.value = '解密失败: ' + e.message
     } finally {
-      isDecrypting.value = false
+      if (requestId === latestEditorDecryptId) {
+        isDecrypting.value = false
+      }
     }
   }
 
@@ -388,6 +404,11 @@ export function useNoteEditor(props, emit, editorElRef) {
 
     if (valid && props.isSecret && props.modelValue.content && !decryptedContent.value) {
       decryptNoteContent()
+    } else if (!valid && props.isSecret) {
+      // 锁定时清空解密后的明文，避免内存残留
+      decryptedContent.value = ''
+      decryptedTitle.value = ''
+      localTitle.value = ''
     }
   })
 
@@ -449,7 +470,6 @@ export function useNoteEditor(props, emit, editorElRef) {
     displayTitle,
     displayContent,
     isKeyValid,
-    dek,
     tryRecoverKeyFromSession,
     decryptedTitle,
     decryptedContent,

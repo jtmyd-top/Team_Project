@@ -16,7 +16,7 @@ export function useKnowledgeList() {
   const vaultStore = useVaultStore()
 
   // Vault encryption
-  const { isKeyValid, dek, keyExpireTime, tryRecoverKeyFromSession } = useVaultEncryption()
+  const { isKeyValid, tryRecoverKeyFromSession } = useVaultEncryption()
   const { decryptContent, encryptContent, looksLikeEncrypted } = useClientCrypto()
 
   // ==================== 状态 ====================
@@ -80,16 +80,14 @@ export function useKnowledgeList() {
       return
     }
 
-    const dekToUse = dek.value || vaultStore.dek
-
-    if (!dekToUse) {
-      console.log('[KnowledgeList] decryptNoteTitle: No DEK available')
+    if (!vaultStore.isUnlocked) {
+      console.log('[KnowledgeList] decryptNoteTitle: Vault locked')
       decryptedTitle.value = ''
       return
     }
 
     try {
-      const plainTitle = decryptContent(currentNoteData.value.title, dekToUse)
+      const plainTitle = await decryptContent(currentNoteData.value.title)
       decryptedTitle.value = plainTitle
       console.log('[KnowledgeList] Title decrypted successfully:', plainTitle.substring(0, 20))
     } catch (e) {
@@ -330,7 +328,7 @@ export function useKnowledgeList() {
             }
           }
 
-          if (!dek.value) {
+          if (!vaultStore.isUnlocked) {
             ElMessage.error('无法获取加密密钥')
             isSaving.value = false
             return
@@ -339,7 +337,7 @@ export function useKnowledgeList() {
           if (titleToSave) {
             try {
               if (!looksLikeEncrypted(titleToSave)) {
-                titleToSave = encryptContent(titleToSave, dek.value)
+                titleToSave = await encryptContent(titleToSave)
               }
             } catch (e) {
               // Error encrypting title
@@ -347,7 +345,7 @@ export function useKnowledgeList() {
           }
 
           if (!looksLikeEncrypted(contentToSave)) {
-            contentToSave = encryptContent(contentToSave, dek.value)
+            contentToSave = await encryptContent(contentToSave)
           }
         } catch (e) {
           ElMessage.error('加密失败: ' + e.message)
@@ -622,24 +620,13 @@ export function useKnowledgeList() {
     }
   })
 
-  // 监听 dek.value 变化
-  watch(() => dek.value, async (newDek) => {
-    if (newDek && currentNoteData.value.is_secret && currentNoteData.value.title) {
-      console.log('[KnowledgeList] dek.value updated, attempting to decrypt title')
+  // 监听 vault 解锁状态变化（替代原先分别监听 dek 和 vaultStore.dek）
+  watch(() => vaultStore.isUnlocked, async (unlocked) => {
+    if (unlocked && currentNoteData.value.is_secret && currentNoteData.value.title) {
+      console.log('[KnowledgeList] Vault unlocked, attempting to decrypt title')
       await decryptNoteTitle()
-    } else if (!newDek && currentNoteData.value.is_secret && !vaultStore.dek) {
-      console.log('[KnowledgeList] dek.value lost and vaultStore.dek unavailable, clearing title')
-      decryptedTitle.value = ''
-    }
-  })
-
-  // 监听 vaultStore.dek 变化
-  watch(() => vaultStore.dek, async (newVaultDek) => {
-    if (newVaultDek && currentNoteData.value.is_secret && currentNoteData.value.title) {
-      console.log('[KnowledgeList] vaultStore.dek available, attempting to decrypt title')
-      await decryptNoteTitle()
-    } else if (!newVaultDek && currentNoteData.value.is_secret) {
-      console.log('[KnowledgeList] vaultStore.dek cleared, clearing decrypted title')
+    } else if (!unlocked && currentNoteData.value.is_secret) {
+      console.log('[KnowledgeList] Vault locked, clearing decrypted title')
       decryptedTitle.value = ''
     }
   })
@@ -666,8 +653,7 @@ export function useKnowledgeList() {
 
   // ==================== 生命周期 ====================
   onMounted(async () => {
-    await vaultStore.checkAndInitVault()
-
+    // 先注册所有事件监听器
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('note-secret-toggled', handleNoteSecretToggled)
 
@@ -744,15 +730,9 @@ export function useKnowledgeList() {
       }
     })
 
-    // 全局监听 vault-verification-success 事件
-    const handleVaultVerificationSuccess = (event) => {
-      try {
-        const { dek: dekFromEvent, expireTime } = event.detail || {}
-        if (dekFromEvent && expireTime) {
-          vaultStore.setDEK(dekFromEvent, expireTime)
-        }
-      } catch (e) {
-      }
+    // 全局监听 vault-verification-success 事件（DEK 已由 dialog 内部写入 vaultStore，此处仅保留钩子位以便扩展）
+    const handleVaultVerificationSuccess = () => {
+      // no-op: vaultStore.setDEK 已在 useVaultVerifyDialog 中执行
     }
     window.addEventListener('vault-verification-success', handleVaultVerificationSuccess)
     window.__vaultVerificationHandler = handleVaultVerificationSuccess
@@ -766,10 +746,11 @@ export function useKnowledgeList() {
     window.addEventListener('open-vault-unlock-dialog', handleVaultUnlockDialog)
     window.__vaultUnlockDialogHandler = handleVaultUnlockDialog
 
-    // 尝试从 Redis 恢复加密密钥
-    const keyRecovered = await tryRecoverKeyFromSession()
+    // 在后台启动 vault 初始化和密钥恢复，不阻塞笔记数据加载
+    const vaultInitPromise = vaultStore.checkAndInitVault().catch(() => {})
+    const keyRecoveryPromise = tryRecoverKeyFromSession().catch(() => false)
 
-    // 从 URL 恢复状态
+    // 立即从 URL 恢复状态并加载数据，不等待 vault 操作
     const { noteId } = await sidebarStore.initFromUrl()
 
     const needsModuleData =
@@ -783,6 +764,10 @@ export function useKnowledgeList() {
     if (noteId) {
       isLoadingNote.value = true
       currentNoteId.value = noteId
+
+      // 等待密钥恢复完成，以便能解密保密笔记
+      await keyRecoveryPromise
+
       await fetchNoteDetail(noteId)
       viewMode.value = 'read'
 
@@ -792,6 +777,9 @@ export function useKnowledgeList() {
 
       isLoadingNote.value = false
     }
+
+    // vault 初始化在后台完成，不影响 UI
+    await vaultInitPromise
   })
 
   onUnmounted(() => {

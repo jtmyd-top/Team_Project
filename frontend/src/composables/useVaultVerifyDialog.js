@@ -5,8 +5,11 @@
 
 import { ref, watch, computed, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useVaultStore } from '@/stores/vault'
 
 export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
+  const vaultStore = useVaultStore()
+
   // ==================== 状态 ====================
   const code = ref('')
   const useBackup = ref(false)
@@ -205,10 +208,14 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
     hasError.value = false
 
     try {
+      // 方案 C：开启 ECDH 握手，携带临时公钥
+      const { clientPrivateKey, clientPubB64 } = await vaultStore.beginHandshake()
+
       const requestBody = {
         code: code.value,
         use_backup: useBackup.value,
-        duration: durationMinutes.value
+        duration: durationMinutes.value,
+        client_pub: clientPubB64
       }
 
       if (requireCaptcha.value) {
@@ -228,14 +235,32 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
       if (data.status === 'success') {
         ElMessage.success('验证成功')
         isVerificationSuccess.value = true
+
+        // 方案 C：用握手响应解包 DEK 并导入非导出 CryptoKey
+        // 注意：用 remaining_seconds（TTL 秒数），expire_time 是 Unix 时间戳，直接当 TTL 会让
+        // setTimeout 收到 1e15 级别的延时被浏览器钳为 1ms，立刻触发自动锁定
+        const ttl = data.remaining_seconds || data.expire_time
+        if (data.server_pub && data.iv && data.ct && ttl) {
+          try {
+            await vaultStore.completeHandshake({
+              serverPubB64: data.server_pub,
+              ivB64: data.iv,
+              ctB64: data.ct,
+              clientPrivateKey
+            }, ttl)
+          } catch (e) {
+            console.error('[Vault] Failed to complete handshake:', e)
+          }
+        }
+
         emit('verified', {
           expireTime: data.expire_time,
           remainingSeconds: data.remaining_seconds
         })
 
+        // 通知事件订阅者：vault 已解锁（不再广播原始 DEK）
         window.dispatchEvent(new CustomEvent('vault-verification-success', {
           detail: {
-            dek: data.dek,
             expireTime: data.expire_time
           }
         }))

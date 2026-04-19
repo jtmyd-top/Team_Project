@@ -337,14 +337,13 @@ export function getCodeEnhancerStyles(isDark = false) {
   /* 代码块增强：复制和折叠 */
   pre.code-block-enhanced {
     position: relative !important;
-    padding-top: 44px !important;
   }
 
-  /* 复制按钮 */
+  /* 复制按钮 - 悬浮叠加在右上角，不占用额外空间 */
   pre.code-block-enhanced .copy-btn {
     position: absolute !important;
-    top: 8px !important;
-    right: 8px !important;
+    top: 6px !important;
+    right: 6px !important;
     height: 28px !important;
     padding: 0 10px !important;
     border: none !important;
@@ -361,6 +360,12 @@ export function getCodeEnhancerStyles(isDark = false) {
     font-size: 12px !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     line-height: 1 !important;
+    opacity: 0 !important;
+    backdrop-filter: blur(4px) !important;
+  }
+
+  pre.code-block-enhanced:hover .copy-btn {
+    opacity: 1 !important;
   }
 
   pre.code-block-enhanced .copy-btn:hover {
@@ -371,6 +376,7 @@ export function getCodeEnhancerStyles(isDark = false) {
   pre.code-block-enhanced .copy-btn.copied {
     background: #67c23a !important;
     color: white !important;
+    opacity: 1 !important;
   }
 
   pre.code-block-enhanced .copy-btn svg {

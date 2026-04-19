@@ -4,7 +4,6 @@
  */
 
 import { ref, watch, nextTick, computed } from 'vue'
-import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@composables/useClientCrypto'
 import { useVaultStore } from '@/stores/vault'
 
@@ -17,7 +16,6 @@ export function useNoteListItem(props, emit) {
   const decryptedTitle = ref('')
 
   // ==================== Composables ====================
-  const { isKeyValid, dek } = useVaultEncryption()
   const { decryptContent } = useClientCrypto()
   const vaultStore = useVaultStore()
 
@@ -41,11 +39,13 @@ export function useNoteListItem(props, emit) {
   const isInTrash = computed(() => props.showTrashActions)
 
   const needsUnlock = computed(() => {
-    return props.note.is_secret && !isKeyValid.value && !vaultStore.dek && isInTrash.value
+    return props.note.is_secret && !vaultStore.isUnlocked && isInTrash.value
   })
 
   // ==================== 解密逻辑 ====================
-  function decryptNoteTitle() {
+  // latestDecryptId 用于竞态保护：快速切换笔记时丢弃旧的 await 结果
+  let latestDecryptId = 0
+  async function decryptNoteTitle() {
     if (!props.note.is_secret) {
       decryptedTitle.value = ''
       return
@@ -56,21 +56,20 @@ export function useNoteListItem(props, emit) {
       return
     }
 
-    let dekToUse = dek.value
-
-    if (!isKeyValid.value && vaultStore.dek) {
-      dekToUse = vaultStore.dek
-    }
-
-    if (!dekToUse) {
+    if (!vaultStore.isUnlocked) {
       decryptedTitle.value = ''
       return
     }
 
+    const requestId = ++latestDecryptId
+    const capturedNoteId = props.note.id
     try {
-      const plainTitle = decryptContent(props.note.title, dekToUse)
+      const plainTitle = await decryptContent(props.note.title)
+      // 如果期间切换了笔记或发起了新请求，忽略本次结果
+      if (requestId !== latestDecryptId || capturedNoteId !== props.note.id) return
       decryptedTitle.value = plainTitle
     } catch (e) {
+      if (requestId !== latestDecryptId || capturedNoteId !== props.note.id) return
       decryptedTitle.value = ''
     }
   }
@@ -92,23 +91,21 @@ export function useNoteListItem(props, emit) {
 
   watch(() => props.note.id, () => {
     decryptedTitle.value = ''
-    if (props.note.is_secret && (isKeyValid.value || vaultStore.dek)) {
+    if (props.note.is_secret && vaultStore.isUnlocked) {
       decryptNoteTitle()
     }
   })
 
-  watch(() => isKeyValid.value, (valid) => {
+  watch(() => vaultStore.isUnlocked, (valid) => {
     if (valid && props.note.is_secret && props.note.title) {
       decryptNoteTitle()
-    } else if (!valid && props.note.is_secret && !vaultStore.dek) {
+    } else if (!valid && props.note.is_secret) {
       decryptedTitle.value = ''
-    } else if (!valid && props.note.is_secret && vaultStore.dek) {
-      decryptNoteTitle()
     }
   })
 
   watch(() => props.note, (note) => {
-    if (note.is_secret && note.title && (isKeyValid.value || vaultStore.dek)) {
+    if (note.is_secret && note.title && vaultStore.isUnlocked) {
       decryptNoteTitle()
     }
   }, { immediate: true })
@@ -189,7 +186,7 @@ export function useNoteListItem(props, emit) {
   // ==================== 事件处理 ====================
   function handleClick() {
     // 【关键修复】如果是回收站中的加密笔记且未解锁，先触发解锁流程
-    if (props.note.is_secret && isInTrash.value && !isKeyValid.value && !vaultStore.dek) {
+    if (props.note.is_secret && isInTrash.value && !vaultStore.isUnlocked) {
       console.log('[NoteListItem] Encrypted note in trash clicked without DEK, triggering unlock')
       handleUnlockVault()
       return

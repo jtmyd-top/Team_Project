@@ -2,8 +2,8 @@
 
 .knowledge-layout {
   display: flex;
-  height: calc(100vh - 64px); /* 减去顶部导航栏高度 */
-  margin-top: 64px; /* 顶部导航栏高度 */
+  height: 100vh;
+  margin-top: 0; /* sticky导航栏不需要margin */
   width: 100vw;
   overflow: hidden;
   background: var(--bg-primary, #fff);

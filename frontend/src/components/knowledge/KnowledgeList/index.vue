@@ -155,7 +155,16 @@
                 :note-id="currentNoteId"
               />
               <!-- 普通笔记 -->
-              <div v-else class="note-content" v-html="currentNoteData.content"></div>
+              <NoteShadowViewer
+                v-else
+                :key="currentNoteId"
+                :content="currentNoteData.content"
+                :toc="currentNoteData.toc"
+                :is-dark="isDarkMode"
+                :is-secret="false"
+                :is-trashed="currentNoteData.is_trashed"
+                :note-id="currentNoteId"
+              />
             </div>
 
             <!-- 编辑模式 -->
@@ -213,7 +222,11 @@ import VaultSetupDialog from '@/components/common/VaultSetupDialog/index.vue'
 import PrimarySidebar from '@/components/layout/PrimarySidebar/index.vue'
 import SecondaryPanel from '@/components/layout/SecondaryPanel/index.vue'
 import { useKnowledgeList } from '@/composables/useKnowledgeList'
+import { useGlobalVaultAutoLock } from '@/composables/useGlobalVaultAutoLock'
 import '@/assets/styles/components/knowledge-list.css'
+
+// 全局保密柜自动锁定：活动重置 + 节流 + visibilitychange 60s
+useGlobalVaultAutoLock()
 
 const {
   // 状态
