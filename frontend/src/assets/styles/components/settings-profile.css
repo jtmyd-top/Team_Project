@@ -2,28 +2,174 @@
   /* 移除 flex 布局，让 form-section 自然堆叠 */
 }
 
-/* 表单区域 - 这是分层卡片的核心 */
+/* ==================== 封面/横幅区域 ==================== */
+.profile-cover-section {
+  margin: -24px -32px 24px -32px; /* 突破 .st-view 的 padding */
+}
+
+.profile-cover-media {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  overflow: hidden;
+  border-radius: 16px 16px 0 0; /* 匹配卡片顶部圆角 */
+}
+
+.cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-gradient {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #6e8efb 0%, #a777e3 100%);
+}
+
+/* 视频控件：左下角 */
+.cover-video-controls {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 10;
+}
+
+/* 更改封面按钮：右下角 */
+.cover-upload-wrap {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  z-index: 10;
+}
+
+/* 毛玻璃"更改封面"按钮 */
+.cover-change-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.cover-change-btn:hover {
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.cover-change-btn i {
+  font-size: 14px;
+}
+
+/* 统一视频控制按钮（播放/暂停、音量） */
+.cover-ctrl-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.cover-ctrl-btn:hover {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* 音量控制组 */
+.cover-volume-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.cover-volume-slider {
+  width: 0;
+  overflow: hidden;
+  transition: width 0.25s ease;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.cover-volume-slider.visible {
+  width: 100px;
+  padding: 0 12px;
+}
+
+.cover-volume-slider input[type="range"] {
+  width: 100%;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cover-volume-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.cover-volume-slider input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+/* ==================== 表单区域 ==================== */
 .form-section {
   padding: 24px;
   border-radius: 8px;
 }
 
-/* 奇数区域为白色，偶数区域为浅灰 */
-.form-section:nth-of-type(odd) {
-  background-color: #fff;
-}
-
-.form-section:nth-of-type(even) {
-  background-color: #f9f9fa;
-}
-
 .form-section-title {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 600;
   color: #303133;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e4e7ed;
+  margin-bottom: 18px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.account-info-section {
+  margin-top: 4px;
+  padding: 6px 0 26px;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 /* 表单行 - 并排布局 */
@@ -33,9 +179,169 @@
   gap: 24px;
 }
 
+.account-form-row {
+  gap: 20px;
+}
+
+.account-edit-card {
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(249, 247, 255, 0.95) 100%);
+  border: 1px solid rgba(167, 119, 227, 0.1);
+  box-shadow: 0 16px 32px rgba(98, 85, 145, 0.08);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.account-edit-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(167, 119, 227, 0.22);
+  box-shadow: 0 18px 36px rgba(98, 85, 145, 0.12);
+}
+
+.account-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.account-card-head__icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 14px;
+  background: linear-gradient(135deg, rgba(122, 124, 255, 0.95), rgba(167, 119, 227, 0.95));
+  box-shadow: 0 10px 18px rgba(122, 124, 255, 0.2);
+}
+
+.account-card-head__icon i {
+  line-height: 1;
+}
+
+.account-card-head__icon--email {
+  background: linear-gradient(135deg, rgba(79, 140, 255, 0.95), rgba(111, 211, 255, 0.95));
+  box-shadow: 0 10px 18px rgba(79, 140, 255, 0.2);
+}
+
+.account-card-head__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.account-card-head__text strong {
+  font-size: 17px;
+  color: #1f2340;
+  font-weight: 700;
+}
+
+.account-card-head__text span {
+  font-size: 12px;
+  color: #8f89a6;
+  line-height: 1.5;
+}
+
+.account-card-head__badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b26f07;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.account-card-head__badge.is-active {
+  background: rgba(16, 185, 129, 0.12);
+  color: #0f9a6d;
+}
+
+.account-edit-card :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.account-edit-card :deep(.el-form-item__label) {
+  display: none;
+}
+
+.account-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.account-main-input {
+  flex: 1;
+}
+
+.account-main-input :deep(.el-input__wrapper) {
+  min-height: 50px !important;
+  background: #f6f5fb !important;
+  border-radius: 14px !important;
+}
+
+.account-main-input :deep(.el-input__wrapper:hover) {
+  background: #f1eff9 !important;
+}
+
+.account-main-input :deep(.el-input__wrapper.is-focus) {
+  background: #fff !important;
+}
+
+.account-edit-card .form-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(246, 247, 251, 0.95);
+  border: 1px solid rgba(167, 119, 227, 0.1);
+  color: #7b8096;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 @media (max-width: 768px) {
+  .account-info-section {
+    padding: 4px 0 20px;
+  }
+
+  .account-card-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .account-card-head__badge {
+    margin-left: 52px;
+  }
+
   .form-row {
     grid-template-columns: 1fr;
+  }
+
+  .account-input-row {
+    flex-direction: column;
+  }
+
+  .account-edit-card :deep(.account-action-btn) {
+    width: 100%;
+  }
+
+  .profile-cover-section {
+    margin: -16px -20px 16px -20px; /* 匹配响应式 .st-view padding */
+  }
+
+  .profile-cover-media {
+    height: 120px;
   }
 }
 
@@ -74,9 +380,9 @@
 
 /* 个性签名显示 */
 .bio-display {
-  padding: 16px;
-  background: #f5f7fa;
-  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
 }
 
 .bio-display p {
@@ -89,7 +395,7 @@
   max-width: 100%;
 }
 
-/* 强制覆盖 Element Plus 输入框组的 append 按钮样式 */
+/* append 按钮 - 由 settings-app.css 统一管理 */
 .form-section :deep(.el-input-group__append) {
   background-color: transparent !important;
   border: none !important;
@@ -97,403 +403,612 @@
 }
 
 .form-section :deep(.el-input-group__append .el-button) {
-  background-color: #409EFF !important;
-  color: #ffffff !important;
-  border-color: #409EFF !important;
+  background: transparent !important;
+  color: #909399 !important;
+  border: none !important;
+  box-shadow: none !important;
   margin: 0 !important;
 }
 
 .form-section :deep(.el-input-group__append .el-button:hover) {
-  background-color: #66b1ff !important;
-  border-color: #66b1ff !important;
+  color: var(--st-purple, #a777e3) !important;
+  background: transparent !important;
 }
 
-/* 增加输入框高度 */
+/* 输入框基础高度 */
 .form-section :deep(.el-input__wrapper) {
-  min-height: 48px !important;
+  min-height: 44px !important;
   padding: 8px 12px !important;
 }
 
 .form-section :deep(.el-input__inner) {
-  height: 32px !important;
-  line-height: 32px !important;
+  height: 28px !important;
+  line-height: 28px !important;
 }
 
-/* 确保 textarea 也有合适的高度 */
+/* textarea 高度 */
 .form-section :deep(.el-textarea__inner) {
-  min-height: 100px !important;
+  min-height: 90px !important;
   padding: 12px !important;
 }
 
-/* 输入框动画效果 */
+/* 输入框样式 - 配合 settings-app.css 主题 */
 .form-section :deep(.el-input__wrapper) {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  border: 1px solid #dcdfe6 !important;
+  transition: all 0.25s ease !important;
+  border: 1.5px solid transparent !important;
+  background: var(--st-input-bg, #f4f5f9) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
 }
 
 .form-section :deep(.el-input__wrapper:hover) {
-  border-color: #c0c4cc !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
-  transform: translateY(-1px);
+  background: #eef0f5 !important;
+  box-shadow: none !important;
+  transform: none;
 }
 
 .form-section :deep(.el-input__wrapper.is-focus) {
-  border-color: #409EFF !important;
-  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15) !important;
-  transform: translateY(-1px);
+  background: #fff !important;
+  border-color: var(--st-purple, #a777e3) !important;
+  box-shadow: var(--st-input-focus-shadow, 0 0 0 3px rgba(167, 119, 227, 0.1)) !important;
+  transform: none;
 }
 
-/* Textarea 动画效果 */
+/* Textarea 样式 */
 .form-section :deep(.el-textarea__inner) {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  border: 1px solid #dcdfe6 !important;
+  transition: all 0.25s ease !important;
+  border: 1.5px solid transparent !important;
+  background: var(--st-input-bg, #f4f5f9) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
 }
 
 .form-section :deep(.el-textarea__inner:hover) {
-  border-color: #c0c4cc !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+  background: #eef0f5 !important;
+  box-shadow: none !important;
 }
 
 .form-section :deep(.el-textarea__inner:focus) {
-  border-color: #409EFF !important;
-  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15) !important;
+  background: #fff !important;
+  border-color: var(--st-purple, #a777e3) !important;
+  box-shadow: var(--st-input-focus-shadow, 0 0 0 3px rgba(167, 119, 227, 0.1)) !important;
 }
 
-/* 按钮悬停动画 */
+/* 按钮动画 */
 .form-section :deep(.el-button) {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition: all 0.25s ease !important;
 }
 
 .form-section :deep(.el-button:hover) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(167, 119, 227, 0.25) !important;
 }
 
 .form-section :deep(.el-button:active) {
   transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.2) !important;
+  box-shadow: 0 2px 6px rgba(167, 119, 227, 0.15) !important;
 }
 
-/* ==================== 邮箱修改弹窗样式 ==================== */
-:deep(.email-change-dialog) {
-  border-radius: 20px;
+.account-edit-card :deep(.account-action-btn) {
+  min-width: 92px;
+  height: 50px;
+  padding: 0 18px !important;
+  border: none !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #7a7cff 0%, #a777e3 100%) !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 10px 20px rgba(122, 124, 255, 0.24) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.account-edit-card :deep(.account-action-btn i) {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.account-edit-card :deep(.account-action-btn--email) {
+  background: linear-gradient(135deg, #4f8cff 0%, #6fd3ff 100%) !important;
+  box-shadow: 0 10px 20px rgba(79, 140, 255, 0.24) !important;
+}
+
+.account-edit-card :deep(.account-action-btn:not(.is-disabled):hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 24px rgba(122, 124, 255, 0.3) !important;
+}
+
+.account-edit-card :deep(.account-action-btn--email:not(.is-disabled):hover) {
+  box-shadow: 0 14px 24px rgba(79, 140, 255, 0.3) !important;
+}
+
+.account-edit-card :deep(.account-action-btn.is-disabled),
+.account-edit-card :deep(.account-action-btn:disabled) {
+  background: linear-gradient(135deg, #eef1f6 0%, #e2e7ef 100%) !important;
+  color: #a4acb9 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+/* ==================== Glassmorphism 邮箱修改弹窗 ==================== */
+/* 所有选择器使用普通嵌套，不使用 :deep()，因为该 CSS 为全局引入 */
+
+/* 全屏遮罩 - 背景模糊 */
+.el-overlay-dialog:has(.email-change-dialog),
+.el-overlay:has(.email-change-dialog) {
+  background: rgba(15, 23, 42, 0.42) !important;
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+
+/* 弹窗主体 - 毛玻璃磨砂材质 */
+.email-change-dialog {
+  border-radius: 22px !important;
   overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  box-shadow:
+    0 30px 70px -18px rgba(15, 23, 42, 0.4),
+    0 10px 24px -6px rgba(15, 23, 42, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
 }
 
-:deep(.email-change-dialog .el-dialog__header) {
-  padding: 0;
-  margin: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.email-change-dialog .el-dialog__header {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
 }
 
-:deep(.email-change-dialog .el-dialog__body) {
-  padding: 0;
-  background: #f8fafc;
+.email-change-dialog .el-dialog__body {
+  padding: 0 !important;
+  background: transparent !important;
 }
 
-:deep(.email-change-dialog .el-dialog__footer) {
-  padding: 20px 32px 24px;
-  background: #fff;
-  border-top: 1px solid #e4e7ed;
-}
-
-:deep(.email-change-dialog .el-dialog__headerbtn) {
-  top: 20px;
-  right: 20px;
-  width: 36px;
-  height: 36px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 50%;
-  transition: all 0.3s ease;
-}
-
-:deep(.email-change-dialog .el-dialog__headerbtn:hover) {
+.email-change-dialog .el-dialog__footer {
+  padding: 18px 28px 22px !important;
   background: rgba(255, 255, 255, 0.3);
-  transform: rotate(90deg);
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-:deep(.email-change-dialog .el-dialog__headerbtn .el-dialog__close) {
-  color: #fff;
-  font-size: 18px;
+.email-change-dialog .el-dialog__headerbtn {
+  top: 16px !important;
+  right: 16px !important;
+  width: 34px !important;
+  height: 34px !important;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 2;
 }
 
-/* 弹窗头部 */
-.dialog-header {
+.email-change-dialog .el-dialog__headerbtn:hover {
+  background: rgba(15, 23, 42, 0.12);
+  transform: rotate(90deg) scale(1.05);
+}
+
+.email-change-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: #475569 !important;
+  font-size: 16px;
+}
+
+/* ==================== 弹窗头部 ==================== */
+.email-change-dialog .dialog-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 28px 32px;
-  color: #fff;
+  gap: 14px;
+  padding: 22px 28px 18px;
+  color: #1e293b;
 }
 
-.header-icon-wrapper {
-  width: 56px;
-  height: 56px;
-  background: rgba(255, 255, 255, 0.2);
+.email-change-dialog .header-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
   border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(10px);
+  background: linear-gradient(135deg, rgba(122, 124, 255, 0.95), rgba(167, 119, 227, 0.95));
+  box-shadow:
+    0 8px 18px rgba(122, 124, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  color: #fff;
+  backdrop-filter: none;
 }
 
-.header-icon-wrapper i {
-  font-size: 26px;
-}
-
-.header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.header-title {
+.email-change-dialog .header-icon-wrapper i {
   font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
 }
 
-.header-subtitle {
-  font-size: 13px;
-  opacity: 0.85;
-}
-
-/* 弹窗内容 */
-.dialog-body {
-  padding: 28px 32px;
-}
-
-.email-form {
+.email-change-dialog .header-text {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  min-width: 0;
 }
 
-.form-item-enhanced {
-  margin-bottom: 20px;
+.email-change-dialog .header-title {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #0f172a;
 }
 
-.form-item-enhanced :deep(.el-form-item__label) {
-  font-weight: 600;
-  color: #303133;
-  font-size: 14px;
-  margin-bottom: 8px;
+.email-change-dialog .header-subtitle {
+  font-size: 12.5px;
+  color: #64748b;
+  font-weight: 500;
+  opacity: 1;
 }
 
-/* 增强输入框 */
-.enhanced-input :deep(.el-input__wrapper) {
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  border: 2px solid #e4e7ed;
-  transition: all 0.3s ease;
-  background: #fff;
+/* ==================== 弹窗内容 ==================== */
+.email-change-dialog .dialog-body {
+  padding: 22px 28px 10px;
 }
 
-.enhanced-input :deep(.el-input__wrapper:hover) {
-  border-color: #c0c4cc;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+.email-change-dialog .email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.enhanced-input :deep(.el-input__wrapper.is-focus) {
-  border-color: #667eea;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.2);
+.email-change-dialog .form-item-enhanced {
+  margin-bottom: 18px;
 }
 
-.input-icon {
-  color: #909399;
-  font-size: 16px;
+.email-change-dialog .form-item-enhanced .el-form-item__label {
+  font-weight: 600 !important;
+  color: #475569 !important;
+  font-size: 13px !important;
+  margin-bottom: 6px !important;
+  padding: 0 !important;
+  line-height: 1.5 !important;
+}
+
+/* ==================== 输入框 - 半透明磨砂 ==================== */
+.email-change-dialog .enhanced-input .el-input__wrapper {
+  border-radius: 12px !important;
+  padding: 0 14px !important;
+  min-height: 46px !important;
+  box-shadow: none !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  background: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.email-change-dialog .enhanced-input .el-input__wrapper:hover {
+  border-color: rgba(167, 119, 227, 0.35) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+}
+
+.email-change-dialog .enhanced-input .el-input__wrapper.is-focus {
+  border-color: rgba(167, 119, 227, 0.65) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  box-shadow:
+    0 0 0 4px rgba(167, 119, 227, 0.14),
+    0 4px 14px rgba(167, 119, 227, 0.18) !important;
+}
+
+.email-change-dialog .enhanced-input .el-input__inner {
+  height: 44px !important;
+  line-height: 44px !important;
+  color: #0f172a !important;
+  font-size: 14px !important;
+  background: transparent !important;
+}
+
+.email-change-dialog .enhanced-input .el-input__inner::placeholder {
+  color: #94a3b8 !important;
+}
+
+.email-change-dialog .input-icon {
+  color: #94a3b8;
+  font-size: 15px;
   margin-right: 4px;
+  transition: color 0.25s ease;
 }
 
-/* 状态图标 */
-.status-icon {
-  font-size: 18px;
+.email-change-dialog .enhanced-input .el-input__wrapper.is-focus .input-icon {
+  color: #a777e3;
 }
 
-.status-success {
-  color: #67c23a;
+.email-change-dialog .el-input__prefix,
+.email-change-dialog .el-input__suffix {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
-.status-error {
-  color: #f56c6c;
+/* ==================== 状态图标和消息 ==================== */
+.email-change-dialog .status-icon {
+  font-size: 16px;
+  animation: emailDialogPopIn 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
-.status-warning {
-  color: #e6a23c;
+@keyframes emailDialogPopIn {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
-/* 状态消息 */
-.status-message {
+.email-change-dialog .status-success { color: #10b981; }
+.email-change-dialog .status-error { color: #ef4444; }
+.email-change-dialog .status-warning { color: #f59e0b; }
+
+.email-change-dialog .status-message {
   margin-top: 8px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
   display: flex;
   align-items: center;
   gap: 8px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: emailDialogSlideUp 0.25s ease;
 }
 
-.status-success-msg {
-  background: linear-gradient(135deg, #f0f9eb 0%, #e1f3d8 100%);
-  color: #67c23a;
-  border: 1px solid #c2e7b0;
-}
-
-.status-error-msg {
-  background: linear-gradient(135deg, #fef0f0 0%, #fde2e2 100%);
-  color: #f56c6c;
-  border: 1px solid #fbc4c4;
-}
-
-/* 验证码容器 */
-.captcha-container {
-  background: linear-gradient(135deg, #f5f7fa 0%, #e8ebf0 100%);
-  border-radius: 12px;
-  padding: 16px;
-  border: 1px dashed #dcdfe6;
-}
-
-/* 验证码输入容器 */
-.code-input-container {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.code-input {
-  flex: 1;
-}
-
-/* 发送验证码按钮 */
-.send-code-btn {
-  border-radius: 12px;
-  padding: 0 24px;
-  height: 50px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.3s ease;
-  min-width: 130px;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-}
-
-.send-code-btn:not(.is-disabled):hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-}
-
-.send-code-btn.is-disabled {
-  background: linear-gradient(135deg, #a0a0a0 0%, #c0c0c0 100%);
-}
-
-/* 2FA 区域 */
-.two-fa-section {
-  margin-top: 20px;
-  padding: 20px;
-  background: #fff;
-  border-radius: 12px;
-  border: 2px solid #667eea;
-  animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
+@keyframes emailDialogSlideUp {
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.divider-enhanced {
-  margin: 0 0 20px 0;
+.email-change-dialog .status-success-msg {
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: #059669 !important;
+  border: 1px solid rgba(16, 185, 129, 0.22) !important;
 }
 
-.divider-enhanced :deep(.el-divider__text) {
-  background: #fff;
-  padding: 0 16px;
-  font-weight: 600;
-  color: #667eea;
+.email-change-dialog .status-error-msg {
+  background: rgba(239, 68, 68, 0.1) !important;
+  color: #dc2626 !important;
+  border: 1px solid rgba(239, 68, 68, 0.22) !important;
+}
+
+/* ==================== Cloudflare Turnstile 容器 ==================== */
+.email-change-dialog .captcha-container {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border-radius: 12px !important;
+  padding: 14px !important;
+  border: 1px solid rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  min-height: 70px;
 }
 
-.alert-enhanced {
-  margin-bottom: 20px;
-  border-radius: 10px;
+.email-change-dialog .captcha-widget {
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
-.alert-content {
+.email-change-dialog .turnstile-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.email-change-dialog .cf-turnstile {
+  display: flex !important;
+  justify-content: center !important;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.email-change-dialog .cf-turnstile iframe {
+  border-radius: 8px;
+  margin: 0 auto;
+}
+
+/* ==================== 验证码输入与发送按钮 ==================== */
+.email-change-dialog .code-input-container {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.email-change-dialog .code-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.email-change-dialog .send-code-btn {
+  border-radius: 12px !important;
+  padding: 0 20px !important;
+  height: 46px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  min-width: 130px;
+  justify-content: center !important;
+  background: linear-gradient(135deg, #7a7cff 0%, #a777e3 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow:
+    0 6px 16px rgba(122, 124, 255, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  flex-shrink: 0;
+}
+
+.email-change-dialog .send-code-btn:not(.is-disabled):hover {
+  transform: scale(0.98);
+  filter: brightness(1.06);
+  box-shadow:
+    0 8px 20px rgba(122, 124, 255, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+.email-change-dialog .send-code-btn:not(.is-disabled):active {
+  transform: scale(0.96);
+}
+
+.email-change-dialog .send-code-btn.is-disabled {
+  background: rgba(203, 213, 225, 0.7) !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
+.email-change-dialog .send-code-btn i {
+  font-size: 13px;
+}
+
+/* ==================== 2FA 区域 ==================== */
+.email-change-dialog .two-fa-section {
+  margin-top: 18px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 14px;
+  border: 1px solid rgba(167, 119, 227, 0.2);
+  animation: emailDialogFadeIn 0.3s ease;
+}
+
+@keyframes emailDialogFadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.email-change-dialog .divider-enhanced {
+  margin: 0 0 16px 0;
+}
+
+.email-change-dialog .divider-enhanced .el-divider__text {
+  background: rgba(255, 255, 255, 0.6) !important;
+  padding: 0 14px !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  color: #a777e3 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px;
+}
+
+.email-change-dialog .alert-enhanced {
+  margin-bottom: 16px !important;
+  border-radius: 10px !important;
+  padding: 12px 14px !important;
+  background: rgba(59, 130, 246, 0.08) !important;
+  border: 1px solid rgba(59, 130, 246, 0.18) !important;
+}
+
+.email-change-dialog .alert-content {
   display: flex;
   align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #1e40af;
+}
+
+.email-change-dialog .alert-content i {
+  font-size: 18px;
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+
+.email-change-dialog .two-fa-actions {
+  display: flex;
   gap: 12px;
-  font-size: 14px;
-}
-
-.alert-content i {
-  font-size: 20px;
-}
-
-.two-fa-actions {
-  display: flex;
-  gap: 16px;
   align-items: center;
   flex-wrap: wrap;
+  margin-top: 10px;
 }
 
-/* 弹窗底部 */
-.dialog-footer {
+/* ==================== 底部按钮 ==================== */
+.email-change-dialog .dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
 }
 
-.cancel-btn,
-.submit-btn {
-  border-radius: 12px;
-  padding: 0 28px;
-  height: 46px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.3s ease;
+.email-change-dialog .cancel-btn,
+.email-change-dialog .submit-btn {
+  border-radius: 12px !important;
+  padding: 0 26px !important;
+  height: 42px !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  min-width: 108px;
+  justify-content: center !important;
 }
 
-.cancel-btn {
-  background: #f5f7fa;
-  border: 2px solid #dcdfe6;
-  color: #606266;
+/* 幽灵样式取消按钮 */
+.email-change-dialog .cancel-btn {
+  background: transparent !important;
+  border: 1px solid rgba(15, 23, 42, 0.14) !important;
+  color: #64748b !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-.cancel-btn:hover {
-  background: #e9ecef;
-  border-color: #c0c4cc;
-  transform: translateY(-2px);
+.email-change-dialog .cancel-btn:hover {
+  background: rgba(15, 23, 42, 0.04) !important;
+  border-color: rgba(15, 23, 42, 0.25) !important;
+  color: #334155 !important;
+  transform: scale(0.98);
 }
 
-.submit-btn:not(.is-disabled) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.35);
+.email-change-dialog .cancel-btn:active {
+  transform: scale(0.96);
 }
 
-.submit-btn:not(.is-disabled):hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.45);
+/* 圆润强调色确认按钮 */
+.email-change-dialog .submit-btn:not(.is-disabled) {
+  background: linear-gradient(135deg, #7a7cff 0%, #a777e3 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow:
+    0 6px 16px rgba(122, 124, 255, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
 }
 
-.submit-btn.is-disabled {
-  background: #e4e7ed;
-  color: #a8abb2;
+.email-change-dialog .submit-btn:not(.is-disabled):hover {
+  filter: brightness(1.06);
+  transform: scale(0.98);
+  box-shadow:
+    0 8px 22px rgba(122, 124, 255, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
 }
 
-/* 动画 */
+.email-change-dialog .submit-btn:not(.is-disabled):active {
+  transform: scale(0.96);
+}
+
+.email-change-dialog .submit-btn.is-disabled {
+  background: rgba(226, 232, 240, 0.7) !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  border: none !important;
+  cursor: not-allowed;
+}
+
+/* ==================== 动画 ==================== */
 .slide-fade-enter-active {
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .slide-fade-leave-active {
@@ -502,34 +1017,161 @@
 
 .slide-fade-enter-from,
 .slide-fade-leave-to {
-  transform: translateY(-10px);
+  transform: translateY(-8px);
   opacity: 0;
 }
 
-/* 响应式 */
+/* ==================== 响应式 ==================== */
 @media (max-width: 768px) {
-  .dialog-header {
-    padding: 20px 24px;
+  .email-change-dialog .dialog-header {
+    padding: 18px 20px 14px;
+    gap: 12px;
   }
 
-  .dialog-body {
-    padding: 20px 24px;
+  .email-change-dialog .header-icon-wrapper {
+    width: 42px;
+    height: 42px;
   }
 
-  .code-input-container {
+  .email-change-dialog .header-icon-wrapper i {
+    font-size: 20px;
+  }
+
+  .email-change-dialog .header-title {
+    font-size: 17px;
+  }
+
+  .email-change-dialog .dialog-body {
+    padding: 18px 20px 8px;
+  }
+
+  .email-change-dialog .el-dialog__footer {
+    padding: 14px 20px 18px !important;
+  }
+
+  .email-change-dialog .code-input-container {
     flex-direction: column;
   }
 
-  .send-code-btn {
+  .email-change-dialog .send-code-btn {
     width: 100%;
   }
 
-  .dialog-footer {
+  .email-change-dialog .dialog-footer {
     flex-direction: column-reverse;
   }
 
-  .cancel-btn,
-  .submit-btn {
+  .email-change-dialog .cancel-btn,
+  .email-change-dialog .submit-btn {
     width: 100%;
+  }
+
+  .email-change-dialog .two-fa-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ==================== 暗黑模式适配 ==================== */
+@media (prefers-color-scheme: dark) {
+  .email-change-dialog {
+    background: rgba(30, 41, 59, 0.72) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow:
+      0 30px 70px -18px rgba(0, 0, 0, 0.6),
+      0 10px 24px -6px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .el-overlay:has(.email-change-dialog),
+  .el-overlay-dialog:has(.email-change-dialog) {
+    background: rgba(0, 0, 0, 0.6) !important;
+  }
+
+  .email-change-dialog .el-dialog__header {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .email-change-dialog .el-dialog__footer {
+    background: rgba(15, 23, 42, 0.5);
+    border-top-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .email-change-dialog .el-dialog__headerbtn {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .email-change-dialog .el-dialog__headerbtn:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .email-change-dialog .el-dialog__headerbtn .el-dialog__close {
+    color: #cbd5e1 !important;
+  }
+
+  .email-change-dialog .dialog-header { color: #f1f5f9; }
+  .email-change-dialog .header-title { color: #f8fafc; }
+  .email-change-dialog .header-subtitle { color: #94a3b8; }
+
+  .email-change-dialog .form-item-enhanced .el-form-item__label {
+    color: #cbd5e1 !important;
+  }
+
+  .email-change-dialog .enhanced-input .el-input__wrapper {
+    background: rgba(15, 23, 42, 0.55) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .email-change-dialog .enhanced-input .el-input__wrapper:hover {
+    background: rgba(15, 23, 42, 0.72) !important;
+    border-color: rgba(167, 119, 227, 0.4) !important;
+  }
+
+  .email-change-dialog .enhanced-input .el-input__wrapper.is-focus {
+    background: rgba(15, 23, 42, 0.85) !important;
+    border-color: rgba(167, 119, 227, 0.65) !important;
+  }
+
+  .email-change-dialog .enhanced-input .el-input__inner {
+    color: #f1f5f9 !important;
+  }
+
+  .email-change-dialog .captcha-container {
+    background: rgba(15, 23, 42, 0.45) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .email-change-dialog .two-fa-section {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(167, 119, 227, 0.22);
+  }
+
+  .email-change-dialog .divider-enhanced .el-divider__text {
+    background: rgba(30, 41, 59, 0.75) !important;
+    color: #c4b5fd !important;
+  }
+
+  .email-change-dialog .alert-enhanced {
+    background: rgba(59, 130, 246, 0.1) !important;
+    border-color: rgba(59, 130, 246, 0.22) !important;
+  }
+
+  .email-change-dialog .alert-content { color: #93c5fd; }
+
+  .email-change-dialog .cancel-btn {
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    color: #cbd5e1 !important;
+  }
+
+  .email-change-dialog .cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.22) !important;
+    color: #f1f5f9 !important;
+  }
+
+  .email-change-dialog .submit-btn.is-disabled {
+    background: rgba(51, 65, 85, 0.6) !important;
+    color: #64748b !important;
   }
 }

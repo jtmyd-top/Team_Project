@@ -1,54 +1,141 @@
 <template>
   <div class="profile-settings-container">
+    <!-- 封面/横幅区域 -->
+    <div class="profile-cover-section">
+      <div class="profile-cover-media">
+        <img
+          v-if="userStore.banner && !userStore.bannerIsVideo"
+          :src="userStore.banner"
+          alt="封面"
+          class="cover-img">
+        <video
+          v-if="userStore.banner && userStore.bannerIsVideo"
+          ref="bannerVideoRef"
+          :src="userStore.banner"
+          class="cover-img"
+          autoplay loop playsinline
+          :muted="videoMuted"
+          @loadedmetadata="checkVideoAudio">
+        </video>
+        <div v-if="!userStore.banner" class="cover-gradient"></div>
+
+        <!-- 视频控件：左下角（仅视频显示） -->
+        <div v-if="userStore.bannerIsVideo" class="cover-video-controls">
+          <!-- 播放/暂停 -->
+          <button class="cover-ctrl-btn" @click.stop="toggleVideoPlay"
+                  :title="videoPaused ? '播放' : '暂停'">
+            <i :class="playIconClass"></i>
+          </button>
+
+          <!-- 音量 -->
+          <div class="cover-volume-ctrl"
+               @mouseenter.stop="volumeSliderVisible = true"
+               @mouseleave.stop="volumeSliderVisible = false">
+            <button class="cover-ctrl-btn" @click.stop="toggleVideoMute"
+                    :title="videoMuted ? '开启声音' : '静音'">
+              <i :class="volumeIconClass" :key="volumeIconClass"></i>
+            </button>
+            <div class="cover-volume-slider" :class="{ visible: volumeSliderVisible }">
+              <input type="range" min="0" max="1" step="0.01"
+                     v-model.number="videoVolume" @input="updateVideoVolume">
+            </div>
+          </div>
+        </div>
+
+        <!-- 更改封面按钮：右下角 -->
+        <div class="cover-upload-wrap">
+          <el-upload
+            :action="API_ENDPOINTS.uploadAvatar"
+            name="banner"
+            :headers="csrfHeader"
+            :show-file-list="false"
+            :on-success="handleBannerSuccess"
+            :on-error="() => ElMessage.error('封面上传失败')"
+            accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm">
+            <button class="cover-change-btn">
+              <i class="fas fa-camera"></i>
+              <span>更改封面</span>
+            </button>
+          </el-upload>
+        </div>
+      </div>
+    </div>
+
     <!-- 区域 1: 账户信息 (用户名和邮箱) -->
-    <div class="form-section">
-      <h3 class="form-section-title">账户信息</h3>
-      <div class="form-row">
+    <div class="form-section account-info-section">
+      <div class="form-row account-form-row">
         <!-- 用户名修改 -->
-        <el-form label-position="top">
+        <el-form label-position="top" class="account-edit-card">
+          <div class="account-card-head">
+            <div class="account-card-head__icon">
+              <i class="fas fa-signature"></i>
+            </div>
+            <div class="account-card-head__text">
+              <strong>用户名</strong>
+              <span>修改后会同步到你的个人资料展示</span>
+            </div>
+          </div>
           <el-form-item label="用户名">
-            <el-input
-              v-model="userStore.nickname"
-              placeholder="至少6位，以小写字母开头">
-              <template #prefix>
-                <i class="fas fa-user"></i>
-              </template>
-              <template #append>
-                <el-button
-                  type="primary"
-                  :loading="profileSaving"
-                  @click="saveProfile">
-                  保存
-                </el-button>
-              </template>
-            </el-input>
+            <div class="account-input-row">
+              <el-input
+                v-model="userStore.nickname"
+                class="account-main-input"
+                placeholder="至少6位，以小写字母开头" />
+              <el-button
+                class="account-action-btn"
+                type="primary"
+                :disabled="!nicknameDirty || profileSaving"
+                :loading="profileSaving"
+                @click="saveProfile">
+                <i class="fas fa-check"></i>
+                保存
+              </el-button>
+            </div>
             <div class="form-hint">
-              用户名至少6位，以小写字母开头，只能包含字母、数字和下划线
+              <span v-if="nicknameDirty">
+                <i class="fas fa-pen"></i> 已检测到修改，点击右侧按钮即可保存
+              </span>
+              <span v-else>用户名至少6位，以小写字母开头，只能包含字母、数字和下划线</span>
             </div>
           </el-form-item>
         </el-form>
 
         <!-- 邮箱设置 -->
-        <el-form label-position="top">
+        <el-form label-position="top" class="account-edit-card">
+          <div class="account-card-head">
+            <div class="account-card-head__icon account-card-head__icon--email">
+              <i class="fas fa-envelope-open-text"></i>
+            </div>
+            <div class="account-card-head__text">
+              <strong>邮箱</strong>
+              <span>邮箱修改需要进行一次安全验证</span>
+            </div>
+            <span class="account-card-head__badge" :class="{ 'is-active': !emailDirty }">
+              {{ emailDirty ? '待验证' : '已绑定' }}
+            </span>
+          </div>
           <el-form-item label="邮箱">
-            <el-input
-              v-model="tempEmail"
-              placeholder="请输入新的邮箱地址">
-              <template #prefix>
-                <i class="fas fa-envelope"></i>
-              </template>
-              <template #append>
-                <el-button
-                  type="primary"
-                  @click="openEmailChangeDialog">
-                  修改
-                </el-button>
-              </template>
-            </el-input>
+            <div class="account-input-row">
+              <el-input
+                v-model="tempEmail"
+                class="account-main-input"
+                placeholder="请输入新的邮箱地址" />
+              <el-button
+                class="account-action-btn account-action-btn--email"
+                type="primary"
+                :disabled="!emailDirty"
+                @click="openEmailChangeDialog">
+                <i class="fas fa-wand-magic-sparkles"></i>
+                修改
+              </el-button>
+            </div>
             <div class="form-hint">
-              <span v-if="!emailChanged">当前邮箱：{{ userStore.email }}</span>
-              <span v-else style="color: #409EFF;">
+              <span v-if="!emailDirty">当前邮箱：{{ userStore.email }}</span>
+              <span v-else-if="emailChanged" style="color: #409EFF;">
                 <i class="fas fa-info-circle"></i> 修改邮箱需要进行安全验证
+              </span>
+              <span v-else style="color: #E6A23C;">
+                <i class="fas fa-exclamation-circle"></i> 请输入正确的邮箱格式后再继续
               </span>
             </div>
           </el-form-item>
@@ -264,12 +351,15 @@
 </template>
 
 <script setup>
+import { ElMessage, ElUpload } from 'element-plus';
 import CaptchaWidget from '@components/common/CaptchaWidget/index.vue';
 import { useSettingsProfile } from '@composables/useSettingsProfile.js';
 import '@/assets/styles/components/settings-profile.css';
 
 const {
   userStore,
+  API_ENDPOINTS,
+  csrfHeader,
   bioSaving,
   profileSaving,
   bioEditing,
@@ -281,6 +371,8 @@ const {
   emailForm,
   emailCheck,
   tempEmail,
+  nicknameDirty,
+  emailDirty,
   emailChanged,
   openEmailChangeDialog,
   editBio,
@@ -294,6 +386,20 @@ const {
   changeEmail,
   resetEmailForm,
   sendEmail2faCode,
-  toggleEmailBackupCode
+  toggleEmailBackupCode,
+  // 封面/横幅
+  bannerVideoRef,
+  videoHasAudio,
+  videoMuted,
+  videoPaused,
+  videoVolume,
+  volumeSliderVisible,
+  volumeIconClass,
+  playIconClass,
+  handleBannerSuccess,
+  checkVideoAudio,
+  toggleVideoMute,
+  toggleVideoPlay,
+  updateVideoVolume,
 } = useSettingsProfile();
 </script>

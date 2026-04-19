@@ -10,6 +10,11 @@
 <link rel="stylesheet" href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}">
 <!-- Vite构建生成的样式 -->
 <link rel="stylesheet" href="{% static 'dist/assets/settings.css' %}?v={{ timestamp|default:'20241214-012' }}">
+<style>
+  main {
+    padding-top: 0 !important;
+  }
+</style>
 {% endblock %}
 
 {% block content %}

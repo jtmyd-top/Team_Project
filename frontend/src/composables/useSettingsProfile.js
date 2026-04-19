@@ -79,10 +79,114 @@ export function useSettingsProfile() {
 
   // 临时邮箱（用于输入新邮箱）
   const tempEmail = ref(userStore.email);
+  const originalNickname = ref((userStore.nickname || '').trim());
+
+  // 用户名是否已修改
+  const nicknameDirty = computed(() => {
+    return (userStore.nickname || '').trim() !== originalNickname.value;
+  });
+
+  // 邮箱输入是否已修改
+  const emailDirty = computed(() => {
+    return (tempEmail.value || '').trim() !== (userStore.email || '').trim();
+  });
+
+  // ==================== 封面/横幅控制 ====================
+  const bannerVideoRef = ref(null);
+  const videoHasAudio = ref(false);
+  const videoMuted = ref(true);
+  const videoPaused = ref(false);
+  const videoVolume = ref(0.5);
+  const previousVolume = ref(0.5);
+  const volumeSliderVisible = ref(false);
+
+  const volumeIconClass = computed(() => {
+    if (videoMuted.value || videoVolume.value === 0) return 'fas fa-volume-mute';
+    if (videoVolume.value < 0.5) return 'fas fa-volume-down';
+    return 'fas fa-volume-up';
+  });
+
+  const playIconClass = computed(() => {
+    return videoPaused.value ? 'fas fa-play' : 'fas fa-pause';
+  });
+
+  const handleBannerSuccess = (response) => {
+    if (response.status === 'success') {
+      const isVideo = /\.(mp4|webm|ogg)$/i.test(response.banner_url);
+      userStore.updateBanner(response.banner_url, isVideo);
+      ElMessage.success('封面上传成功');
+    } else {
+      ElMessage.error(response.message || '封面上传失败');
+    }
+  };
+
+  const checkVideoAudio = async () => {
+    const video = bannerVideoRef.value;
+    if (!video) { videoHasAudio.value = false; return; }
+    videoHasAudio.value = false;
+    try {
+      if (video.readyState < 1) {
+        await new Promise(resolve => {
+          video.addEventListener('loadedmetadata', resolve, { once: true });
+        });
+      }
+      if (video.audioTracks && video.audioTracks.length !== undefined) {
+        videoHasAudio.value = video.audioTracks.length > 0; return;
+      }
+      if (video.mozHasAudio !== undefined) {
+        videoHasAudio.value = video.mozHasAudio; return;
+      }
+      if (video.webkitAudioDecodedByteCount !== undefined) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        videoHasAudio.value = video.webkitAudioDecodedByteCount > 0; return;
+      }
+      videoHasAudio.value = true;
+    } catch { videoHasAudio.value = true; }
+    if (videoHasAudio.value && video) {
+      video.muted = true; videoMuted.value = true;
+      video.volume = Number(videoVolume.value);
+    }
+  };
+
+  const toggleVideoMute = async () => {
+    const video = bannerVideoRef.value;
+    if (!video) return;
+    if (videoMuted.value) {
+      const vol = previousVolume.value > 0 ? previousVolume.value : 0.5;
+      video.muted = false; video.volume = vol;
+      videoMuted.value = false; videoVolume.value = vol;
+      if (video.paused) { try { await video.play(); } catch {} }
+    } else {
+      if (videoVolume.value > 0) previousVolume.value = Number(videoVolume.value);
+      video.muted = true; video.volume = 0;
+      videoMuted.value = true; videoVolume.value = 0;
+    }
+  };
+
+  const updateVideoVolume = () => {
+    const video = bannerVideoRef.value;
+    if (!video) return;
+    const vol = Number(videoVolume.value);
+    video.volume = vol;
+    const muted = vol === 0;
+    videoMuted.value = muted; video.muted = muted;
+    if (!muted) previousVolume.value = vol;
+  };
+
+  const toggleVideoPlay = async () => {
+    const video = bannerVideoRef.value;
+    if (!video) return;
+    if (video.paused) {
+      try { await video.play(); videoPaused.value = false; } catch {}
+    } else {
+      video.pause();
+      videoPaused.value = true;
+    }
+  };
 
   // 邮箱是否改变
   const emailChanged = computed(() => {
-    return (tempEmail.value || '').trim() !== userStore.email &&
+    return emailDirty.value &&
            EMAIL_REGEX.test((tempEmail.value || '').trim());
   });
 
@@ -90,9 +194,13 @@ export function useSettingsProfile() {
    * 打开邮箱修改对话框
    */
   const openEmailChangeDialog = async () => {
-    // 检查邮箱是否有效改变
-    if (!emailChanged.value) {
+    if (!emailDirty.value) {
       ElMessage.warning('请先输入新的邮箱地址');
+      return;
+    }
+
+    if (!EMAIL_REGEX.test((tempEmail.value || '').trim())) {
+      ElMessage.warning('请输入正确的邮箱地址');
       return;
     }
 
@@ -200,14 +308,19 @@ export function useSettingsProfile() {
    * 保存用户名
    */
   const saveProfile = async () => {
-    if (!await validateUsername(userStore.nickname)) return;
+    const trimmedNickname = (userStore.nickname || '').trim();
+    userStore.nickname = trimmedNickname;
+
+    if (!nicknameDirty.value) return;
+    if (!await validateUsername(trimmedNickname)) return;
     if (profileSaving.value) return;
 
     profileSaving.value = true;
     try {
-      const data = await window.apiService.updateProfile({ nickname: userStore.nickname });
+      const data = await window.apiService.updateProfile({ nickname: trimmedNickname });
       if (data.status === "success") {
         userStore.updateNickname(data.nickname);
+        originalNickname.value = (data.nickname || '').trim();
         ElMessage.success("用户名修改成功");
       } else {
         ElMessage.error(data.message || "更新失败");
@@ -412,6 +525,8 @@ export function useSettingsProfile() {
 
   return {
     userStore,
+    API_ENDPOINTS,
+    csrfHeader,
     bioSaving,
     profileSaving,
     bioEditing,
@@ -426,6 +541,8 @@ export function useSettingsProfile() {
     emailForm,
     emailCheck,
     tempEmail,
+    nicknameDirty,
+    emailDirty,
     emailChanged,
     openEmailChangeDialog,
     editBio,
@@ -439,6 +556,20 @@ export function useSettingsProfile() {
     changeEmail,
     resetEmailForm,
     sendEmail2faCode,
-    toggleEmailBackupCode
+    toggleEmailBackupCode,
+    // 封面/横幅
+    bannerVideoRef,
+    videoHasAudio,
+    videoMuted,
+    videoPaused,
+    videoVolume,
+    volumeSliderVisible,
+    volumeIconClass,
+    playIconClass,
+    handleBannerSuccess,
+    checkVideoAudio,
+    toggleVideoMute,
+    toggleVideoPlay,
+    updateVideoVolume,
   };
 }

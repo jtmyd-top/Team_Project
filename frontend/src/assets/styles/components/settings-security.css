@@ -185,3 +185,560 @@
 .settings-security :deep(.el-input__prefix i) {
   color: #909399;
 }
+
+/* ==================== Glassmorphism 修改密码弹窗 ==================== */
+/* 全屏遮罩 - 背景模糊 */
+.el-overlay-dialog:has(.password-change-dialog),
+.el-overlay:has(.password-change-dialog) {
+  background: rgba(15, 23, 42, 0.42) !important;
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+
+/* 弹窗主体 - 毛玻璃磨砂材质 */
+.password-change-dialog {
+  border-radius: 22px !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  box-shadow:
+    0 30px 70px -18px rgba(15, 23, 42, 0.4),
+    0 10px 24px -6px rgba(15, 23, 42, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+}
+
+.password-change-dialog .el-dialog__header {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.password-change-dialog .el-dialog__body {
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.password-change-dialog .el-dialog__footer {
+  padding: 18px 28px 22px !important;
+  background: rgba(255, 255, 255, 0.3);
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.password-change-dialog .el-dialog__headerbtn {
+  top: 16px !important;
+  right: 16px !important;
+  width: 34px !important;
+  height: 34px !important;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 2;
+}
+
+.password-change-dialog .el-dialog__headerbtn:hover {
+  background: rgba(15, 23, 42, 0.12);
+  transform: rotate(90deg) scale(1.05);
+}
+
+.password-change-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: #475569 !important;
+  font-size: 16px;
+}
+
+/* ==================== 弹窗头部 ==================== */
+.password-change-dialog .dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 28px 18px;
+  color: #1e293b;
+}
+
+.password-change-dialog .header-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(122, 124, 255, 0.95), rgba(167, 119, 227, 0.95));
+  box-shadow:
+    0 8px 18px rgba(122, 124, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+
+.password-change-dialog .header-icon-wrapper i {
+  font-size: 22px;
+}
+
+.password-change-dialog .header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.password-change-dialog .header-title {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #0f172a;
+}
+
+.password-change-dialog .header-subtitle {
+  font-size: 12.5px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* ==================== 弹窗内容 ==================== */
+.password-change-dialog .dialog-body {
+  padding: 22px 28px 10px;
+}
+
+.password-change-dialog .password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.password-change-dialog .form-item-enhanced {
+  margin-bottom: 18px;
+}
+
+.password-change-dialog .form-item-enhanced .el-form-item__label {
+  font-weight: 600 !important;
+  color: #475569 !important;
+  font-size: 13px !important;
+  margin-bottom: 6px !important;
+  padding: 0 !important;
+  line-height: 1.5 !important;
+}
+
+/* ==================== 输入框 - 半透明磨砂 ==================== */
+.password-change-dialog .enhanced-input .el-input__wrapper {
+  border-radius: 12px !important;
+  padding: 0 14px !important;
+  min-height: 46px !important;
+  box-shadow: none !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  background: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.password-change-dialog .enhanced-input .el-input__wrapper:hover {
+  border-color: rgba(167, 119, 227, 0.35) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+}
+
+.password-change-dialog .enhanced-input .el-input__wrapper.is-focus {
+  border-color: rgba(167, 119, 227, 0.65) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  box-shadow:
+    0 0 0 4px rgba(167, 119, 227, 0.14),
+    0 4px 14px rgba(167, 119, 227, 0.18) !important;
+}
+
+.password-change-dialog .enhanced-input .el-input__inner {
+  height: 44px !important;
+  line-height: 44px !important;
+  color: #0f172a !important;
+  font-size: 14px !important;
+  background: transparent !important;
+}
+
+.password-change-dialog .enhanced-input .el-input__inner::placeholder {
+  color: #94a3b8 !important;
+}
+
+.password-change-dialog .input-icon {
+  color: #94a3b8;
+  font-size: 15px;
+  margin-right: 4px;
+  transition: color 0.25s ease;
+}
+
+.password-change-dialog .enhanced-input .el-input__wrapper.is-focus .input-icon {
+  color: #a777e3;
+}
+
+.password-change-dialog .el-input__prefix,
+.password-change-dialog .el-input__suffix {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* ==================== 辅助提示 ==================== */
+.password-change-dialog .form-hint-pwd {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #64748b;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.password-change-dialog .form-hint-pwd i {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+/* ==================== 2FA 区域 ==================== */
+.password-change-dialog .two-fa-section {
+  margin-top: 18px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 14px;
+  border: 1px solid rgba(167, 119, 227, 0.2);
+  animation: pwdDialogFadeIn 0.3s ease;
+}
+
+@keyframes pwdDialogFadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.password-change-dialog .divider-enhanced {
+  margin: 0 0 16px 0;
+}
+
+.password-change-dialog .divider-enhanced .el-divider__text {
+  background: rgba(255, 255, 255, 0.6) !important;
+  padding: 0 14px !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  color: #a777e3 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px;
+}
+
+.password-change-dialog .alert-enhanced {
+  margin-bottom: 16px !important;
+  border-radius: 10px !important;
+  padding: 12px 14px !important;
+  background: rgba(59, 130, 246, 0.08) !important;
+  border: 1px solid rgba(59, 130, 246, 0.18) !important;
+}
+
+.password-change-dialog .alert-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #1e40af;
+}
+
+.password-change-dialog .alert-content i {
+  font-size: 18px;
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+
+/* ==================== 验证码输入与发送按钮 ==================== */
+.password-change-dialog .code-input-container {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.password-change-dialog .code-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.password-change-dialog .send-code-btn {
+  border-radius: 12px !important;
+  padding: 0 20px !important;
+  height: 46px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  min-width: 110px;
+  justify-content: center !important;
+  background: linear-gradient(135deg, #7a7cff 0%, #a777e3 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow:
+    0 6px 16px rgba(122, 124, 255, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  flex-shrink: 0;
+}
+
+.password-change-dialog .send-code-btn:not(.is-disabled):hover {
+  transform: scale(0.98);
+  filter: brightness(1.06);
+}
+
+.password-change-dialog .send-code-btn.is-disabled {
+  background: rgba(203, 213, 225, 0.7) !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+}
+
+.password-change-dialog .countdown-hint {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  color: #b45309;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.password-change-dialog .two-fa-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.password-change-dialog .backup-code-toggle {
+  color: #a777e3 !important;
+  font-weight: 600 !important;
+  padding: 6px 12px !important;
+  border-radius: 8px !important;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.25s ease;
+}
+
+.password-change-dialog .backup-code-toggle:hover {
+  background: rgba(167, 119, 227, 0.08) !important;
+  border-color: rgba(167, 119, 227, 0.18);
+}
+
+/* ==================== 底部按钮 ==================== */
+.password-change-dialog .dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.password-change-dialog .cancel-btn,
+.password-change-dialog .submit-btn {
+  border-radius: 12px !important;
+  padding: 0 26px !important;
+  height: 42px !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  min-width: 108px;
+  justify-content: center !important;
+}
+
+/* 幽灵样式取消按钮 */
+.password-change-dialog .cancel-btn {
+  background: transparent !important;
+  border: 1px solid rgba(15, 23, 42, 0.14) !important;
+  color: #64748b !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.password-change-dialog .cancel-btn:hover {
+  background: rgba(15, 23, 42, 0.04) !important;
+  border-color: rgba(15, 23, 42, 0.25) !important;
+  color: #334155 !important;
+  transform: scale(0.98);
+}
+
+.password-change-dialog .cancel-btn:active {
+  transform: scale(0.96);
+}
+
+/* 圆润强调色确认按钮 */
+.password-change-dialog .submit-btn:not(.is-disabled) {
+  background: linear-gradient(135deg, #7a7cff 0%, #a777e3 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow:
+    0 6px 16px rgba(122, 124, 255, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+.password-change-dialog .submit-btn:not(.is-disabled):hover {
+  filter: brightness(1.06);
+  transform: scale(0.98);
+  box-shadow:
+    0 8px 22px rgba(122, 124, 255, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+.password-change-dialog .submit-btn:not(.is-disabled):active {
+  transform: scale(0.96);
+}
+
+.password-change-dialog .submit-btn.is-disabled {
+  background: rgba(226, 232, 240, 0.7) !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  border: none !important;
+  cursor: not-allowed;
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width: 768px) {
+  .password-change-dialog .dialog-header {
+    padding: 18px 20px 14px;
+    gap: 12px;
+  }
+
+  .password-change-dialog .header-icon-wrapper {
+    width: 42px;
+    height: 42px;
+  }
+
+  .password-change-dialog .header-title {
+    font-size: 17px;
+  }
+
+  .password-change-dialog .dialog-body {
+    padding: 18px 20px 8px;
+  }
+
+  .password-change-dialog .el-dialog__footer {
+    padding: 14px 20px 18px !important;
+  }
+
+  .password-change-dialog .code-input-container {
+    flex-direction: column;
+  }
+
+  .password-change-dialog .send-code-btn {
+    width: 100%;
+  }
+
+  .password-change-dialog .dialog-footer {
+    flex-direction: column-reverse;
+  }
+
+  .password-change-dialog .cancel-btn,
+  .password-change-dialog .submit-btn {
+    width: 100%;
+  }
+}
+
+/* ==================== 暗黑模式适配 ==================== */
+@media (prefers-color-scheme: dark) {
+  .password-change-dialog {
+    background: rgba(30, 41, 59, 0.72) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow:
+      0 30px 70px -18px rgba(0, 0, 0, 0.6),
+      0 10px 24px -6px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .el-overlay:has(.password-change-dialog),
+  .el-overlay-dialog:has(.password-change-dialog) {
+    background: rgba(0, 0, 0, 0.6) !important;
+  }
+
+  .password-change-dialog .el-dialog__header {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .password-change-dialog .el-dialog__footer {
+    background: rgba(15, 23, 42, 0.5);
+    border-top-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .password-change-dialog .el-dialog__headerbtn {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .password-change-dialog .el-dialog__headerbtn .el-dialog__close {
+    color: #cbd5e1 !important;
+  }
+
+  .password-change-dialog .dialog-header { color: #f1f5f9; }
+  .password-change-dialog .header-title { color: #f8fafc; }
+  .password-change-dialog .header-subtitle { color: #94a3b8; }
+
+  .password-change-dialog .form-item-enhanced .el-form-item__label {
+    color: #cbd5e1 !important;
+  }
+
+  .password-change-dialog .enhanced-input .el-input__wrapper {
+    background: rgba(15, 23, 42, 0.55) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .password-change-dialog .enhanced-input .el-input__wrapper:hover {
+    background: rgba(15, 23, 42, 0.72) !important;
+    border-color: rgba(167, 119, 227, 0.4) !important;
+  }
+
+  .password-change-dialog .enhanced-input .el-input__wrapper.is-focus {
+    background: rgba(15, 23, 42, 0.85) !important;
+    border-color: rgba(167, 119, 227, 0.65) !important;
+  }
+
+  .password-change-dialog .enhanced-input .el-input__inner {
+    color: #f1f5f9 !important;
+  }
+
+  .password-change-dialog .form-hint-pwd {
+    background: rgba(15, 23, 42, 0.4);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+  }
+
+  .password-change-dialog .two-fa-section {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(167, 119, 227, 0.22);
+  }
+
+  .password-change-dialog .divider-enhanced .el-divider__text {
+    background: rgba(30, 41, 59, 0.75) !important;
+    color: #c4b5fd !important;
+  }
+
+  .password-change-dialog .cancel-btn {
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    color: #cbd5e1 !important;
+  }
+
+  .password-change-dialog .cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.22) !important;
+    color: #f1f5f9 !important;
+  }
+
+  .password-change-dialog .submit-btn.is-disabled {
+    background: rgba(51, 65, 85, 0.6) !important;
+    color: #64748b !important;
+  }
+}

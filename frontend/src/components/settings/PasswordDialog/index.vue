@@ -9,8 +9,13 @@
 
     <template #header>
       <div class="dialog-header">
-        <i class="fas fa-key header-icon"></i>
-        <span class="header-title">修改密码</span>
+        <div class="header-icon-wrapper">
+          <i class="fas fa-key"></i>
+        </div>
+        <div class="header-text">
+          <span class="header-title">修改密码</span>
+          <span class="header-subtitle">请验证身份并设置新密码</span>
+        </div>
       </div>
     </template>
 

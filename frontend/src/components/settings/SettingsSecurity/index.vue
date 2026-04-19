@@ -57,104 +57,157 @@
     <el-dialog
       v-model="showPasswordDialog"
       title="修改密码"
-      width="500px"
+      width="540px"
+      :close-on-click-modal="false"
+      class="password-change-dialog"
       @close="resetPasswordForm">
 
-      <el-form label-position="top">
-        <el-form-item label="当前密码">
-          <el-input
-            v-model="passwordForm.current"
-            type="password"
-            placeholder="请输入当前密码"
-            show-password
-            maxlength="50">
-            <template #prefix>
-              <i class="fas fa-lock"></i>
-            </template>
-          </el-input>
-        </el-form-item>
-
-        <el-form-item label="新密码">
-          <el-input
-            v-model="passwordForm.new"
-            type="password"
-            placeholder="至少8位字符"
-            show-password
-            maxlength="50">
-            <template #prefix>
-              <i class="fas fa-key"></i>
-            </template>
-          </el-input>
-          <div class="form-hint" style="color: #909399;">
-            密码至少8位，建议包含字母、数字和特殊字符
+      <template #header>
+        <div class="dialog-header">
+          <div class="header-icon-wrapper">
+            <i class="fas fa-key"></i>
           </div>
-        </el-form-item>
+          <div class="header-text">
+            <span class="header-title">修改密码</span>
+            <span class="header-subtitle">请验证身份并设置新密码</span>
+          </div>
+        </div>
+      </template>
 
-        <el-form-item label="确认新密码">
-          <el-input
-            v-model="passwordForm.confirm"
-            type="password"
-            placeholder="再次输入新密码"
-            show-password
-            maxlength="50">
-            <template #prefix>
-              <i class="fas fa-key"></i>
-            </template>
-          </el-input>
-        </el-form-item>
+      <div class="dialog-body">
+        <el-form label-position="top" class="password-form">
+          <el-form-item label="当前密码" class="form-item-enhanced">
+            <el-input
+              v-model="passwordForm.current"
+              type="password"
+              placeholder="请输入当前密码"
+              show-password
+              size="large"
+              clearable
+              maxlength="50"
+              class="enhanced-input">
+              <template #prefix>
+                <i class="fas fa-lock input-icon"></i>
+              </template>
+            </el-input>
+          </el-form-item>
 
-        <!-- 2FA验证（如果需要） -->
-        <div v-if="passwordForm.show2FA">
-          <el-divider>需要两因素验证</el-divider>
-
-          <el-alert
-            type="info"
-            :closable="false"
-            style="margin-bottom: 16px;">
-            {{ passwordForm.twoFaMethod === 'totp'
-              ? '请输入验证器应用中的6位验证码'
-              : '验证码已发送到您的邮箱，请查收' }}
-          </el-alert>
-
-          <el-form-item :label="passwordForm.useBackup ? '备用验证码' : '验证码'">
-            <div style="display: flex; gap: 12px;">
-              <el-input
-                v-model="passwordForm.twoFaCode"
-                :placeholder="passwordForm.useBackup ? '请输入8位备用码' : '请输入6位验证码'"
-                :maxlength="passwordForm.useBackup ? 8 : 6">
-              </el-input>
-              <el-button
-                v-if="passwordForm.twoFaMethod === 'email' && !passwordForm.useBackup"
-                :disabled="passwordCountdown.counting"
-                :loading="passwordForm.twoFaCodeSending"
-                @click="sendPassword2faCode"
-                :type="passwordCountdown.counting ? 'info' : 'primary'">
-                {{ passwordCountdown.counting ? `${passwordCountdown.seconds}秒` : '重发' }}
-              </el-button>
-            </div>
-            <div v-if="passwordCountdown.counting && passwordForm.twoFaMethod === 'email'"
-                 class="form-hint" style="color: #E6A23C; margin-top: 4px;">
-              <i class="fas fa-clock"></i> 请等待 {{ passwordCountdown.seconds }} 秒后重新发送
+          <el-form-item label="新密码" class="form-item-enhanced">
+            <el-input
+              v-model="passwordForm.new"
+              type="password"
+              placeholder="至少8位字符"
+              show-password
+              size="large"
+              clearable
+              maxlength="50"
+              class="enhanced-input">
+              <template #prefix>
+                <i class="fas fa-shield-alt input-icon"></i>
+              </template>
+            </el-input>
+            <div class="form-hint-pwd">
+              <i class="fas fa-info-circle"></i>
+              密码至少8位，建议包含字母、数字和特殊字符
             </div>
           </el-form-item>
 
-          <el-button
-            type="text"
-            size="small"
-            @click="togglePasswordBackupCode">
-            {{ passwordForm.useBackup ? '使用验证器' : '使用备用验证码' }}
-          </el-button>
-        </div>
-      </el-form>
+          <el-form-item label="确认新密码" class="form-item-enhanced">
+            <el-input
+              v-model="passwordForm.confirm"
+              type="password"
+              placeholder="再次输入新密码"
+              show-password
+              size="large"
+              clearable
+              maxlength="50"
+              class="enhanced-input">
+              <template #prefix>
+                <i class="fas fa-check-double input-icon"></i>
+              </template>
+            </el-input>
+          </el-form-item>
+
+          <!-- 2FA验证（如果需要） -->
+          <div v-if="passwordForm.show2FA" class="two-fa-section">
+            <el-divider class="divider-enhanced">
+              <i class="fas fa-shield-alt"></i>
+              <span>需要两因素验证</span>
+            </el-divider>
+
+            <el-alert
+              type="info"
+              :closable="false"
+              class="alert-enhanced">
+              <template #default>
+                <div class="alert-content">
+                  <i :class="passwordForm.twoFaMethod === 'totp' ? 'fas fa-mobile-alt' : 'fas fa-envelope'"></i>
+                  <span>{{ passwordForm.twoFaMethod === 'totp'
+                    ? '请输入验证器应用中的6位验证码'
+                    : '验证码已发送到您的邮箱，请查收' }}</span>
+                </div>
+              </template>
+            </el-alert>
+
+            <el-form-item :label="passwordForm.useBackup ? '备用验证码' : '验证码'" class="form-item-enhanced">
+              <div class="code-input-container">
+                <el-input
+                  v-model="passwordForm.twoFaCode"
+                  :placeholder="passwordForm.useBackup ? '请输入8位备用码' : '请输入6位验证码'"
+                  :maxlength="passwordForm.useBackup ? 8 : 6"
+                  size="large"
+                  clearable
+                  class="enhanced-input code-input">
+                  <template #prefix>
+                    <i :class="passwordForm.useBackup ? 'fas fa-key' : 'fas fa-qrcode'" class="input-icon"></i>
+                  </template>
+                </el-input>
+                <el-button
+                  v-if="passwordForm.twoFaMethod === 'email' && !passwordForm.useBackup"
+                  :disabled="passwordCountdown.counting"
+                  :loading="passwordForm.twoFaCodeSending"
+                  @click="sendPassword2faCode"
+                  size="large"
+                  class="send-code-btn">
+                  <i v-if="!passwordForm.twoFaCodeSending && !passwordCountdown.counting" class="fas fa-paper-plane"></i>
+                  <i v-else-if="passwordCountdown.counting" class="fas fa-clock"></i>
+                  <span>{{ passwordCountdown.counting ? `${passwordCountdown.seconds}秒` : '重发' }}</span>
+                </el-button>
+              </div>
+              <div v-if="passwordCountdown.counting && passwordForm.twoFaMethod === 'email'" class="countdown-hint">
+                <i class="fas fa-hourglass-half"></i>
+                <span>请等待 <strong>{{ passwordCountdown.seconds }}</strong> 秒后重新发送</span>
+              </div>
+            </el-form-item>
+
+            <div class="two-fa-actions">
+              <el-button
+                type="text"
+                size="small"
+                @click="togglePasswordBackupCode"
+                class="backup-code-toggle">
+                <i :class="passwordForm.useBackup ? 'fas fa-mobile-alt' : 'fas fa-key'"></i>
+                {{ passwordForm.useBackup ? '使用验证器' : '使用备用验证码' }}
+              </el-button>
+            </div>
+          </div>
+        </el-form>
+      </div>
 
       <template #footer>
-        <el-button @click="showPasswordDialog = false">取消</el-button>
-        <el-button
-          type="primary"
-          @click="changePassword"
-          :loading="passwordForm.submitting">
-          确认修改
-        </el-button>
+        <div class="dialog-footer">
+          <el-button size="large" class="cancel-btn" @click="showPasswordDialog = false">
+            <i class="fas fa-times"></i> 取消
+          </el-button>
+          <el-button
+            type="primary"
+            size="large"
+            class="submit-btn"
+            :loading="passwordForm.submitting"
+            @click="changePassword">
+            <i class="fas fa-check"></i> 确认修改
+          </el-button>
+        </div>
       </template>
     </el-dialog>
 
