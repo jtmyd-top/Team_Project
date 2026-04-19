@@ -11,11 +11,15 @@ db.sqlite3
 media/
 uploads/
 .env
-.gitignore
-tests.py
 xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5
+
+# Python 字节码与缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
 
 # Frontend
 frontend/node_modules/
@@ -23,3 +27,6 @@ node_modules/
 staticfiles/
 # Build output (keep in static/dist for Django)
 # static/dist/ is tracked since it's needed for deployment
+
+# 本地 HTTPS dev 证书（mkcert 签发，各自机器本地生成，不入库）
+certs/

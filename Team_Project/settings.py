@@ -20,6 +20,19 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-for-dev') # �
 DEBUG = os.getenv('DEBUG', 'True').lower() in ['true', '1', 't']
 ALLOWED_HOSTS = ["*"] # 在生产环境中应配置为具体的域名
 
+# HTTPS dev 环境下（runserver_plus + 自签证书），Django 4.x CSRF 校验要求 Origin 在白名单
+# 从环境变量 CSRF_TRUSTED_ORIGINS 读取，逗号分隔；默认覆盖常见 LAN/localhost HTTPS 地址
+# 注意：HTTPS 协议默认端口是 443，非默认端口（如 80/8000）Origin 里必须显式带端口
+_csrf_env = os.getenv('CSRF_TRUSTED_ORIGINS', '')
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_env.split(',') if o.strip()] or [
+    'https://localhost',
+    'https://localhost:443',
+    'https://127.0.0.1',
+    'https://127.0.0.1:443',
+    'https://192.168.1.6',
+    'https://192.168.1.6:443',
+]
+
 # Vite 开发模式开关
 # 设置为 True 时，模板会从 Vite 开发服务器 (localhost:5173) 加载资源
 # 设置为 False 时，模板会从 static/dist/ 加载构建后的资源
@@ -38,6 +51,13 @@ INSTALLED_APPS = [
     'django_ckeditor_5',  # 只保留这一个
     'captcha',  # django-simple-captcha
 ]
+
+# django-extensions 提供 runserver_plus（HTTPS dev server），仅在已安装时启用
+try:
+    import django_extensions  # noqa: F401
+    INSTALLED_APPS.append('django_extensions')
+except ImportError:
+    pass
 
 
 # --- 4. 中间件和 URL 配置 ---
@@ -131,12 +151,27 @@ CACHES = {
         "LOCATION": os.getenv('redis1'),
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "CONNECTION_POOL_KWARGS": {"max_connections": 100},
+            "CONNECTION_POOL_KWARGS": {
+                "max_connections": 100,
+                # 空闲连接保活：内核层 TCP keepalive + 应用层每 30s 主动 PING
+                "socket_keepalive": True,
+                "health_check_interval": 30,
+                # 快速失败而不是长时间挂起
+                "socket_connect_timeout": 5,
+                "socket_timeout": 5,
+                # 偶发超时自动重试一次
+                "retry_on_timeout": True,
+            },
             # 增加一个密码选项，更明确
             "PASSWORD": os.getenv('mysql_passwd'),
+            # 任何 cache 异常都不往上抛，返回 None；配合下面的日志开关避免静默丢数据
+            "IGNORE_EXCEPTIONS": True,
         }
     }
 }
+# 被 IGNORE_EXCEPTIONS 吞掉的异常仍写日志，便于排障
+DJANGO_REDIS_LOG_IGNORED_EXCEPTIONS = True
+DJANGO_REDIS_LOGGER = 'django_redis'
 # --- 【核心新增配置】会话超时设置 ---
 
 # 1. 设置 Session 的 cookie 有效期为3小时（以秒为单位）
