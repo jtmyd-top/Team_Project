@@ -46,7 +46,19 @@
       "Bash(for file in \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\common\"/*.vue \"D:\\\\Team Project\\\\Team_Project\\\\frontend\\\\src\\\\components\\\\common\"/*/*.vue)",
       "Bash(pip install:*)",
       "Bash(if:*)",
-      "Bash(.venvScriptspip install django-simple-captcha)"
+      "Bash(.venvScriptspip install django-simple-captcha)",
+      "Bash(where mkcert *)",
+      "Bash(mkcert -version)",
+      "Bash(caddy version *)",
+      "Bash(winget install *)",
+      "Bash(rm -f \"D:/Team Project/Team_Project/knowledge_project/views/__pycache__/auth.cpython\"*.pyc)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe manage.py check)",
+      "Bash(netstat -ano)",
+      "Bash(netsh advfirewall *)",
+      "Bash(cmd //c \"scripts\\\\runserver_https.bat\")",
+      "Bash(\".venv/Scripts/python.exe\" manage.py check)",
+      "Bash(git reset *)"
     ],
     "deny": [],
     "ask": []
