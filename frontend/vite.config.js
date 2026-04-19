@@ -71,6 +71,8 @@ export default defineConfig({
         'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
         // 战情室大屏
         'dashboard': path.resolve(__dirname, 'src/entries/dashboard.js'),
+        // 私信页面
+        'messages': path.resolve(__dirname, 'src/entries/messages.js'),
       },
       output: {
         format: 'es',  // 主格式为 ES 模块

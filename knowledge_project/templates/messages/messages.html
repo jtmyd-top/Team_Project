@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}私信{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{% static 'css/modern-base.css' %}">
+<link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
+<link rel="stylesheet" href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}">
+<style>
+  main {
+    padding: 0 !important;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<script>
+// 注入用户ID
+window.currentUserId = {{ user.id }};
+</script>
+
+<div id="messages-app"></div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{% static 'dist/messages.js' %}"></script>
+{% endblock %}

@@ -2,41 +2,25 @@
 {% load static %}
 
 {% block title %}
-    {% if note_data %}
-        {{ note_data.title }} - 公开分享
-    {% else %}
-        笔记分享
-    {% endif %}
+    {% if note_data %}{{ note_data.title }} - 公开分享{% else %}笔记分享{% endif %}
 {% endblock %}
 
 {% block head_extra %}
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
     <link rel="stylesheet" href="{% static 'css/modern-note-detail.css' %}">
+    {% if user.is_authenticated %}
+    <meta name="username" content="{{ user.username }}">
+    <meta name="user-id" content="{{ user.id }}">
+    {% endif %}
+    <style>
+      main {
+        padding-top: 0 !important;
+      }
+    </style>
 {% endblock %}
 
 {% block content %}
-
-<div class="note-detail-container">
-    <!-- 背景动画效果 -->
-    <div class="bg-animation">
-        <div class="floating-shapes">
-            <div class="shape shape-1"></div>
-            <div class="shape shape-2"></div>
-            <div class="shape shape-3"></div>
-            <div class="shape shape-4"></div>
-            <div class="shape shape-5"></div>
-        </div>
-    </div>
-
-    <!-- 阅读进度条 -->
-    <div class="reading-progress">
-        <div class="reading-progress-bar" id="reading-progress-bar"></div>
-    </div>
-
-    <!-- Vue组件将在这里渲染 -->
-    <div id="public-note-app" v-cloak></div>
-</div>
+<div id="public-note-app" v-cloak></div>
 
 {% if note_data %}{{ note_data|json_script:"note-data" }}{% endif %}
 {% if full_content_data %}{{ full_content_data|json_script:"full-content-data" }}{% endif %}
@@ -45,9 +29,6 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- Vue 3 Production Build -->
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-<!-- Vue Component -->
 <script src="{% static 'dist/public-note-entry.js' %}"></script>
-
 {% endblock %}

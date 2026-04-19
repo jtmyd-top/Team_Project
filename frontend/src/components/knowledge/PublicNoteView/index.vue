@@ -21,7 +21,7 @@
         <nav class="detail-navbar glass-effect animate__animated animate__fadeInDown">
           <div class="navbar-content">
             <div class="navbar-left">
-              <a href="/knowledge/" class="back-button hover-glow">
+              <a href="/knowledge/" class="back-button hover-glow" @click.prevent="goBack">
                 <i class="fas fa-arrow-left"></i>
                 返回列表
               </a>
@@ -54,7 +54,9 @@
             <h1 class="article-title gradient-text shimmer-text">${ note.title }</h1>
 
             <div class="article-meta glass-card">
-              <div class="meta-item author-info hover-lift">
+              <div
+                class="meta-item author-info hover-lift cursor-pointer"
+                @click="showAuthorModal = true">
                 <div class="author-avatar pulse-avatar">
                   <template v-if="note.author.avatar_url">
                     <img :src="note.author.avatar_url" :alt="note.author.username" class="avatar-img">
@@ -105,6 +107,21 @@
                     <i :class="note.user_has_liked ? 'fas' : 'far'" class="fa-heart"></i>
                   </div>
                   <span class="like-count">${ note.likes || 0 }</span>
+                </button>
+              </div>
+
+              <div class="meta-divider"></div>
+
+              <!-- 私信按钮 -->
+              <div class="meta-item">
+                <button
+                  v-if="isAuthenticated && note.author.id !== currentUserId"
+                  class="message-button"
+                  @click="showAuthorModal = true"
+                  title="发送私信"
+                >
+                  <i class="fas fa-envelope"></i>
+                  <span>私信</span>
                 </button>
               </div>
             </div>
@@ -186,7 +203,7 @@
           <i class="fas fa-exclamation-triangle error-icon"></i>
           <h2>${ errorMessage || '无法加载笔记数据' }</h2>
           <p>请检查链接是否正确，或稍后重试</p>
-          <a href="/knowledge/" class="back-to-home-btn modern-btn-primary">
+          <a href="/knowledge/" class="back-to-home-btn modern-btn-primary" @click.prevent="goBack">
             返回首页
           </a>
         </div>
@@ -194,6 +211,15 @@
 
     <!-- 使用 BaseNotification 组件 -->
     <BaseNotification ref="notificationRef" />
+
+    <!-- 用户卡片弹窗 -->
+    <UserCardModal
+      :isVisible="showAuthorModal"
+      :userId="note?.author?.id"
+      :currentUserId="currentUserId"
+      @close="showAuthorModal = false"
+      @message-sent="handleMessageSent"
+    />
   </div>
 </template>
 
@@ -201,10 +227,14 @@
 import { ref, onMounted } from 'vue'
 import NoteShadowViewer from '@components/knowledge/NoteShadowViewer/index.vue'
 import BaseNotification from '@components/common/BaseNotification/index.vue'
+import UserCardModal from '@components/common/UserCardModal/index.vue'
 import { usePublicNoteView } from '@composables/usePublicNoteView'
 import '@/assets/styles/components/public-note-view.css'
 
 const notificationRef = ref(null)
+const showAuthorModal = ref(false)
+const currentUserId = ref(null)
+const isAuthenticated = ref(false)
 
 const {
   note,
@@ -223,7 +253,35 @@ const {
   setupScrollListener
 } = usePublicNoteView(notificationRef)
 
+// 从DOM获取当前用户ID和认证状态
+const getCurrentUserId = () => {
+  const userIdMeta = document.querySelector('meta[name="user-id"]')
+  if (userIdMeta && userIdMeta.content) {
+    // 用户已登录
+    isAuthenticated.value = true
+    const userId = parseInt(userIdMeta.content)
+    return userId > 0 ? userId : null
+  }
+  isAuthenticated.value = false
+  return null
+}
+
+// 返回上一页，无历史则回首页
+const goBack = () => {
+  if (window.history.length > 1) {
+    window.history.back()
+  } else {
+    window.location.href = '/knowledge/'
+  }
+}
+
+// 消息发送回调
+const handleMessageSent = () => {
+  notificationRef.value?.showSuccess('私信已发送')
+}
+
 onMounted(() => {
+  currentUserId.value = getCurrentUserId()
   initializeData()
   setupScrollListener()
 })
@@ -231,4 +289,29 @@ onMounted(() => {
 
 <style scoped>
 @import '@/assets/styles/components/public-note-view.css';
+
+/* 私信按钮样式 */
+.message-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #409eff;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.message-button:hover {
+  transform: translateY(-2px);
+  color: #66b1ff;
+}
+
+.message-button i {
+  font-size: 16px;
+}
 </style>
