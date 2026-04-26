@@ -12,6 +12,7 @@ Django Admin 安全增强 - 自定义登录视图
 
 import time
 import logging
+import hashlib
 import pyotp
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import authenticate, login, logout
@@ -38,6 +39,42 @@ class SecureAdminSite(AdminSite):
     """
 
     login_template = 'admin/secure_login.html'
+
+    @staticmethod
+    def _consume_backup_code(profile, code):
+        """
+        校验并消费 backup code。
+        兼容两种历史数据：
+        1) 新格式：JSONField 存储 sha256 哈希列表
+        2) 旧格式：字符串或列表中的明文备份码
+        """
+        backup_codes = profile.backup_codes or []
+        if isinstance(backup_codes, str):
+            backup_codes = [c.strip() for c in backup_codes.split(',') if c.strip()]
+
+        if not isinstance(backup_codes, list):
+            return False
+
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+
+        # 新格式：匹配哈希
+        if code_hash in backup_codes:
+            backup_codes.remove(code_hash)
+            profile.backup_codes = backup_codes
+            profile.save(update_fields=['backup_codes'])
+            return True
+
+        # 旧格式兼容：匹配明文后迁移为哈希列表
+        normalized_code = code.strip().upper()
+        normalized_codes = [str(c).strip().upper() for c in backup_codes]
+        if normalized_code in normalized_codes:
+            idx = normalized_codes.index(normalized_code)
+            backup_codes.pop(idx)
+            profile.backup_codes = [hashlib.sha256(str(c).encode()).hexdigest() for c in backup_codes]
+            profile.save(update_fields=['backup_codes'])
+            return True
+
+        return False
 
     def login(self, request, extra_context=None):
         """自定义登录视图"""
@@ -202,13 +239,7 @@ class SecureAdminSite(AdminSite):
             verified = False
 
             if use_backup:
-                if profile.backup_codes:
-                    import hashlib
-                    code_hash = hashlib.sha256(code.encode()).hexdigest()
-                    if code_hash in profile.backup_codes:
-                        profile.backup_codes.remove(code_hash)
-                        profile.save(update_fields=['backup_codes'])
-                        verified = True
+                verified = self._consume_backup_code(profile, code)
             elif two_fa_method == 'totp':
                 totp = pyotp.TOTP(profile.totp_secret)
                 if totp.verify(code, valid_window=1):
@@ -268,7 +299,7 @@ class SecureAdminSite(AdminSite):
                 # 生成备用码
                 import secrets
                 backup_codes = [secrets.token_hex(4).upper() for _ in range(5)]
-                profile.backup_codes = ','.join(backup_codes)
+                profile.backup_codes = [hashlib.sha256(c.encode()).hexdigest() for c in backup_codes]
 
                 profile.save()
 

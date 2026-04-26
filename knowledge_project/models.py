@@ -393,6 +393,27 @@ class Profile(models.Model):
         help_text="个人空间或作品被点赞时发送邮件通知"
     )
 
+    # ==================== 账户可发现性（防用户枚举） ====================
+    discoverable_by_username = models.BooleanField(
+        default=False,
+        verbose_name="允许通过用户名搜索到我",
+        help_text="关闭后即使输入完整用户名也无法被搜索到"
+    )
+    discoverable_by_email = models.BooleanField(
+        default=False,
+        verbose_name="允许通过邮箱搜索到我",
+        help_text="关闭后即使输入完整邮箱也无法被搜索到"
+    )
+    search_code = models.CharField(
+        max_length=12,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="公开搜索短码",
+        help_text="8 位随机字符串，用户可主动分享给朋友用于添加"
+    )
+
     # ==================== 保险柜加密相关字段 ====================
     encrypted_vault_key = models.TextField(
         null=True,
@@ -891,6 +912,19 @@ def create_user_profile(sender, instance, created, **kwargs):
         profile = Profile.objects.create(user=instance)
         fetch_avatar(instance)  # 自动拉取头像
 
+        # 生成 8 位搜索短码（若未生成）
+        try:
+            import secrets, string
+            if not profile.search_code:
+                alphabet = string.ascii_uppercase + string.digits
+                for _ in range(5):
+                    code = ''.join(secrets.choice(alphabet) for _ in range(8))
+                    if not Profile.objects.filter(search_code=code).exists():
+                        profile.search_code = code
+                        break
+        except Exception as e:
+            logger.error(f"[Profile] 生成 search_code 失败: {e}")
+
         # ==================== 【新增】自动初始化保密柜 ====================
         try:
             from knowledge_project.utils.vault_crypto import VaultEncryption
@@ -1011,6 +1045,12 @@ class Message(models.Model):
     is_read = models.BooleanField(default=False, verbose_name="已读")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="发送时间")
     read_at = models.DateTimeField(null=True, blank=True, verbose_name="读取时间")
+    # 软删除：各自对自己隐藏
+    deleted_for_sender = models.BooleanField(default=False, verbose_name="发送者已删除")
+    deleted_for_recipient = models.BooleanField(default=False, verbose_name="接收者已删除")
+    # 撤回：双方均不可见（发送者 2 分钟内可撤回 / 阅后即焚触发）
+    is_recalled = models.BooleanField(default=False, verbose_name="已撤回")
+    recalled_at = models.DateTimeField(null=True, blank=True, verbose_name="撤回时间")
 
     class Meta:
         verbose_name = "私信"
@@ -1024,12 +1064,23 @@ class Message(models.Model):
     def __str__(self):
         return f"{self.sender.username} → {self.recipient.username}"
 
+    def visible_to(self, user):
+        """判断该消息对给定用户是否可见"""
+        if self.is_recalled:
+            return False
+        if user.id == self.sender_id and self.deleted_for_sender:
+            return False
+        if user.id == self.recipient_id and self.deleted_for_recipient:
+            return False
+        return True
+
 
 class MessagePreference(models.Model):
     """用户的私信偏好设置"""
     MESSAGE_MODE_CHOICES = [
         ('all', '所有已登录用户'),
         ('followers_only', '仅关注者'),
+        ('following_only', '仅我关注的人'),
         ('disabled', '禁用私信'),
     ]
 
@@ -1055,6 +1106,13 @@ class MessagePreference(models.Model):
         verbose_name="自动回复内容"
     )
     notify_new_message = models.BooleanField(default=True, verbose_name="邮件通知新私信")
+    browser_new_message = models.BooleanField(default=False, verbose_name="浏览器通知新私信")
+    last_email_notified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="最后邮件通知时间",
+        help_text="用于聚合邮件（同一对话 15 分钟内最多一封）"
+    )
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
     class Meta:
@@ -1096,6 +1154,156 @@ class UserBlocklist(models.Model):
 
     def __str__(self):
         return f"{self.user.username} 屏蔽了 {self.blocked_user.username}"
+
+
+class UserFollow(models.Model):
+    """用户关注 / 订阅关系"""
+    follower = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='following_set',
+        verbose_name="关注者"
+    )
+    following = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='follower_set',
+        verbose_name="被关注者"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="关注时间")
+
+    class Meta:
+        verbose_name = "用户关注"
+        verbose_name_plural = "用户关注"
+        unique_together = ('follower', 'following')
+        indexes = [
+            models.Index(fields=['follower', 'following']),
+            models.Index(fields=['following', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.follower.username} 关注了 {self.following.username}"
+
+
+class NewConversationQuotaLog(models.Model):
+    """新对话配额日志：用户每天主动向多少个陌生人发起新对话"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='new_conv_quota_logs',
+        verbose_name="发起者"
+    )
+    peer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='+',
+        verbose_name="对方"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="发起时间")
+    turnstile_passed = models.BooleanField(default=False, verbose_name="本次是否通过了 Turnstile")
+
+    class Meta:
+        verbose_name = "新对话配额日志"
+        verbose_name_plural = "新对话配额日志"
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.peer.username} @ {self.created_at}"
+
+
+class ConversationSettings(models.Model):
+    """用户对单个对话（peer）的个人会话设置
+
+    设计为单向记录：user 视角下对 peer 的所有可调项。同一个会话在双方各有一条。
+    """
+    DISAPPEARING_CHOICES = [
+        (0, '立即（阅读后即焚）'),
+        (3600, '1 小时'),
+        (86400, '24 小时'),
+        (604800, '7 天'),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='conversation_settings', verbose_name="归属用户"
+    )
+    peer = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='+', verbose_name="对方"
+    )
+    is_pinned = models.BooleanField(default=False, verbose_name="置顶")
+    pinned_at = models.DateTimeField(null=True, blank=True, verbose_name="置顶时间")
+    is_muted = models.BooleanField(default=False, verbose_name="消息免打扰")
+    is_archived = models.BooleanField(default=False, verbose_name="已归档")
+    archived_at = models.DateTimeField(null=True, blank=True, verbose_name="归档时间")
+    disappearing_enabled = models.BooleanField(default=False, verbose_name="开启阅后即焚")
+    disappearing_ttl_seconds = models.IntegerField(default=86400, verbose_name="阅后即焚 TTL (秒)")
+    last_read_at = models.DateTimeField(null=True, blank=True, verbose_name="最后读取时间")
+    force_unread = models.BooleanField(default=False, verbose_name="手动标记未读")
+    cleared_before = models.DateTimeField(null=True, blank=True, verbose_name="清空时间（不显示此时间之前的消息）")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "会话设置"
+        verbose_name_plural = "会话设置"
+        unique_together = ('user', 'peer')
+        indexes = [
+            models.Index(fields=['user', 'is_archived']),
+            models.Index(fields=['user', 'is_pinned']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.peer.username} 会话设置"
+
+
+class MessageReport(models.Model):
+    """举报记录"""
+    REASON_CHOICES = [
+        ('spam', '垃圾广告'),
+        ('abuse', '辱骂骚扰'),
+        ('porn', '色情低俗'),
+        ('scam', '诈骗欺诈'),
+        ('other', '其他'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', '待处理'),
+        ('resolved', '已处理'),
+        ('dismissed', '已驳回'),
+    ]
+
+    reporter = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='+', verbose_name="举报者"
+    )
+    reported_user = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='+', verbose_name="被举报者"
+    )
+    message = models.ForeignKey(
+        Message, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='reports', verbose_name="关联消息"
+    )
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES, verbose_name="原因")
+    detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="处理状态"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="举报时间")
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+
+    class Meta:
+        verbose_name = "私信举报"
+        verbose_name_plural = "私信举报"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['reported_user']),
+        ]
+
+    def __str__(self):
+        return f"{self.reporter.username} 举报 {self.reported_user.username} ({self.get_reason_display()})"
 
 
 @receiver(post_save, sender=User)

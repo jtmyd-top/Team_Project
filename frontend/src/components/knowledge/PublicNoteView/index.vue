@@ -124,6 +124,21 @@
                   <span>私信</span>
                 </button>
               </div>
+
+              <!-- 关注按钮 -->
+              <div class="meta-item" v-if="isAuthenticated && note.author.id !== currentUserId">
+                <button
+                  class="follow-button"
+                  :class="{ 'is-following': isFollowing }"
+                  :disabled="followLoading"
+                  @click="toggleFollow"
+                  :title="isFollowing ? '取消关注' : '关注此作者'"
+                >
+                  <i :class="isFollowing ? 'fas fa-user-check' : 'fas fa-user-plus'"></i>
+                  <span>${ isFollowing ? '已关注' : '关注' }</span>
+                  <span v-if="followersCount > 0" class="follow-count">${ followersCount }</span>
+                </button>
+              </div>
             </div>
           </header>
 
@@ -224,7 +239,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import NoteShadowViewer from '@components/knowledge/NoteShadowViewer/index.vue'
 import BaseNotification from '@components/common/BaseNotification/index.vue'
 import UserCardModal from '@components/common/UserCardModal/index.vue'
@@ -235,6 +250,11 @@ const notificationRef = ref(null)
 const showAuthorModal = ref(false)
 const currentUserId = ref(null)
 const isAuthenticated = ref(false)
+
+// 关注状态
+const isFollowing = ref(false)
+const followersCount = ref(0)
+const followLoading = ref(false)
 
 const {
   note,
@@ -280,11 +300,68 @@ const handleMessageSent = () => {
   notificationRef.value?.showSuccess('私信已发送')
 }
 
+// 关注状态 / 切换
+const getCsrfToken = () =>
+  document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
+
+const loadFollowStatus = async () => {
+  if (!note.value?.author?.id) return
+  try {
+    const r = await fetch(`/api/users/${note.value.author.id}/follow-status/`)
+    if (r.ok) {
+      const d = await r.json()
+      isFollowing.value = !!d.is_following
+      followersCount.value = d.followers_count || 0
+    }
+  } catch (e) {
+    console.error('加载关注状态失败:', e)
+  }
+}
+
+const toggleFollow = async () => {
+  if (!isAuthenticated.value || !note.value?.author?.id) return
+  if (followLoading.value) return
+  followLoading.value = true
+  const endpoint = isFollowing.value ? '/api/users/unfollow/' : '/api/users/follow/'
+  try {
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCsrfToken(),
+      },
+      body: JSON.stringify({ user_id: note.value.author.id }),
+    })
+    const d = await r.json()
+    if (r.ok && d.status === 'success') {
+      isFollowing.value = !!d.is_following
+      followersCount.value = d.followers_count ?? followersCount.value
+      notificationRef.value?.showSuccess(isFollowing.value ? '关注成功' : '已取消关注')
+    } else {
+      notificationRef.value?.showError(d.error || '操作失败')
+    }
+  } catch (e) {
+    notificationRef.value?.showError('网络错误，请稍后重试')
+  } finally {
+    followLoading.value = false
+  }
+}
+
 onMounted(() => {
   currentUserId.value = getCurrentUserId()
   initializeData()
   setupScrollListener()
 })
+
+// 笔记加载完成后再拉关注状态
+watch(
+  () => note.value?.author?.id,
+  (authorId) => {
+    if (authorId && isAuthenticated.value && authorId !== currentUserId.value) {
+      loadFollowStatus()
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -313,5 +390,51 @@ onMounted(() => {
 
 .message-button i {
   font-size: 16px;
+}
+
+/* 关注按钮样式 */
+.follow-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: none;
+  border: 1px solid #67c23a;
+  border-radius: 8px;
+  color: #67c23a;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.follow-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: rgba(103, 194, 58, 0.08);
+}
+
+.follow-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.follow-button.is-following {
+  background: #67c23a;
+  color: #fff;
+}
+
+.follow-button.is-following:hover:not(:disabled) {
+  background: #f56c6c;
+  border-color: #f56c6c;
+}
+
+.follow-button i {
+  font-size: 16px;
+}
+
+.follow-count {
+  font-size: 10px;
+  opacity: 0.85;
 }
 </style>

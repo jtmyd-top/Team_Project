@@ -18,7 +18,7 @@ from django.http import (
 )
 from django.views.decorators.http import require_http_methods
 
-from ..models import Asset
+from ..models import Asset, Note
 
 logger = logging.getLogger(__name__)
 
@@ -134,16 +134,28 @@ def protected_media_view(request, file_path):
     is_authenticated = request.user.is_authenticated
     is_uploader = is_authenticated and asset.uploader == request.user
 
-    # 检查请求是否来自公开笔记页面
-    referer = request.META.get('HTTP_REFERER', '')
-    is_from_public_note = '/notes/public/' in referer
+    # 仅当资源真实被公开笔记引用时，才允许匿名访问
+    protected_url = asset.get_protected_url()
+    is_referenced_by_public_note = bool(
+        protected_url and
+        Note.objects.filter(
+            is_public=True,
+            is_trashed=False,
+            content__contains=protected_url
+        ).exists()
+    )
 
-    # 权限判断：上传者本人 或 来自公开笔记页面的请求
-    if not is_uploader and not is_from_public_note:
+    # 权限判断：上传者本人 或 资源被公开笔记显式引用
+    if not is_uploader and not is_referenced_by_public_note:
         return HttpResponseForbidden("您无权访问此文件。")
 
-    # 文件服务逻辑保持不变
-    file_full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+    # 防路径穿越：确保最终路径始终在 MEDIA_ROOT 下
+    normalized_file_path = os.path.normpath(file_path).lstrip('/\\')
+    file_full_path = os.path.normpath(os.path.join(settings.MEDIA_ROOT, normalized_file_path))
+    media_root_norm = os.path.normpath(settings.MEDIA_ROOT)
+    if file_full_path != media_root_norm and not file_full_path.startswith(media_root_norm + os.sep):
+        raise Http404
+
     try:
         with open(file_full_path, 'rb') as f:
             content_type, _ = mimetypes.guess_type(file_full_path)
@@ -189,7 +201,6 @@ def ckeditor_image_upload_view(request):
         # 阶段一：保存元数据
         new_asset = Asset(
             uploader=current_user,
-            project=None,
             asset_type='image',
             image_hash=file_hash,
             name=image_file.name

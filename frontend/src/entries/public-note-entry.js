@@ -1,4 +1,4 @@
-// 公开笔记详情页 - 三栏布局 + 评论区
+﻿// 公开笔记详情页 - 三栏布局 + 评论区
 document.addEventListener('DOMContentLoaded', function () {
 
   // 解析服务端传递的数据
@@ -94,6 +94,18 @@ document.addEventListener('DOMContentLoaded', function () {
               >
                 <i :class="note.user_has_liked ? 'fas fa-heart' : 'far fa-heart'"></i>
                 {{ note.user_has_liked ? '已点赞' : '点个赞' }}
+              </button>
+              <button
+                v-if="!isOwnNote"
+                class="pn-follow-btn"
+                :class="{ following: isFollowing }"
+                @click="toggleFollow"
+                :disabled="followLoading"
+                :title="isFollowing ? '取消关注' : '关注作者'"
+              >
+                <i :class="isFollowing ? 'fas fa-user-check' : 'fas fa-user-plus'"></i>
+                {{ isFollowing ? '已关注' : '关注' }}
+                <span v-if="followersCount > 0" class="pn-follow-count">{{ followersCount }}</span>
               </button>
               <button
                 v-if="isAuthenticated && !isOwnNote"
@@ -392,6 +404,9 @@ document.addEventListener('DOMContentLoaded', function () {
         errorMessage: null,
         fullContent: '',
         isLiking: false,
+        isFollowing: false,
+        followLoading: false,
+        followersCount: 0,
         isAuthenticated: false,
         readingTime: 0,
         moreNotes: [],
@@ -489,6 +504,8 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         this.readingTime = Math.max(1, Math.ceil(this.fullContent.replace(/<[^>]+>/g, '').length / 400));
+
+        this.fetchFollowStatus();
 
         // DOM 更新后增强代码块 + 初始化 TOC 高亮 + 加载评论
         this.$nextTick(() => {
@@ -645,6 +662,47 @@ document.addEventListener('DOMContentLoaded', function () {
 
       // ── 私信 ────────────────────────────────────────────────────────────
 
+      async fetchFollowStatus() {
+        if (!this.note || !this.note.author || !this.note.author.id || this.isOwnNote) return;
+        try {
+          const res = await fetch(`/api/users/${this.note.author.id}/follow-status/`);
+          if (!res.ok) return;
+          const data = await res.json();
+          this.isFollowing = !!data.is_following;
+          this.followersCount = Number(data.followers_count || 0);
+        } catch (e) {
+          console.error('加载关注状态失败:', e);
+        }
+      },
+
+      async toggleFollow() {
+        if (this.followLoading || this.isOwnNote || !this.note || !this.note.author || !this.note.author.id) return;
+        if (!this.isAuthenticated) {
+          window.location.href = '/login/?next=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        this.followLoading = true;
+        try {
+          const endpoint = this.isFollowing ? '/api/users/unfollow/' : '/api/users/follow/';
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.getCookie('csrftoken') },
+            body: JSON.stringify({ user_id: this.note.author.id })
+          });
+          const data = await res.json();
+          if (res.ok && data.status === 'success') {
+            this.isFollowing = !!data.is_following;
+            this.followersCount = Number(data.followers_count || 0);
+            this.showToast(this.isFollowing ? '关注成功' : '已取消关注', 'success');
+          } else {
+            this.showToast(data.error || '关注操作失败', 'error');
+          }
+        } catch (e) {
+          this.showToast('网络错误，请稍后重试', 'error');
+        } finally {
+          this.followLoading = false;
+        }
+      },
       openMessageModal() {
         this.messageTarget = {
           userId: this.note.author.id,
@@ -934,3 +992,10 @@ document.addEventListener('DOMContentLoaded', function () {
   app.config.errorHandler = (err, vm, info) => console.error('Vue error:', err, info);
   app.mount('#public-note-app');
 });
+
+
+
+
+
+
+

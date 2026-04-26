@@ -55,6 +55,18 @@
           <span>主页</span>
         </button>
 
+        <!-- 关注 / 取消关注 -->
+        <button
+          v-if="isCurrentUser === false"
+          class="action-btn follow-btn"
+          :class="{ 'is-following': isFollowing }"
+          :disabled="followLoading"
+          @click="toggleFollow"
+          :title="isFollowing ? '取消关注' : '关注此用户'">
+          <i :class="isFollowing ? 'fas fa-user-check' : 'fas fa-user-plus'"></i>
+          <span>{{ isFollowing ? `已关注 · ${followersCount}` : `关注 · ${followersCount}` }}</span>
+        </button>
+
         <!-- 屏蔽/取消屏蔽 -->
         <button
           v-if="isCurrentUser === false"
@@ -107,6 +119,11 @@ const emit = defineEmits(['close', 'message-sent'])
 const isEntering = ref(false)
 const showMessageModal = ref(false)
 const isBlocked = ref(false)
+
+// 关注状态
+const isFollowing = ref(false)
+const followersCount = ref(0)
+const followLoading = ref(false)
 
 const userInfo = reactive({
   username: '',
@@ -207,6 +224,47 @@ const toggleBlock = async () => {
   }
 }
 
+// 加载关注状态
+const loadFollowStatus = async () => {
+  if (!props.userId) return
+  try {
+    const res = await fetch(`/api/users/${props.userId}/follow-status/`)
+    if (res.ok) {
+      const data = await res.json()
+      isFollowing.value = !!data.is_following
+      followersCount.value = data.followers_count || 0
+    }
+  } catch (e) {
+    console.error('加载关注状态失败:', e)
+  }
+}
+
+// 切换关注
+const toggleFollow = async () => {
+  if (followLoading.value || !props.userId) return
+  followLoading.value = true
+  const endpoint = isFollowing.value ? '/api/users/unfollow/' : '/api/users/follow/'
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCsrfToken(),
+      },
+      body: JSON.stringify({ user_id: props.userId })
+    })
+    const data = await res.json()
+    if (res.ok && data.status === 'success') {
+      isFollowing.value = !!data.is_following
+      followersCount.value = data.followers_count ?? followersCount.value
+    }
+  } catch (e) {
+    console.error('关注操作失败:', e)
+  } finally {
+    followLoading.value = false
+  }
+}
+
 // 获取CSRF令牌
 const getCsrfToken = () => {
   return document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
@@ -219,6 +277,7 @@ const initialize = () => {
     isEntering.value = true
     loadUserInfo()
     loadMessagePreference()
+    loadFollowStatus()
   }
 }
 
@@ -431,6 +490,33 @@ watch(() => props.isVisible, (newVal) => {
   background: #f0f0f0;
   color: #666;
   border-color: #ddd;
+}
+
+.follow-btn {
+  grid-column: 1 / -1;
+  background: white;
+  color: #67c23a;
+  border: 1px solid #67c23a;
+  flex-direction: row;
+}
+
+.follow-btn:hover:not(:disabled) {
+  background: #f0f9eb;
+}
+
+.follow-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.follow-btn.is-following {
+  background: #67c23a;
+  color: white;
+}
+
+.follow-btn.is-following:hover:not(:disabled) {
+  background: #f56c6c;
+  border-color: #f56c6c;
 }
 
 .info-message {

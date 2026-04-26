@@ -1,8 +1,10 @@
 """用户注册视图。"""
 from ._shared import *
+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 
 
-@method_decorator(csrf_exempt, name='dispatch')
+@method_decorator(ensure_csrf_cookie, name='dispatch')
+@method_decorator(csrf_protect, name='dispatch')
 class SignUpView(View):
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:

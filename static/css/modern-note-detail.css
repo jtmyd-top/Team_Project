@@ -339,6 +339,54 @@ body {
 }
 .pn-like-btn i { font-size: 14px; }
 
+.pn-follow-btn {
+  width: 100%;
+  margin-top: 0.6rem;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1.5px solid var(--pn-border);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--pn-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pn-follow-btn:hover:not(:disabled) {
+  border-color: var(--pn-primary);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.pn-follow-btn.following {
+  color: #16a34a;
+  border-color: #86efac;
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.pn-follow-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pn-follow-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--pn-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 /* 标签卡片 */
 .pn-tags-wrap {
   display: flex;

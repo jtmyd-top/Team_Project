@@ -447,5 +447,67 @@ class TrustedDeviceAdmin(admin.ModelAdmin):
             device.revoked_reason = f'管理员手动撤销 by {request.user.username}'
             device.save(update_fields=['is_revoked', 'revoked_reason'])
             revoked_count += 1
-
         self.message_user(request, f'成功撤销 {revoked_count} 个设备的信任', messages.SUCCESS)
+
+
+# ---------------------------------
+#  私信 / 会话设置 / 举报
+# ---------------------------------
+from .models import (
+    Message, MessagePreference, UserBlocklist,
+    ConversationSettings, MessageReport,
+)
+
+
+@admin.register(Message)
+class MessageAdmin(admin.ModelAdmin):
+    list_display = ('id', 'sender', 'recipient', 'short_content', 'is_read',
+                    'is_recalled', 'deleted_for_sender', 'deleted_for_recipient', 'created_at')
+    list_filter = ('is_read', 'is_recalled', 'created_at')
+    search_fields = ('sender__username', 'recipient__username', 'content')
+    readonly_fields = ('created_at', 'read_at', 'recalled_at')
+
+    def short_content(self, obj):
+        return (obj.content or '')[:40]
+    short_content.short_description = '内容'
+
+
+@admin.register(ConversationSettings)
+class ConversationSettingsAdmin(admin.ModelAdmin):
+    list_display = ('user', 'peer', 'is_pinned', 'is_muted', 'is_archived',
+                    'disappearing_enabled', 'force_unread', 'updated_at')
+    list_filter = ('is_pinned', 'is_muted', 'is_archived', 'disappearing_enabled')
+    search_fields = ('user__username', 'peer__username')
+
+
+@admin.register(MessageReport)
+class MessageReportAdmin(admin.ModelAdmin):
+    list_display = ('id', 'reporter', 'reported_user', 'reason', 'status', 'created_at')
+    list_filter = ('status', 'reason', 'created_at')
+    search_fields = ('reporter__username', 'reported_user__username', 'detail')
+    readonly_fields = ('reporter', 'reported_user', 'message', 'reason', 'detail', 'created_at')
+    actions = ['mark_resolved', 'mark_dismissed']
+
+    @admin.action(description='标记为已处理')
+    def mark_resolved(self, request, queryset):
+        from django.utils import timezone
+        queryset.update(status='resolved', resolved_at=timezone.now())
+
+    @admin.action(description='标记为已驳回')
+    def mark_dismissed(self, request, queryset):
+        from django.utils import timezone
+        queryset.update(status='dismissed', resolved_at=timezone.now())
+
+
+@admin.register(MessagePreference)
+class MessagePreferenceAdmin(admin.ModelAdmin):
+    list_display = ('user', 'allow_messages', 'message_mode',
+                    'show_read_status', 'auto_reply_enabled', 'updated_at')
+    list_filter = ('allow_messages', 'message_mode')
+    search_fields = ('user__username',)
+
+
+@admin.register(UserBlocklist)
+class UserBlocklistAdmin(admin.ModelAdmin):
+    list_display = ('user', 'blocked_user', 'reason', 'created_at')
+    search_fields = ('user__username', 'blocked_user__username')

@@ -77,7 +77,7 @@ class ContentSecurityPolicyMiddleware:
     """
 
     # 需要跳过 CSP 的路径（认证相关页面使用 Turnstile）
-    AUTH_PATHS = ['/login', '/signup', '/forgot-password', '/reset-password', '/settings', '/knowledge']
+    AUTH_PATHS = ['/login', '/signup', '/forgot-password', '/reset-password']
 
     def __init__(self, get_response):
         self.get_response = get_response

@@ -34,6 +34,31 @@
 
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
 
+    <!-- 导航栏未读角标样式（与 messages 模块同色系） -->
+    <style>
+      .nav-messages-link {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 8px;
+        position: relative;
+      }
+      .nav-unread-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        margin-left: auto;
+        border-radius: 9px;
+        background: var(--danger-color, #ef4444);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1;
+      }
+    </style>
+
     <!-- 主题管理器 - 尽早加载以避免闪烁 -->
     <script type="module" src="{% static 'dist/theme-manager.js' %}"></script>
 
@@ -95,7 +120,12 @@
                     </div>
                     <ul class="user-card-menu">
                       {% if user.is_authenticated %}
-                      <li><a href="{% url 'messages' %}"><i class="fas fa-envelope"></i> 私信</a></li>
+                      <li>
+                        <a href="{% url 'messages' %}" class="nav-messages-link">
+                          <i class="fas fa-envelope"></i> 私信
+                          <span id="navUnreadBadge" class="nav-unread-badge" style="display:none">0</span>
+                        </a>
+                      </li>
                       {% endif %}
                       <li><a href="{%url 'settings'%}"><i class="fas fa-cog"></i> 设置</a></li>
                       <li class="divider"></li>
@@ -227,6 +257,35 @@ document.addEventListener("DOMContentLoaded", function() {
       debugLog('Force reset z-index');
     }
   }, 5000);
+
+  // ========== 未读私信角标轮询 ==========
+  const unreadBadge = document.getElementById('navUnreadBadge');
+  if (unreadBadge) {
+    const updateBadge = (count) => {
+      const n = parseInt(count, 10);
+      if (!n || n <= 0) {
+        unreadBadge.style.display = 'none';
+        unreadBadge.textContent = '0';
+      } else {
+        unreadBadge.style.display = 'inline-flex';
+        unreadBadge.textContent = n > 99 ? '99+' : String(n);
+      }
+    };
+
+    const fetchUnread = () => {
+      fetch('/api/messages/unread-count/', { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d && d.status === 'success') {
+            updateBadge(d.unread_count);
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchUnread();
+    setInterval(fetchUnread, 30000);
+  }
 });
 </script>
 

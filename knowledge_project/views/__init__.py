@@ -20,6 +20,7 @@ from .auth import *  # noqa: F401, F403
 from .captcha import *  # noqa: F401, F403
 from .comment import *  # noqa: F401, F403
 from .dashboard import *  # noqa: F401, F403
+from .follow import *  # noqa: F401, F403
 from .message import *  # noqa: F401, F403
 from .note import *  # noqa: F401, F403
 from .profile import *  # noqa: F401, F403
