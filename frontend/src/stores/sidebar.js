@@ -157,6 +157,16 @@ export const useSidebarStore = defineStore('sidebar', () => {
    */
   function setActiveModule(module) {
     const previousModule = activeModule.value
+    const isModuleChanged = previousModule !== module
+
+    if (isModuleChanged) {
+      currentNoteId.value = null
+      currentFolderId.value = null
+      currentFolder.value = null
+      currentSubfolders.value = []
+      breadcrumb.value = []
+    }
+
     activeModule.value = module
 
     // 【安全】从保密柜切换到其他模块时，清空当前笔记 ID
@@ -169,12 +179,8 @@ export const useSidebarStore = defineStore('sidebar', () => {
     // 根据模块重置视图
     if (module === 'my-space') {
       secondaryView.value = 'folders'
-      currentFolderId.value = null
-      currentFolder.value = null
-      breadcrumb.value = []
     } else {
       secondaryView.value = 'notes'
-      currentFolderId.value = null
     }
 
     // 更新 URL
@@ -379,6 +385,9 @@ export const useSidebarStore = defineStore('sidebar', () => {
     error.value = null
 
     try {
+      currentNoteId.value = null
+      window.dispatchEvent(new CustomEvent('knowledge-preview-clear'))
+
       const response = await fetch('/api/folders/trashed-items/')
       const data = await response.json()
 

@@ -1,0 +1,62 @@
+<h1>UBB 使用方法教程</h1>
+<p>这篇教程整理了当前项目中已经支持的 UBB 语法，适用于公开笔记、评论区，以及现已接入的私信消息展示。</p>
+
+<h2>一、基础文字样式</h2>
+<p>下面这些用于文本加粗、斜体、下划线和颜色：</p>
+<pre><code>[b]加粗[/b]
+[i]斜体[/i]
+[u]下划线[/u]
+[forecolor=red]红色文字[/forecolor]</code></pre>
+
+<h2>二、链接、图片、音频、视频</h2>
+<p>常用的多媒体标签如下：</p>
+<pre><code>[url=https://yaohuo.me]妖火网[/url]
+[img]图片直链地址[/img]
+[audio]音频直链地址[/audio]
+[movie]视频直链地址[/movie]</code></pre>
+<p>说明：图片、音频、视频建议使用可直接访问的直链。</p>
+
+<h2>三、QQ 音乐与网易云音乐</h2>
+<p>音乐播放器支持这两类标签：</p>
+<pre><code>[qqmusic]歌曲ID[/qqmusic]
+[qqmusic]带 songid / songmid / songDetail 的 QQ 音乐链接[/qqmusic]
+[wymusic]歌曲ID[/wymusic]</code></pre>
+<p>建议优先使用歌曲 ID，稳定性最高。QQ 音乐如果是分享短链文案，系统会尽量自动解析；如果平台返回异常页，可能会降级为普通链接。</p>
+
+<h2>四、可复制代码块</h2>
+<p>代码内容可以这样写：</p>
+<pre><code>[code]PubkeyAuthentication yes
+PermitRootLogin yes
+AuthorizedKeysFile .ssh/authorized_keys[/code]</code></pre>
+<p>显示时会统一转换成项目当前的代码块样式，并附带复制按钮。</p>
+
+<h2>五、全角转半角</h2>
+<p>如果需要把一段文本中的全角符号转为半角，可以这样写：</p>
+<pre><code>[text]ＡＢＣ１２３，（）【】[/text]</code></pre>
+
+<h2>六、时间与倒计时</h2>
+<p>这两个标签会在页面渲染时动态计算：</p>
+<pre><code>[now]
+[codo]2030-01-01[/codo]</code></pre>
+<p><code>[now]</code> 用于显示当前时间，<code>[codo]</code> 用于显示距离目标日期还有多少天。</p>
+
+<h2>七、使用建议</h2>
+<ul>
+  <li>需要最稳妥展示时，优先使用完整、直接的链接。</li>
+  <li>QQ 音乐推荐使用歌曲 ID，避免分享短链被平台拦截或重定向失败。</li>
+  <li>多行代码建议完整写在 <code>[code]...[/code]</code> 标签内。</li>
+  <li>如果某个外链内容没有正常显示，先检查链接本身是否可公开访问。</li>
+</ul>
+
+<h2>八、示例合集</h2>
+<pre><code>[b]加粗[/b]
+[url=https://example.com]超链接[/url]
+[img]https://example.com/demo.jpg[/img]
+[audio]https://example.com/demo.mp3[/audio]
+[movie]https://example.com/demo.mp4[/movie]
+[qqmusic]243750726[/qqmusic]
+[wymusic]2608813260[/wymusic]
+[code]echo hello[/code]
+[text]ＡＢＣ１２３[/text]
+[now]
+[codo]2030-01-01[/codo]</code></pre>

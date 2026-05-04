@@ -9,6 +9,7 @@ import { useCodeEnhancer } from '@composables/useCodeEnhancer'
 import { useClientCrypto } from '@composables/useClientCrypto'
 import { useVaultStore } from '@/stores/vault'
 import { getShadowStyles, purifyConfig, TOC_THRESHOLD } from '@/components/knowledge/NoteShadowViewer/config.js'
+import { convertUbbMarkupInHtml, hydrateUbbDom } from '@/utils/ubb'
 
 export function useNoteShadowViewer(props) {
   // ==================== Refs ====================
@@ -159,7 +160,8 @@ export function useNoteShadowViewer(props) {
         tocItems.value = []
         showToc.value = false
       } else {
-        cachedCleanHtml = DOMPurify.sanitize(rawHtml, purifyConfig)
+        const normalizedHtml = convertUbbMarkupInHtml(rawHtml)
+        cachedCleanHtml = DOMPurify.sanitize(normalizedHtml, purifyConfig)
         console.log('[ShadowViewer] Sanitized HTML has pre tags:', cachedCleanHtml.includes('<pre'))
         tocItems.value = props.toc || []
         showToc.value = tocItems.value.length >= TOC_THRESHOLD
@@ -192,6 +194,8 @@ export function useNoteShadowViewer(props) {
 
       const preBlocks = content.querySelectorAll('pre')
       console.log('[CodeEnhancer] Found pre blocks:', preBlocks.length)
+
+      hydrateUbbDom(content)
 
       if (preBlocks.length > 0) {
         preBlocks.forEach((pre, index) => {

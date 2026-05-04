@@ -58,6 +58,10 @@
       "assets/index.css"
     ]
   },
+  "_preload-helper-CYKyUB34.js": {
+    "file": "chunks/preload-helper-CYKyUB34.js",
+    "name": "preload-helper"
+  },
   "_usePasswordStrength-CtF29Ab7.js": {
     "file": "chunks/usePasswordStrength-CtF29Ab7.js",
     "name": "usePasswordStrength",
@@ -79,6 +83,12 @@
   "_vue-vendor-BycGvb3a.js": {
     "file": "chunks/vue-vendor-BycGvb3a.js",
     "name": "vue-vendor"
+  },
+  "src/composables/useCodeEnhancer.js": {
+    "file": "chunks/useCodeEnhancer-D0rmz2rR.js",
+    "name": "useCodeEnhancer",
+    "src": "src/composables/useCodeEnhancer.js",
+    "isDynamicEntry": true
   },
   "src/entries/dashboard.js": {
     "file": "dashboard.js",
@@ -135,7 +145,10 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
+      "_preload-helper-CYKyUB34.js",
+      "src/utils/ubb.js",
       "_vendor-wzGsUuS6.js",
+      "src/composables/useCodeEnhancer.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "_index-Ccs9ac-W.js",
       "_index-BUtN-9n3.js"
@@ -169,6 +182,8 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
+      "src/composables/useCodeEnhancer.js",
+      "src/utils/ubb.js",
       "_element-plus-3zH3XlIy.js",
       "_index-BUtN-9n3.js",
       "_user-CYVfXQjS.js",
@@ -182,7 +197,14 @@
     "file": "public-note-entry.js",
     "name": "public-note-entry",
     "src": "src/entries/public-note-entry.js",
-    "isEntry": true
+    "isEntry": true,
+    "imports": [
+      "_preload-helper-CYKyUB34.js"
+    ],
+    "dynamicImports": [
+      "src/utils/ubb.js",
+      "src/composables/useCodeEnhancer.js"
+    ]
   },
   "src/entries/public-note-page.js": {
     "file": "public-note-page.js",
@@ -253,5 +275,14 @@
     "name": "theme-manager",
     "src": "src/entries/theme-manager.js",
     "isEntry": true
+  },
+  "src/utils/ubb.js": {
+    "file": "chunks/ubb-CzoRHiNp.js",
+    "name": "ubb",
+    "src": "src/utils/ubb.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-wzGsUuS6.js"
+    ]
   }
 }

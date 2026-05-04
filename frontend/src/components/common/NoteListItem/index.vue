@@ -5,6 +5,10 @@
     draggable="true"
     @click="handleClick"
     @contextmenu.prevent="handleContextMenu"
+    @touchstart="handleTouchStart"
+    @touchmove="handleTouchMove"
+    @touchend="handleTouchEnd"
+    @touchcancel="handleTouchCancel"
     @dragstart="handleDragStart"
     @dragend="handleDragEnd"
   >
@@ -165,6 +169,10 @@ const {
   handleDragEnd,
   handleClick,
   handleContextMenu,
+  handleTouchStart,
+  handleTouchMove,
+  handleTouchEnd,
+  handleTouchCancel,
   handleFavorite,
   handleTrash,
   handleRestore,
@@ -181,6 +189,9 @@ const {
   cursor: pointer;
   transition: background 0.2s, opacity 0.2s, transform 0.2s;
   border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.05));
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+  user-select: none;
 }
 
 .note-list-item:hover {

@@ -621,7 +621,20 @@ export function useSecondaryPanel(props, emit) {
    * 使用 vaultStore.encrypt（内部走 Web Crypto + 非导出 CryptoKey），调用前需确保 vault 已解锁
    * @param {Object} note - 笔记对象
    */
-  async function performEncryption(note) {
+  function assertEncryptionSourceIntegrity(latestNoteData, sourceSnapshot) {
+    const latestContent = latestNoteData?.content || ''
+    const snapshotContent = sourceSnapshot?.content || ''
+
+    if (!snapshotContent) return
+
+    if (latestContent.length < snapshotContent.length) {
+      throw new Error(
+        `安全中止：待加密内容长度异常变短（当前 ${latestContent.length}，原始 ${snapshotContent.length}）。为避免笔记内容丢失，已取消纳入保密柜。`
+      )
+    }
+  }
+
+  async function performEncryption(note, sourceSnapshot = null) {
     if (!note || !note.id) {
       throw new Error('笔记对象无效')
     }
@@ -633,7 +646,7 @@ export function useSecondaryPanel(props, emit) {
     try {
       // 【关键】始终从数据库加载最新的笔记数据，确保获取的是最新内容
       console.log(`[Vault] Loading latest note data for ID: ${note.id}`)
-      const fetchResp = await fetch(`/api/notes/${note.id}/`, {
+      const fetchResp = await fetch(`/api/notes/${note.id}/?full_content=true`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       })
@@ -645,6 +658,8 @@ export function useSecondaryPanel(props, emit) {
       const noteData = await fetchResp.json()
       let plainTitle = noteData.title || ''
       let plainContent = noteData.content || ''
+
+      assertEncryptionSourceIntegrity(noteData, sourceSnapshot)
 
       if (!plainContent || plainContent.trim() === '') {
         throw new Error('笔记内容为空，无法加密')
@@ -674,7 +689,9 @@ export function useSecondaryPanel(props, emit) {
         },
         body: JSON.stringify({
           title: encryptedTitle,
-          content: encryptedContent
+          content: encryptedContent,
+          vault_source_content_length: plainContent.length,
+          vault_original_content_length: (sourceSnapshot?.content || '').length || plainContent.length
         })
       })
 
@@ -757,12 +774,12 @@ export function useSecondaryPanel(props, emit) {
    * 执行加密并保存
    * 包含两个分支的智能逻辑
    */
-  async function executeEncryptAndSave(note) {
+  async function executeEncryptAndSave(note, sourceSnapshot = null) {
     if (vaultStore.isUnlocked) {
       // ========== 分支 A: Smart Pass（已解锁）==========
       console.log('[Vault] Branch A: Smart Pass - Vault already unlocked')
       try {
-        await performEncryption(note)
+        await performEncryption(note, sourceSnapshot)
         ElMessage.success('加入保密柜成功！内容已加密')
         await refreshVaultData(note)
       } catch (e) {
@@ -797,7 +814,7 @@ export function useSecondaryPanel(props, emit) {
           throw new Error('重新标记为保密笔记失败')
         }
 
-        await performEncryption(note)
+        await performEncryption(note, sourceSnapshot)
       }
 
       vaultStore.setPendingOperation(note.id, note.content, encryptOperation)
@@ -838,7 +855,7 @@ export function useSecondaryPanel(props, emit) {
       // 先获取笔记数据和 is_secret 状态，再切换标记
 
       // 1. 先获取笔记的当前状态
-      const currentNoteResp = await fetch(`/api/notes/${note.id}/`, {
+      const currentNoteResp = await fetch(`/api/notes/${note.id}/?full_content=true`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       })
@@ -992,7 +1009,7 @@ export function useSecondaryPanel(props, emit) {
       } else {
         // ========== 加入保密柜 ==========
         // 需要加密内容，执行智能流程
-        await executeEncryptAndSave(note)
+        await executeEncryptAndSave(note, currentNote)
 
         // 【P0】触发事件：笔记已移入保密柜
         window.dispatchEvent(new CustomEvent('note-moved-to-vault', {

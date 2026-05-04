@@ -1,5 +1,8 @@
 ﻿// 公开笔记详情页 - 三栏布局 + 评论区
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
+  const { convertUbbMarkupInHtml, renderCommentUbb, hydrateUbbDom } = await import('@/utils/ubb')
+  const { enhanceCodeBlocks } = await import('@/composables/useCodeEnhancer')
+
 
   // 解析服务端传递的数据
   window.GLOBAL_DATA = { noteData: null, navigationData: null, isAuthenticated: false };
@@ -86,36 +89,38 @@ document.addEventListener('DOMContentLoaded', function () {
                   <div class="pn-stat-label">评论</div>
                 </div>
               </div>
-              <button
-                class="pn-like-btn"
-                :class="{ liked: note.user_has_liked }"
-                @click="toggleLike"
-                :disabled="isLiking"
-              >
-                <i :class="note.user_has_liked ? 'fas fa-heart' : 'far fa-heart'"></i>
-                {{ note.user_has_liked ? '已点赞' : '点个赞' }}
-              </button>
-              <button
-                v-if="!isOwnNote"
-                class="pn-follow-btn"
-                :class="{ following: isFollowing }"
-                @click="toggleFollow"
-                :disabled="followLoading"
-                :title="isFollowing ? '取消关注' : '关注作者'"
-              >
-                <i :class="isFollowing ? 'fas fa-user-check' : 'fas fa-user-plus'"></i>
-                {{ isFollowing ? '已关注' : '关注' }}
-                <span v-if="followersCount > 0" class="pn-follow-count">{{ followersCount }}</span>
-              </button>
-              <button
-                v-if="isAuthenticated && !isOwnNote"
-                class="pn-message-btn"
-                @click="openMessageModal"
-                title="发送私信"
-              >
-                <i class="fas fa-envelope"></i>
-                私信
-              </button>
+              <div class="pn-author-actions">
+                <button
+                  class="pn-like-btn"
+                  :class="{ liked: note.user_has_liked }"
+                  @click="toggleLike"
+                  :disabled="isLiking"
+                >
+                  <i :class="note.user_has_liked ? 'fas fa-heart' : 'far fa-heart'"></i>
+                  {{ note.user_has_liked ? '已点赞' : '点个赞' }}
+                </button>
+                <button
+                  v-if="!isOwnNote"
+                  class="pn-follow-btn"
+                  :class="{ following: isFollowing }"
+                  @click="toggleFollow"
+                  :disabled="followLoading"
+                  :title="isFollowing ? '取消关注' : '关注作者'"
+                >
+                  <i :class="isFollowing ? 'fas fa-user-check' : 'fas fa-user-plus'"></i>
+                  {{ isFollowing ? '已关注' : '关注' }}
+                  <span v-if="followersCount > 0" class="pn-follow-count">{{ followersCount }}</span>
+                </button>
+                <button
+                  v-if="isAuthenticated && !isOwnNote"
+                  class="pn-message-btn"
+                  @click="openMessageModal"
+                  title="发送私信"
+                >
+                  <i class="fas fa-envelope"></i>
+                  私信
+                </button>
+              </div>
             </div>
 
             <!-- 标签卡 -->
@@ -208,7 +213,7 @@ document.addEventListener('DOMContentLoaded', function () {
               </div>
 
               <!-- 评论列表 -->
-              <div class="pn-comment-list">
+              <div ref="commentList" class="pn-comment-list">
                 <div v-if="isLoadingComments" style="padding:2rem;text-align:center;color:#94a3b8">
                   <i class="fas fa-spinner fa-spin"></i> 加载评论中...
                 </div>
@@ -217,7 +222,7 @@ document.addEventListener('DOMContentLoaded', function () {
                   暂无评论，来发表第一条吧！
                 </div>
                 <div v-else>
-                  <div v-for="comment in comments" :key="comment.id" class="pn-comment-item">
+                  <div v-for="comment in comments" :key="comment.id" :id="'comment-' + comment.id" class="pn-comment-item">
                     <div class="pn-comment-row">
                       <img v-if="comment.author_avatar" :src="comment.author_avatar" class="pn-comment-avatar pn-clickable-user" :alt="comment.author" @click="showUserCard($event, comment)">
                       <div v-else class="pn-comment-avatar-text pn-clickable-user" @click="showUserCard($event, comment)">{{ comment.author.charAt(0).toUpperCase() }}</div>
@@ -226,7 +231,7 @@ document.addEventListener('DOMContentLoaded', function () {
                           <span class="pn-comment-author pn-clickable-user" @click="showUserCard($event, comment)">{{ comment.author }}</span>
                           <span class="pn-comment-time">{{ comment.created_at }}</span>
                         </div>
-                        <div class="pn-comment-content">{{ comment.content }}</div>
+                        <div class="pn-comment-content" v-html="comment.rendered_content"></div>
                         <div class="pn-comment-actions">
                           <button v-if="isAuthenticated" class="pn-comment-action-btn" @click="startReply(comment)">
                             <i class="fas fa-reply"></i> 回复
@@ -234,14 +239,14 @@ document.addEventListener('DOMContentLoaded', function () {
                           <button v-if="isAuthenticated && !comment.is_owner && comment.author_id !== currentUserId" class="pn-comment-action-btn message" @click="openCommentMessage(comment)">
                             <i class="fas fa-envelope"></i> 私信
                           </button>
-                          <button v-if="comment.is_owner" class="pn-comment-action-btn delete" @click="deleteComment(comment.id)">
+                          <button v-if="comment.is_owner" class="pn-comment-action-btn delete" @click="openDeleteConfirm(comment)">
                             <i class="fas fa-trash"></i> 删除
                           </button>
                         </div>
 
                         <!-- 回复列表 -->
                         <div v-if="comment.replies && comment.replies.length" class="pn-replies">
-                          <div v-for="reply in comment.replies" :key="reply.id" class="pn-reply-item">
+                          <div v-for="reply in comment.replies" :key="reply.id" :id="'comment-' + reply.id" class="pn-reply-item">
                             <img v-if="reply.author_avatar" :src="reply.author_avatar" class="pn-reply-avatar pn-clickable-user" :alt="reply.author" @click="showUserCard($event, reply)">
                             <div v-else class="pn-reply-avatar-text pn-clickable-user" @click="showUserCard($event, reply)">{{ reply.author.charAt(0).toUpperCase() }}</div>
                             <div class="pn-reply-body">
@@ -249,12 +254,12 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <span class="pn-reply-author pn-clickable-user" @click="showUserCard($event, reply)">{{ reply.author }}</span>
                                 <span class="pn-reply-time">{{ reply.created_at }}</span>
                               </div>
-                              <div class="pn-reply-content">{{ reply.content }}</div>
+                              <div class="pn-reply-content" v-html="reply.rendered_content"></div>
                               <div class="pn-comment-actions">
                                 <button v-if="isAuthenticated && !reply.is_owner && reply.author_id !== currentUserId" class="pn-comment-action-btn message" @click="openCommentMessage(reply)">
                                   <i class="fas fa-envelope"></i> 私信
                                 </button>
-                                <button v-if="reply.is_owner" class="pn-comment-action-btn delete" @click="deleteComment(reply.id)">
+                                <button v-if="reply.is_owner" class="pn-comment-action-btn delete" @click="openDeleteConfirm(reply, comment)">
                                   <i class="fas fa-trash"></i> 删除
                                 </button>
                               </div>
@@ -375,6 +380,42 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
 
+      <div v-if="deleteConfirm.visible" class="pn-message-modal-overlay" @click.self="closeDeleteConfirm">
+        <div class="pn-message-modal pn-delete-modal">
+          <div class="pn-modal-header pn-delete-modal-header">
+            <div class="pn-modal-title pn-delete-modal-title">
+              <div class="pn-delete-modal-icon">
+                <i class="fas fa-trash-alt"></i>
+              </div>
+              <span>删除{{ deleteConfirm.kind === 'reply' ? '回复' : '评论' }}</span>
+            </div>
+            <button class="pn-modal-close" @click="closeDeleteConfirm" :disabled="deleteConfirm.deleting">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div class="pn-modal-body">
+            <p class="pn-delete-modal-text">
+              {{ deleteConfirm.kind === 'reply' ? '这条回复删除后将无法恢复。' : '这条评论删除后将无法恢复。' }}
+            </p>
+            <p v-if="deleteConfirm.replyCount > 0" class="pn-delete-modal-warning">
+              该评论下还有 {{ deleteConfirm.replyCount }} 条回复，会一并删除。
+            </p>
+            <div v-if="deleteConfirm.preview" class="pn-delete-modal-preview">
+              <div class="pn-delete-modal-preview-label">内容预览</div>
+              <div class="pn-delete-modal-preview-text">{{ deleteConfirm.preview }}</div>
+            </div>
+            <div class="pn-modal-footer pn-delete-modal-footer">
+              <button class="pn-modal-secondary-btn" @click="closeDeleteConfirm" :disabled="deleteConfirm.deleting">取消</button>
+              <button class="pn-modal-danger-btn" @click="confirmDeleteComment" :disabled="deleteConfirm.deleting">
+                <i v-if="deleteConfirm.deleting" class="fas fa-spinner fa-spin"></i>
+                <i v-else class="fas fa-trash-alt"></i>
+                {{ deleteConfirm.deleting ? '删除中...' : '确认删除' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 用户迷你名片弹窗 -->
       <div v-if="userCard.visible" class="pn-user-card-overlay" @click.self="closeUserCard">
         <div class="pn-user-card" :style="userCardPosition">
@@ -428,6 +469,15 @@ document.addEventListener('DOMContentLoaded', function () {
         isSendingMessage: false,
         messageTarget: { userId: null, username: '', avatar: '' },
         messageContext: '',
+        messageContextLink: '',
+        deleteConfirm: {
+          visible: false,
+          deleting: false,
+          commentId: null,
+          kind: 'comment',
+          replyCount: 0,
+          preview: ''
+        },
         // 用户迷你名片
         userCard: { visible: false, userId: null, username: '', avatar: '', commentId: null },
         userCardClickPos: { x: 0, y: 0 },
@@ -438,7 +488,7 @@ document.addEventListener('DOMContentLoaded', function () {
     computed: {
       displayContent() {
         if (!this.fullContent) return '';
-        return this.fixImageUrls(this.fullContent);
+        return this.fixImageUrls(convertUbbMarkupInHtml(this.fullContent));
       },
       isOwnNote() {
         if (!this.note || !this.currentUserId) return false;
@@ -453,6 +503,10 @@ document.addEventListener('DOMContentLoaded', function () {
     mounted() {
       this.initializeData();
       this.setupScrollListener();
+    },
+
+    updated() {
+      this.hydrateRuntimeWidgets();
     },
 
     // ─── 方法 ─────────────────────────────────────────────────────────────
@@ -509,7 +563,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // DOM 更新后增强代码块 + 初始化 TOC 高亮 + 加载评论
         this.$nextTick(() => {
-          this.enhanceCodeBlocks();
+          this.hydrateRuntimeWidgets();
           this.fetchComments();
         });
       },
@@ -522,12 +576,16 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
           const res = await fetch(`/api/notes/${this.note.id}/comments/`);
           const data = await res.json();
-          this.comments = data.comments || [];
+          this.comments = (data.comments || []).map(comment => this.decorateComment(comment));
           this.totalComments = data.total || 0;
         } catch (e) {
           console.error('加载评论失败:', e);
         } finally {
           this.isLoadingComments = false;
+          this.$nextTick(() => {
+            this.hydrateRuntimeWidgets();
+            this.scrollToLinkedComment();
+          });
         }
       },
 
@@ -541,11 +599,12 @@ document.addEventListener('DOMContentLoaded', function () {
             body: JSON.stringify({ content: this.commentContent.trim() })
           });
           if (res.status === 201) {
-            const newComment = await res.json();
+            const newComment = this.decorateComment(await res.json());
             newComment.replies = [];
             this.comments.push(newComment);
             this.totalComments++;
             this.commentContent = '';
+            this.$nextTick(() => this.hydrateRuntimeWidgets());
             this.showToast('评论发表成功！', 'success');
           } else {
             const err = await res.json();
@@ -568,12 +627,13 @@ document.addEventListener('DOMContentLoaded', function () {
             body: JSON.stringify({ content: this.replyContent.trim(), parent_id: parentId })
           });
           if (res.status === 201) {
-            const reply = await res.json();
+            const reply = this.decorateComment(await res.json());
             const parent = this.comments.find(c => c.id === parentId);
             if (parent) { parent.replies.push(reply); }
             this.totalComments++;
             this.replyContent = '';
             this.replyingToId = null;
+            this.$nextTick(() => this.hydrateRuntimeWidgets());
             this.showToast('回复成功！', 'success');
           } else {
             const err = await res.json();
@@ -586,8 +646,26 @@ document.addEventListener('DOMContentLoaded', function () {
         }
       },
 
-      async deleteComment(commentId) {
-        if (!confirm('确定要删除这条评论吗？')) return;
+      openDeleteConfirm(target, parentComment = null) {
+        this.deleteConfirm = {
+          visible: true,
+          deleting: false,
+          commentId: target.id,
+          kind: parentComment ? 'reply' : 'comment',
+          replyCount: parentComment ? 0 : ((target.replies || []).length),
+          preview: this.getCommentPreview(target.content || '')
+        };
+      },
+
+      closeDeleteConfirm() {
+        if (this.deleteConfirm.deleting) return;
+        this.deleteConfirm.visible = false;
+      },
+
+      async confirmDeleteComment() {
+        const commentId = this.deleteConfirm.commentId;
+        if (!commentId) return;
+        this.deleteConfirm.deleting = true;
         try {
           const res = await fetch(`/api/comments/${commentId}/delete/`, {
             method: 'DELETE',
@@ -609,11 +687,64 @@ document.addEventListener('DOMContentLoaded', function () {
           }
         } catch (e) {
           this.showToast('删除失败', 'error');
+        } finally {
+          this.deleteConfirm = {
+            visible: false,
+            deleting: false,
+            commentId: null,
+            kind: 'comment',
+            replyCount: 0,
+            preview: ''
+          };
         }
       },
 
       startReply(comment) { this.replyingToId = comment.id; this.replyContent = ''; },
       cancelReply() { this.replyingToId = null; this.replyContent = ''; },
+
+      decorateComment(comment) {
+        return {
+          ...comment,
+          rendered_content: renderCommentUbb(comment.content || ''),
+          replies: (comment.replies || []).map(reply => ({
+            ...reply,
+            rendered_content: renderCommentUbb(reply.content || '')
+          }))
+        };
+      },
+
+      hydrateRuntimeWidgets() {
+        const run = () => {
+          hydrateUbbDom(this.$refs.articleContent);
+          hydrateUbbDom(this.$refs.commentList);
+          if (this.$refs.articleContent) enhanceCodeBlocks(this.$refs.articleContent);
+          if (this.$refs.commentList) enhanceCodeBlocks(this.$refs.commentList);
+        };
+
+        run();
+        requestAnimationFrame(run);
+        setTimeout(run, 0);
+      },
+
+      getCommentPreview(content) {
+        const raw = String(content || '')
+          .replace(/\[(?:\/)?(?:b|i|u|img|audio|movie|qqmusic|wymusic|url|forecolor|code|text|codo)(?:=[^\]]+)?\]/gi, ' ')
+          .replace(/\[now\]/gi, ' ')
+          .replace(/https?:\/\/\S+/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (raw) {
+          return raw.length > 90 ? raw.slice(0, 90) + '...' : raw;
+        }
+
+        if (/\[(?:img)\]/i.test(content || '')) return '这条评论包含图片内容';
+        if (/\[(?:audio)\]/i.test(content || '')) return '这条评论包含音频内容';
+        if (/\[(?:movie)\]/i.test(content || '')) return '这条评论包含视频内容';
+        if (/\[(?:qqmusic|wymusic)\]/i.test(content || '')) return '这条评论包含音乐内容';
+        if (/\[(?:code)\]/i.test(content || '')) return '这条评论包含代码内容';
+        return '';
+      },
 
       // ── TOC 滚动 ────────────────────────────────────────────────────────
 
@@ -710,6 +841,7 @@ document.addEventListener('DOMContentLoaded', function () {
           avatar: this.note.author.avatar_url
         };
         this.messageContext = '';
+        this.messageContextLink = '';
         this.showMessageModal = true;
         this.messageContent = '';
       },
@@ -722,6 +854,7 @@ document.addEventListener('DOMContentLoaded', function () {
           avatar: commentOrReply.author_avatar
         };
         this.messageContext = '来自笔记《' + this.note.title + '》下的评论';
+        this.messageContextLink = this.buildCommentLink(commentOrReply.id);
         this.showMessageModal = true;
         this.messageContent = '';
       },
@@ -730,6 +863,7 @@ document.addEventListener('DOMContentLoaded', function () {
         this.showMessageModal = false;
         this.messageContent = '';
         this.messageContext = '';
+        this.messageContextLink = '';
       },
 
       async sendMessage() {
@@ -739,7 +873,10 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
           let content = this.messageContent.trim();
           if (this.messageContext) {
-            content = '【' + this.messageContext + '】\n\n' + content;
+            const context = this.messageContextLink
+              ? '[' + this.sanitizeMarkdownLinkText(this.messageContext) + '](' + this.messageContextLink + ')'
+              : '【' + this.messageContext + '】';
+            content = context + '\n\n' + content;
           }
           const res = await fetch('/api/messages/send/', {
             method: 'POST',
@@ -789,7 +926,8 @@ document.addEventListener('DOMContentLoaded', function () {
         this.openCommentMessage({
           author_id: this.userCard.userId,
           author: this.userCard.username,
-          author_avatar: this.userCard.avatar
+          author_avatar: this.userCard.avatar,
+          id: this.userCard.commentId
         });
       },
 
@@ -806,6 +944,47 @@ document.addEventListener('DOMContentLoaded', function () {
       getCookie(name) {
         const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
         return match ? decodeURIComponent(match[1]) : '';
+      },
+
+      sanitizeMarkdownLinkText(text) {
+        return String(text || '').replace(/[\r\n[\]]/g, ' ');
+      },
+
+      buildCommentLink(commentId) {
+        if (!commentId) return '';
+        const publicId = this.note && this.note.public_id;
+        const path = publicId ? `/notes/public/${publicId}/` : window.location.pathname;
+        return `${window.location.origin}${path}?comment=${encodeURIComponent(commentId)}#comment-${encodeURIComponent(commentId)}`;
+      },
+
+      getLinkedCommentId() {
+        const params = new URLSearchParams(window.location.search);
+        const queryId = params.get('comment');
+        if (queryId) return queryId;
+        const match = window.location.hash.match(/^#comment-(.+)$/);
+        return match ? decodeURIComponent(match[1]) : '';
+      },
+
+      scrollToLinkedComment() {
+        const commentId = this.getLinkedCommentId();
+        if (!commentId) return;
+        const el = document.getElementById(`comment-${commentId}`);
+        if (!el) return;
+
+        const mainEl = document.querySelector('.pn-main');
+        if (mainEl && window.innerWidth >= 960) {
+          const mainRect = mainEl.getBoundingClientRect();
+          const elRect = el.getBoundingClientRect();
+          const targetTop = elRect.top - mainRect.top + mainEl.scrollTop - 80;
+          mainEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        } else {
+          window.scrollTo({ top: el.getBoundingClientRect().top + window.pageYOffset - 80, behavior: 'smooth' });
+        }
+
+        el.classList.remove('pn-comment-jump-highlight');
+        void el.offsetWidth;
+        el.classList.add('pn-comment-jump-highlight');
+        setTimeout(() => el.classList.remove('pn-comment-jump-highlight'), 2600);
       },
 
       fixImageUrls(html) {
@@ -936,56 +1115,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }, { passive: true });
       },
 
-      // ── 代码块增强 ───────────────────────────────────────────────────────
-
-      enhanceCodeBlocks() {
-        const container = this.$refs.articleContent;
-        if (!container) return;
-        container.querySelectorAll('pre').forEach(pre => {
-          if (pre.classList.contains('code-block-enhanced')) return;
-          let codeEl = pre.querySelector('code');
-          if (!codeEl) { pre.innerHTML = `<code>${pre.innerHTML}</code>`; codeEl = pre.querySelector('code'); }
-          if (!codeEl) return;
-
-          pre.classList.add('code-block-enhanced');
-          let lines = codeEl.textContent.split('\n').length;
-          if (lines <= 1) {
-            lines = (codeEl.innerHTML.match(/<br\s*\/?>/gi) || []).length + 1;
-          }
-          const COLLAPSE_THRESHOLD = 5;
-          if (lines > COLLAPSE_THRESHOLD) { pre.classList.add('long-code', 'collapsed'); }
-
-          // 复制按钮
-          const copyBtn = document.createElement('button');
-          copyBtn.className = 'copy-btn';
-          copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
-          pre.appendChild(copyBtn);
-          copyBtn.addEventListener('click', async e => {
-            e.stopPropagation();
-            try {
-              await navigator.clipboard.writeText(codeEl.textContent);
-              copyBtn.classList.add('copied');
-              copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-              setTimeout(() => {
-                copyBtn.classList.remove('copied');
-                copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
-              }, 2000);
-            } catch (_) {}
-          });
-
-          // 折叠按钮
-          if (lines > COLLAPSE_THRESHOLD) {
-            const colBtn = document.createElement('button');
-            colBtn.className = 'collapse-btn';
-            colBtn.textContent = '展开代码';
-            pre.appendChild(colBtn);
-            colBtn.addEventListener('click', e => {
-              e.stopPropagation();
-              pre.classList.toggle('collapsed');
-              colBtn.textContent = pre.classList.contains('collapsed') ? '展开代码' : '收起代码';
-            });          }
-        });
-      }
     }
   });
 

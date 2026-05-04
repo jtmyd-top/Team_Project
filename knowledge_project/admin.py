@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.db import models
 # 【修改点】从 models.py 导入更新后的模型，移除了 Project 和 ProjectMembership
-from .models import Note, Asset, Profile, Tag, LoginDevice, LoginNotification, AccessLog, TrustedDevice
+from .models import Note, Asset, Profile, Tag, LoginDevice, LoginNotification, AccessLog, TrustedDevice, MessageAttachment
 from django_ckeditor_5.widgets import CKEditor5Widget
 from django import forms
 from django.contrib import messages
@@ -148,6 +148,39 @@ class AssetAdmin(admin.ModelAdmin):
         if not obj.name and obj.file:
             obj.name = os.path.basename(obj.file.name)
             obj.save(update_fields=['name'])
+
+
+@admin.register(MessageAttachment)
+class MessageAttachmentAdmin(admin.ModelAdmin):
+    list_display = (
+        'original_name',
+        'attachment_status',
+        'attachment_type',
+        'uploader',
+        'message',
+        'size',
+        'created_at',
+    )
+    list_filter = ('attachment_type', 'created_at')
+    search_fields = ('original_name', 'uploader__username', 'message__content')
+    readonly_fields = ('attachment_status', 'created_at')
+
+    @admin.display(description='附件状态')
+    def attachment_status(self, obj):
+        if not obj.file:
+            return format_html('<span style="color: #6b7280; font-weight: 500;">无附件文件</span>')
+
+        if obj.reports.filter(status='pending').exists():
+            review_url = reverse('review_reported_attachment', args=[obj.id])
+            return format_html(
+                '<a href="{}" target="_blank" style="color: #ef4444; font-weight: bold;">收到举报 (点击审查)</a>',
+                review_url
+            )
+
+        return format_html(
+            '<span style="color: #10b981; font-weight: 500;">🔒 隐私保护 (已锁定)</span>'
+        )
+
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
@@ -455,7 +488,7 @@ class TrustedDeviceAdmin(admin.ModelAdmin):
 # ---------------------------------
 from .models import (
     Message, MessagePreference, UserBlocklist,
-    ConversationSettings, MessageReport,
+    ConversationSettings, MessageReport, AttachmentReport,
 )
 
 
@@ -497,6 +530,44 @@ class MessageReportAdmin(admin.ModelAdmin):
     def mark_dismissed(self, request, queryset):
         from django.utils import timezone
         queryset.update(status='dismissed', resolved_at=timezone.now())
+
+
+@admin.register(AttachmentReport)
+class AttachmentReportAdmin(admin.ModelAdmin):
+    list_display = ('id', 'attachment', 'reporter', 'status', 'review_link', 'created_at', 'handled_at', 'handled_by')
+    list_filter = ('status', 'created_at', 'handled_at')
+    search_fields = ('attachment__original_name', 'reporter__username', 'reason', 'detail')
+    readonly_fields = ('attachment', 'reporter', 'reason', 'detail', 'created_at', 'handled_at', 'handled_by', 'review_link')
+    actions = ['mark_removed', 'mark_dismissed']
+
+    @admin.display(description='审查入口')
+    def review_link(self, obj):
+        if obj.status != 'pending':
+            return format_html('<span style="color: #10b981; font-weight: 500;">🔒 工单已结案</span>')
+
+        review_url = reverse('review_reported_attachment', args=[obj.attachment_id])
+        return format_html(
+            '<a href="{}" target="_blank" style="color: #ef4444; font-weight: bold;">点击审查附件</a>',
+            review_url
+        )
+
+    @admin.action(description='标记为已违规删除')
+    def mark_removed(self, request, queryset):
+        from django.utils import timezone
+        queryset.filter(status='pending').update(
+            status='removed',
+            handled_at=timezone.now(),
+            handled_by=request.user,
+        )
+
+    @admin.action(description='标记为已驳回误报')
+    def mark_dismissed(self, request, queryset):
+        from django.utils import timezone
+        queryset.filter(status='pending').update(
+            status='dismissed',
+            handled_at=timezone.now(),
+            handled_by=request.user,
+        )
 
 
 @admin.register(MessagePreference)

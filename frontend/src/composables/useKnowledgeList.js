@@ -8,6 +8,7 @@ import { useSidebarStore } from '@/stores/sidebar'
 import { useVaultStore } from '@/stores/vault'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
+import { convertUbbMarkupInHtml } from '@/utils/ubb'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 export function useKnowledgeList() {
@@ -48,6 +49,14 @@ export function useKnowledgeList() {
   // ==================== 计算属性 ====================
   const showBreadcrumb = computed(() => {
     return sidebarStore.activeModule === 'my-space' && sidebarStore.secondaryView === 'notes' && sidebarStore.currentFolderId
+  })
+
+  const canCreateNoteInCurrentContext = computed(() => {
+    if (sidebarStore.activeModule === 'vault') {
+      return sidebarStore.vaultStatus.isVerified
+    }
+
+    return ['all-notes', 'my-space'].includes(sidebarStore.activeModule)
   })
 
   const isDarkMode = computed(() => {
@@ -168,6 +177,22 @@ export function useKnowledgeList() {
 
   // 创建笔记
   async function handleCreateNote(folderId = null) {
+    if (!canCreateNoteInCurrentContext.value) {
+      ElMessage.warning('当前区域不能新建笔记')
+      return
+    }
+
+    let normalizedFolderId = null
+    if (Number.isInteger(folderId)) {
+      normalizedFolderId = folderId
+    } else if (typeof folderId === 'string') {
+      const trimmedFolderId = folderId.trim()
+      if (/^\d+$/.test(trimmedFolderId)) {
+        const parsedFolderId = Number.parseInt(trimmedFolderId, 10)
+        normalizedFolderId = Number.isNaN(parsedFolderId) ? null : parsedFolderId
+      }
+    }
+
     if (hasUnsavedChanges.value) {
       try {
         await ElMessageBox.confirm('当前笔记有未保存的更改，是否保存？', '提示', {
@@ -187,7 +212,8 @@ export function useKnowledgeList() {
 
     try {
       const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-      const targetFolderId = folderId ?? sidebarStore.currentFolderId
+      const rawTargetFolderId = normalizedFolderId ?? sidebarStore.currentFolderId
+      const targetFolderId = Number.isInteger(rawTargetFolderId) ? rawTargetFolderId : null
       const isVaultModule = sidebarStore.activeModule === 'vault'
 
       const response = await fetch('/api/notes/create/', {
@@ -313,7 +339,7 @@ export function useKnowledgeList() {
       if (noteEditorRef.value && noteEditorRef.value.getContent) {
         contentToSave = noteEditorRef.value.getContent()
       } else {
-        contentToSave = currentNoteData.value.content
+        contentToSave = convertUbbMarkupInHtml(currentNoteData.value.content)
       }
 
       // 如果是加密笔记，在前端进行加密
@@ -408,6 +434,33 @@ export function useKnowledgeList() {
   // 删除笔记
   async function handleDelete() {
     if (!currentNoteId.value) return
+
+    if (currentNoteData.value.is_trashed) {
+      try {
+        await ElMessageBox.confirm(
+          '此操作不可恢复，确定要永久删除这篇笔记吗？',
+          '确认永久删除',
+          {
+            confirmButtonText: '永久删除',
+            cancelButtonText: '取消',
+            type: 'error',
+            confirmButtonClass: 'el-button--danger',
+            customClass: 'delete-confirm-box'
+          }
+        )
+
+        await sidebarStore.permanentDeleteNote(currentNoteId.value)
+        ElMessage.success('笔记已永久删除')
+        currentNoteId.value = null
+        currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+        sidebarStore.setCurrentNoteId(null)
+      } catch (e) {
+        if (e !== 'cancel') {
+          ElMessage.error('永久删除失败')
+        }
+      }
+      return
+    }
 
     try {
       await ElMessageBox.confirm(
@@ -586,6 +639,9 @@ export function useKnowledgeList() {
 
       currentNoteData.value.is_secret = isSecret
       currentNoteData.value.is_public = isPublic
+      if (!isPublic) {
+        currentNoteData.value.public_url = ''
+      }
 
       if (isSecret) {
         ElMessage.info('笔记已加入保密柜')
@@ -593,6 +649,25 @@ export function useKnowledgeList() {
     } catch (e) {
       // 组件卸载时，静默处理错误
     }
+  }
+
+  function clearCurrentPreview() {
+    currentNoteId.value = null
+    currentNoteData.value = {
+      id: null,
+      title: '',
+      content: '',
+      toc: [],
+      updated_at: null,
+      author: null,
+      is_public: false,
+      is_secret: false,
+      is_trashed: false,
+      public_url: ''
+    }
+    decryptedTitle.value = ''
+    hasUnsavedChanges.value = false
+    viewMode.value = 'read'
   }
 
   // ==================== 监听器 ====================
@@ -638,16 +713,11 @@ export function useKnowledgeList() {
     })
   })
 
-  // 监听当前模块变化，从保密柜切换时清空预览区
+  // 监听当前模块变化，切换模块时清空预览区，避免在只读区域残留旧笔记操作。
   watch(() => sidebarStore.activeModule, (newModule, previousModule) => {
-    if (previousModule === 'vault' && newModule !== 'vault') {
-      console.log('[KnowledgeList] Switched from vault, clearing preview area')
-      currentNoteId.value = null
-      currentNoteData.value = { id: null, title: '', content: '', toc: [] }
-      decryptedTitle.value = ''
-      hasUnsavedChanges.value = false
-      viewMode.value = 'read'
-      ElMessage.info('已切换模块，预览已清空')
+    if (newModule !== previousModule) {
+      clearCurrentPreview()
+      sidebarStore.setCurrentNoteId(null)
     }
   })
 
@@ -684,11 +754,12 @@ export function useKnowledgeList() {
     window.addEventListener('note-moved-to-trash', (event) => {
       const { noteId } = event.detail
       if (currentNoteId.value === noteId) {
-        currentNoteId.value = null
-        currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+        clearCurrentPreview()
         ElMessage.info('笔记已移入回收站')
       }
     })
+
+    window.addEventListener('knowledge-preview-clear', clearCurrentPreview)
 
     // 监听文件夹变更
     window.addEventListener('note-folder-changed', async (event) => {
@@ -776,6 +847,11 @@ export function useKnowledgeList() {
       }
 
       isLoadingNote.value = false
+    } else if (new URLSearchParams(window.location.search).get('create') === '1') {
+      await handleCreateNote()
+      const url = new URL(window.location.href)
+      url.searchParams.delete('create')
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
     }
 
     // vault 初始化在后台完成，不影响 UI
@@ -785,6 +861,7 @@ export function useKnowledgeList() {
   onUnmounted(() => {
     window.removeEventListener('beforeunload', handleBeforeUnload)
     window.removeEventListener('note-secret-toggled', handleNoteSecretToggled)
+    window.removeEventListener('knowledge-preview-clear', clearCurrentPreview)
     if (window.__vaultVerificationHandler) {
       window.removeEventListener('vault-verification-success', window.__vaultVerificationHandler)
       delete window.__vaultVerificationHandler
@@ -811,6 +888,7 @@ export function useKnowledgeList() {
     showBreadcrumb,
     isDarkMode,
     displayTitle,
+    canCreateNoteInCurrentContext,
 
     // Stores
     sidebarStore,

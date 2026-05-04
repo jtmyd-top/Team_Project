@@ -7,17 +7,24 @@
         <aside class="left-sidebar">
           <!-- 导航菜单 -->
           <div class="nav-card">
-            <nav class="nav-menu">
-              <a
-                v-for="nav in navItems"
-                :key="nav.id"
-                class="nav-item"
-                :class="{ active: activeNav === nav.id }"
-                @click="setActiveNav(nav.id)"
+            <nav class="nav-menu" aria-label="主页导航">
+              <div
+                v-for="group in navGroups"
+                :key="group.label"
+                class="nav-group"
               >
-                <span class="material-icons-outlined">{{ nav.icon }}</span>
-                {{ nav.label }}
-              </a>
+                <div class="nav-group-label">{{ group.label }}</div>
+                <a
+                  v-for="nav in group.items"
+                  :key="nav.id"
+                  class="nav-item"
+                  :class="{ active: activeNav === nav.id }"
+                  @click="setActiveNav(nav.id)"
+                >
+                  <span class="material-icons-outlined">{{ nav.icon }}</span>
+                  {{ nav.label }}
+                </a>
+              </div>
             </nav>
           </div>
 
@@ -68,6 +75,43 @@
             <button class="search-result-clear" @click="clearSearch">清除搜索</button>
           </div>
 
+          <div class="feed-controls">
+            <div class="feed-heading">
+              <div>
+                <p class="feed-kicker">{{ activeNavLabel }}</p>
+                <h2 class="feed-title">知识笔记</h2>
+              </div>
+              <span class="feed-count">{{ articles.length }} 篇</span>
+            </div>
+
+            <div class="content-type-tabs" aria-label="内容类型">
+              <button
+                v-for="type in contentTypeTabs"
+                :key="type.id"
+                class="content-type-tab"
+                :class="{ active: activeContentType === type.id }"
+                @click="setContentType(type.id)"
+              >
+                <span class="material-icons-outlined">{{ type.icon }}</span>
+                <span>{{ type.label }}</span>
+                <span class="type-count">{{ type.count }}</span>
+              </button>
+            </div>
+
+            <div class="sort-chips" aria-label="排序方式">
+              <button
+                v-for="option in sortOptions"
+                :key="option.id"
+                class="sort-chip"
+                :class="{ active: activeSort === option.id }"
+                @click="setSort(option.id)"
+              >
+                <span class="material-icons-outlined">{{ option.icon }}</span>
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+
           <!-- 加载状态 -->
           <div v-if="loading" class="loading-wrapper" v-loading="loading"></div>
 
@@ -93,8 +137,14 @@
                       <span class="publish-time">• {{ formatTimeAgo(article.created_at) }}</span>
                     </div>
                     <span
+                      class="article-badge type-badge"
+                      :class="article.type"
+                    >
+                      {{ article.typeLabel }}
+                    </span>
+                    <span
                       v-if="article.badge"
-                      class="article-badge"
+                      class="article-badge tag-badge"
                       :class="article.badgeColor || 'purple'"
                     >
                       {{ article.badge }}
@@ -177,6 +227,25 @@
             </div>
           </div>
 
+          <!-- 快捷操作 -->
+          <div class="quick-actions-card">
+            <h3 class="card-title">快捷操作</h3>
+            <div class="quick-actions-list">
+              <button class="quick-action" @click="navigateToNewNote">
+                <span class="material-icons-outlined">edit_note</span>
+                <span>发布笔记</span>
+              </button>
+              <button class="quick-action" @click="setActiveNav('hot')">
+                <span class="material-icons-outlined">local_fire_department</span>
+                <span>热门内容</span>
+              </button>
+              <button class="quick-action" @click="setSort('comments')">
+                <span class="material-icons-outlined">forum</span>
+                <span>讨论最多</span>
+              </button>
+            </div>
+          </div>
+
           <!-- 活跃贡献者 -->
           <div class="contributors-card">
             <div class="contributors-header">
@@ -230,7 +299,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
 import { useHome } from '@/composables/useHome'
 import '@/assets/styles/components/home.css'
 
@@ -238,26 +307,28 @@ const {
   loading,
   searchQuery,
   isSearching,
-  isAuthenticated,
   articles,
   paginatedArticles,
   hasMore,
   activeNav,
-  navItems,
+  activeNavLabel,
+  navGroups,
+  activeContentType,
+  activeSort,
+  contentTypeTabs,
+  sortOptions,
   hotTopics,
   communityStats,
   activeContributors,
-  userAvatar,
   handleImageError,
-  handleAvatarError,
   fetchArticles,
   fetchHomeStats,
   handleSearch,
   clearSearch,
+  setContentType,
+  setSort,
   navigateToArticle,
   navigateToNewNote,
-  navigateToLogin,
-  navigateToSignup,
   setActiveNav,
   loadMore,
   formatTimeAgo,
@@ -265,8 +336,15 @@ const {
 } = useHome()
 
 onMounted(() => {
+  document.documentElement.classList.add('home-scroll-shell')
+  document.body.classList.add('home-scroll-shell')
   fetchArticles()
   fetchHomeStats()
+})
+
+onBeforeUnmount(() => {
+  document.documentElement.classList.remove('home-scroll-shell')
+  document.body.classList.remove('home-scroll-shell')
 })
 </script>
 

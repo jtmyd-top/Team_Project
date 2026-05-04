@@ -133,6 +133,59 @@ export function getShadowStyles(isDark) {
     margin: 1em 0;
   }
 
+  .note-content audio {
+    display: block;
+    width: min(100%, 420px);
+    margin: 1em 0;
+  }
+
+  .note-content video {
+    display: block;
+    width: min(100%, 100%);
+    max-width: 760px;
+    margin: 1em 0;
+    border-radius: 12px;
+    background: #000;
+  }
+
+  .note-content .ubb-music-card {
+    margin: 1em 0;
+  }
+
+  .note-content .ubb-music-frame {
+    display: block;
+    width: 100%;
+    max-width: 420px;
+    border: none;
+    border-radius: 12px;
+    background: ${isDark ? '#111827' : '#f8fafc'};
+  }
+
+  .note-content .ubb-code-block {
+    margin: 1em 0;
+    padding: 1em;
+    border-radius: 10px;
+    background: ${isDark ? '#111827' : '#0f172a'};
+    color: #e2e8f0;
+  }
+
+  .note-content .ubb-code-block code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    white-space: pre-wrap;
+  }
+
+  .note-content .ubb-countdown {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.08rem 0.5rem;
+    border-radius: 999px;
+    background: ${isDark ? 'rgba(245, 158, 11, 0.18)' : 'rgba(245, 158, 11, 0.12)'};
+    color: ${isDark ? '#fbbf24' : '#b45309'};
+    font-size: 0.82em;
+  }
+
   /* 代码 */
   .note-content code {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
@@ -249,6 +302,8 @@ export function getShadowStyles(isDark) {
 export const purifyConfig = {
   FORBID_TAGS: ['script', 'iframe', 'frame', 'object', 'embed', 'form', 'meta', 'link'],
   FORBID_ATTR: ['onerror', 'onclick', 'onmouseover', 'onload', 'onmouseenter', 'onfocus', 'onblur', 'onsubmit'],
+  ADD_TAGS: ['audio', 'video'],
+  ADD_ATTR: ['controls', 'preload', 'playsinline', 'src', 'data-song-id', 'data-date', 'data-ubb-now'],
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 }
 

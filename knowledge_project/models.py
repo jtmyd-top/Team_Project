@@ -1027,6 +1027,13 @@ def auto_generate_tags_for_note(sender, instance, created, **kwargs):
 
 
 # ============ 私信功能模型 ============
+def message_attachment_path(instance, filename):
+    user_id = instance.uploader_id or 'unknown'
+    _, ext = os.path.splitext(filename or '')
+    safe_ext = ext[:16] if ext else ''
+    return f'messages/user_{user_id}/{uuid.uuid4().hex}{safe_ext}'
+
+
 class Message(models.Model):
     """用户之间的私信"""
     sender = models.ForeignKey(
@@ -1073,6 +1080,107 @@ class Message(models.Model):
         if user.id == self.recipient_id and self.deleted_for_recipient:
             return False
         return True
+
+
+class MessageAttachment(models.Model):
+    """私信附件，先上传为草稿，发送消息时绑定到 Message。"""
+    ATTACHMENT_TYPE_CHOICES = [
+        ('image', '图片'),
+        ('audio', '语音'),
+        ('video', '视频'),
+        ('file', '文件'),
+    ]
+
+    uploader = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='message_attachments',
+        verbose_name="上传者",
+    )
+    message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+        verbose_name="关联私信",
+    )
+    file = models.FileField(upload_to=message_attachment_path, verbose_name="附件文件")
+    original_name = models.CharField(max_length=255, verbose_name="原始文件名")
+    attachment_type = models.CharField(
+        max_length=10,
+        choices=ATTACHMENT_TYPE_CHOICES,
+        default='file',
+        verbose_name="附件类型",
+    )
+    mime_type = models.CharField(max_length=120, blank=True, verbose_name="MIME 类型")
+    size = models.PositiveIntegerField(default=0, verbose_name="文件大小")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="上传时间")
+
+    class Meta:
+        verbose_name = "私信附件"
+        verbose_name_plural = "私信附件"
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['uploader', 'message']),
+            models.Index(fields=['message', 'created_at']),
+        ]
+
+    def __str__(self):
+        return self.original_name or self.file.name
+
+
+class AttachmentReport(models.Model):
+    """私信附件举报工单。只有待处理工单会临时打开管理员审查权限。"""
+    STATUS_CHOICES = [
+        ('pending', '待处理'),
+        ('removed', '已违规删除'),
+        ('dismissed', '已驳回误报'),
+    ]
+
+    attachment = models.ForeignKey(
+        MessageAttachment,
+        on_delete=models.CASCADE,
+        related_name='reports',
+        verbose_name="关联附件",
+    )
+    reporter = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='+',
+        verbose_name="举报人",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        verbose_name="处理状态",
+    )
+    reason = models.CharField(max_length=120, blank=True, verbose_name="举报原因")
+    detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="举报时间")
+    handled_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    handled_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        verbose_name="处理人",
+    )
+
+    class Meta:
+        verbose_name = "私信附件举报"
+        verbose_name_plural = "私信附件举报"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['attachment', 'status']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['reporter', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.reporter.username} 举报附件 {self.attachment_id} ({self.get_status_display()})"
 
 
 class MessagePreference(models.Model):

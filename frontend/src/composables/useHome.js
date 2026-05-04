@@ -16,6 +16,8 @@ export function useHome() {
   const itemsPerPage = 10
   const activeNav = ref('explore')
   const isSearching = ref(false)
+  const activeContentType = ref('all')
+  const activeSort = ref('latest')
 
   // 收藏和历史相关状态
   const favoriteArticles = ref([])
@@ -23,11 +25,38 @@ export function useHome() {
   const hotArticles = ref([])
 
   // 导航菜单配置
-  const navItems = ref([
-    { id: 'explore', icon: 'explore', label: '探索发现' },
-    { id: 'hot', icon: 'whatshot', label: '热门讨论' },
-    { id: 'favorites', icon: 'bookmarks', label: '我的收藏' },
-    { id: 'history', icon: 'history', label: '浏览历史' }
+  const navGroups = ref([
+    {
+      label: '发现',
+      items: [
+        { id: 'explore', icon: 'explore', label: '探索发现' },
+        { id: 'hot', icon: 'whatshot', label: '热门讨论' }
+      ]
+    },
+    {
+      label: '个人',
+      items: [
+        { id: 'favorites', icon: 'bookmarks', label: '我的收藏' },
+        { id: 'history', icon: 'history', label: '浏览历史' }
+      ]
+    }
+  ])
+  const navItems = computed(() => navGroups.value.flatMap(group => group.items))
+
+  const contentTypes = ref([
+    { id: 'all', label: '全部', icon: 'apps' },
+    { id: 'tutorial', label: '教程', icon: 'school' },
+    { id: 'troubleshooting', label: '问题排查', icon: 'build_circle' },
+    { id: 'resource', label: '工具资源', icon: 'extension' },
+    { id: 'document', label: '项目文档', icon: 'description' },
+    { id: 'experience', label: '经验分享', icon: 'tips_and_updates' }
+  ])
+
+  const sortOptions = ref([
+    { id: 'latest', label: '最新', icon: 'schedule' },
+    { id: 'hot', label: '最热', icon: 'local_fire_department' },
+    { id: 'comments', label: '最多评论', icon: 'forum' },
+    { id: 'likes', label: '最多收藏', icon: 'favorite' }
   ])
 
   // 热门话题数据 (由后台管理)
@@ -46,7 +75,22 @@ export function useHome() {
   // 用户头像
   const userAvatar = ref('/static/img/default-avatar.png')
 
-  // 根据当前导航和搜索词过滤文章
+  const inferArticleType = (article) => {
+    const tags = (article.tags || []).map(tag => String(tag).toLowerCase())
+    const text = `${article.title || ''} ${article.excerpt || article.summary || ''} ${tags.join(' ')}`.toLowerCase()
+
+    if (/(教程|指南|quick start|使用方法|入门|配置)/i.test(text)) return 'tutorial'
+    if (/(失效|修复|报错|问题|bug|排查|认证|ssh|登录)/i.test(text)) return 'troubleshooting'
+    if (/(工具|api|客户端|模型|cli|proxy|资源|库)/i.test(text)) return 'resource'
+    if (/(文档|项目|说明|规范|注册表|流程)/i.test(text)) return 'document'
+    return 'experience'
+  }
+
+  const getTypeMeta = (typeId) => {
+    return contentTypes.value.find(type => type.id === typeId) || contentTypes.value[0]
+  }
+
+  // 根据当前导航、内容类型、排序和搜索词过滤文章
   const articles = computed(() => {
     let sourceArticles = allArticles.value
 
@@ -59,15 +103,53 @@ export function useHome() {
       sourceArticles = historyArticles.value
     }
 
+    let filtered = [...sourceArticles]
+
+    if (activeContentType.value !== 'all') {
+      filtered = filtered.filter(a => a.type === activeContentType.value)
+    }
+
     // 应用搜索过滤
     const q = searchQuery.value.trim().toLowerCase()
-    if (!q) return sourceArticles
-    return sourceArticles.filter(a =>
-      a.title.toLowerCase().includes(q) ||
-      a.author.toLowerCase().includes(q) ||
-      (a.summary && a.summary.toLowerCase().includes(q)) ||
-      (a.tags && a.tags.some(t => t.toLowerCase().includes(q)))
-    )
+    if (q) {
+      filtered = filtered.filter(a =>
+        a.title.toLowerCase().includes(q) ||
+        a.author.toLowerCase().includes(q) ||
+        (a.summary && a.summary.toLowerCase().includes(q)) ||
+        (a.tags && a.tags.some(t => t.toLowerCase().includes(q)))
+      )
+    }
+
+    const sorters = {
+      latest: (a, b) => new Date(b.created_at) - new Date(a.created_at),
+      hot: (a, b) => (b.views || 0) - (a.views || 0),
+      comments: (a, b) => (b.comments || 0) - (a.comments || 0),
+      likes: (a, b) => (b.likes || 0) - (a.likes || 0)
+    }
+
+    return filtered.sort(sorters[activeSort.value] || sorters.latest)
+  })
+
+  const contentTypeTabs = computed(() => {
+    let sourceArticles = allArticles.value
+    if (activeNav.value === 'favorites') {
+      sourceArticles = favoriteArticles.value
+    } else if (activeNav.value === 'hot') {
+      sourceArticles = hotArticles.value
+    } else if (activeNav.value === 'history') {
+      sourceArticles = historyArticles.value
+    }
+
+    return contentTypes.value.map(type => ({
+      ...type,
+      count: type.id === 'all'
+        ? sourceArticles.length
+        : sourceArticles.filter(article => article.type === type.id).length
+    }))
+  })
+
+  const activeNavLabel = computed(() => {
+    return navItems.value.find(item => item.id === activeNav.value)?.label || '探索发现'
   })
 
   // 计算是否有更多数据
@@ -127,23 +209,28 @@ export function useHome() {
 
       const badgeColors = ['purple', 'blue', 'green']
 
-      allArticles.value = data.map((article, index) => ({
-        id: article.id,
-        title: article.title,
-        author: article.author,
-        author_avatar: article.author_avatar || '/static/img/default-avatar.png',
-        created_at: article.created_at,
-        summary: article.excerpt,
-        tags: article.tags || [],
-        public_url: article.public_url,
-        badge: article.tags && article.tags.length > 0 ? article.tags[0] : null,
-        badgeColor: badgeColors[index % badgeColors.length],
-        likes: article.likes || 0,
-        user_has_liked: article.user_has_liked || false,
-        comments: article.comments_count || 0,
-        views: article.views || 0,
-        is_favorited: article.is_favorited || false
-      }))
+      allArticles.value = data.map((article, index) => {
+        const type = inferArticleType(article)
+        return {
+          id: article.id,
+          title: article.title,
+          author: article.author,
+          author_avatar: article.author_avatar || '/static/img/default-avatar.png',
+          created_at: article.created_at,
+          summary: article.excerpt,
+          tags: article.tags || [],
+          public_url: article.public_url,
+          type,
+          typeLabel: getTypeMeta(type).label,
+          badge: article.tags && article.tags.length > 0 ? article.tags[0] : null,
+          badgeColor: badgeColors[index % badgeColors.length],
+          likes: article.likes || 0,
+          user_has_liked: article.user_has_liked || false,
+          comments: article.comments_count || 0,
+          views: article.views || 0,
+          is_favorited: article.is_favorited || false
+        }
+      })
 
       // 初始化热门文章（按views排序）
       hotArticles.value = [...allArticles.value].sort((a, b) => b.views - a.views)
@@ -173,23 +260,28 @@ export function useHome() {
 
       const badgeColors = ['purple', 'blue', 'green']
 
-      favoriteArticles.value = data.map((article, index) => ({
-        id: article.id,
-        title: article.title,
-        author: article.author,
-        author_avatar: article.author_avatar || '/static/img/default-avatar.png',
-        created_at: article.created_at,
-        summary: article.excerpt,
-        tags: article.tags || [],
-        public_url: article.public_url,
-        badge: article.tags && article.tags.length > 0 ? article.tags[0] : null,
-        badgeColor: badgeColors[index % badgeColors.length],
-        likes: article.likes || 0,
-        user_has_liked: article.user_has_liked || false,
-        comments: article.comments_count || 0,
-        views: article.views || 0,
-        is_favorited: true
-      }))
+      favoriteArticles.value = data.map((article, index) => {
+        const type = inferArticleType(article)
+        return {
+          id: article.id,
+          title: article.title,
+          author: article.author,
+          author_avatar: article.author_avatar || '/static/img/default-avatar.png',
+          created_at: article.created_at,
+          summary: article.excerpt,
+          tags: article.tags || [],
+          public_url: article.public_url,
+          type,
+          typeLabel: getTypeMeta(type).label,
+          badge: article.tags && article.tags.length > 0 ? article.tags[0] : null,
+          badgeColor: badgeColors[index % badgeColors.length],
+          likes: article.likes || 0,
+          user_has_liked: article.user_has_liked || false,
+          comments: article.comments_count || 0,
+          views: article.views || 0,
+          is_favorited: true
+        }
+      })
     } catch (error) {
       console.error('获取收藏列表失败:', error)
       ElMessage.error('获取收藏列表失败，请稍后重试')
@@ -209,23 +301,28 @@ export function useHome() {
           const data = await response.json()
           const badgeColors = ['purple', 'blue', 'green']
 
-          historyArticles.value = data.map((article, index) => ({
-            id: article.id,
-            title: article.title,
-            author: article.author,
-            author_avatar: article.author_avatar || '/static/img/default-avatar.png',
-            created_at: article.created_at,
-            summary: article.excerpt,
-            tags: article.tags || [],
-            public_url: article.public_url,
-            badge: article.tags && article.tags.length > 0 ? article.tags[0] : null,
-            badgeColor: badgeColors[index % badgeColors.length],
-            likes: article.likes || 0,
-            user_has_liked: article.user_has_liked || false,
-            comments: article.comments_count || 0,
-            views: article.views || 0,
-            is_favorited: article.is_favorited || false
-          }))
+          historyArticles.value = data.map((article, index) => {
+            const type = inferArticleType(article)
+            return {
+              id: article.id,
+              title: article.title,
+              author: article.author,
+              author_avatar: article.author_avatar || '/static/img/default-avatar.png',
+              created_at: article.created_at,
+              summary: article.excerpt,
+              tags: article.tags || [],
+              public_url: article.public_url,
+              type,
+              typeLabel: getTypeMeta(type).label,
+              badge: article.tags && article.tags.length > 0 ? article.tags[0] : null,
+              badgeColor: badgeColors[index % badgeColors.length],
+              likes: article.likes || 0,
+              user_has_liked: article.user_has_liked || false,
+              comments: article.comments_count || 0,
+              views: article.views || 0,
+              is_favorited: article.is_favorited || false
+            }
+          })
         }
       } else {
         // 未登录：从本地存储获取历史
@@ -302,6 +399,16 @@ export function useHome() {
     currentPage.value = 1
   }
 
+  const setContentType = (typeId) => {
+    activeContentType.value = typeId
+    currentPage.value = 1
+  }
+
+  const setSort = (sortId) => {
+    activeSort.value = sortId
+    currentPage.value = 1
+  }
+
   // 跳转到文章详情
   const navigateToArticle = (article) => {
     // 记录浏览历史
@@ -311,7 +418,7 @@ export function useHome() {
 
   // 跳转到新建笔记
   const navigateToNewNote = () => {
-    window.location.href = '/dashboard/'
+    window.location.href = '/knowledge/?create=1'
   }
 
   // 跳转到登录页
@@ -328,6 +435,7 @@ export function useHome() {
   const setActiveNav = async (navId) => {
     activeNav.value = navId
     currentPage.value = 1
+    activeContentType.value = 'all'
     searchQuery.value = ''
     isSearching.value = false
 
@@ -422,7 +530,14 @@ export function useHome() {
     paginatedArticles,
     hasMore,
     activeNav,
+    activeNavLabel,
     navItems,
+    navGroups,
+    activeContentType,
+    activeSort,
+    contentTypes,
+    contentTypeTabs,
+    sortOptions,
     hotTopics,
     communityStats,
     activeContributors,
@@ -435,6 +550,8 @@ export function useHome() {
     fetchHomeStats,
     handleSearch,
     clearSearch,
+    setContentType,
+    setSort,
     navigateToArticle,
     navigateToNewNote,
     navigateToLogin,

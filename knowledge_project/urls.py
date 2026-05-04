@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/notes/<int:note_id>/comments/', views.note_comments_api, name='note_comments_api'),
     path('api/notes/<int:note_id>/comments/create/', views.note_comment_create_api, name='note_comment_create_api'),
     path('api/comments/<int:comment_id>/delete/', views.note_comment_delete_api, name='note_comment_delete_api'),
+    path('api/ubb/resolve-qqmusic/', views.resolve_qqmusic_share_api, name='resolve_qqmusic_share_api'),
     # --- 【新增】CKEditor 5 图片上传的 API 路由 ---
     path('api/upload/ckeditor_image/', views.ckeditor_image_upload_view, name='ckeditor_image_upload_view'),
     # --- 【新增】图片上传的 API 路由 ---
@@ -59,7 +60,12 @@ urlpatterns = [
 
     # ==================== 私信功能 API ====================
     path('messages/', views.messages_view, name='messages'),
+    path('uploads/messages/<path:path>', views.blocked_message_attachment_media_api, name='blocked_message_attachment_media_api'),
     path('api/messages/send/', views.send_message_api, name='send_message_api'),
+    path('api/messages/attachments/upload/', views.upload_message_attachment_api, name='upload_message_attachment_api'),
+    path('api/messages/attachments/<int:attachment_id>/file/', views.message_attachment_file_api, name='message_attachment_file_api'),
+    path('api/messages/attachments/<int:attachment_id>/report/', views.report_message_attachment_api, name='report_message_attachment_api'),
+    path('admin/messages/attachments/<int:attachment_id>/review/', views.review_reported_attachment, name='review_reported_attachment'),
     path('api/messages/get/', views.get_messages_api, name='get_messages_api'),
     path('api/messages/conversations/', views.get_message_conversations_api, name='get_message_conversations_api'),
     path('api/messages/preference/', views.get_message_preference_api, name='get_message_preference_api'),

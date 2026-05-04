@@ -225,6 +225,15 @@ function enhanceCodeBlock(pre, options) {
     }
 
     if (!codeEl) return
+    pre.classList.add('line')
+    const needsLineWrapper = !codeEl.querySelector('span.line-content')
+      && !codeEl.querySelector('br')
+      && !codeEl.querySelector('div')
+      && !codeEl.querySelector('p')
+    if (needsLineWrapper) {
+      const wrappedContent = codeEl.innerHTML
+      codeEl.innerHTML = `<span class="line-content">${wrappedContent}</span>`
+    }
 
     // 添加增强标记类名
     pre.classList.add(options.enhancedClass)

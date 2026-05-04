@@ -47,14 +47,6 @@
           <div class="form-hint">关闭后，对方无法看到你是否已读。</div>
         </el-form-item>
 
-        <el-form-item label="新消息邮件提醒">
-          <el-switch
-            v-model="privacy.notify_new_message"
-            :disabled="!privacy.allow_messages"
-            @change="savePreference"
-          />
-          <div class="form-hint">收到新私信时发送邮件提醒。</div>
-        </el-form-item>
       </el-form>
     </div>
 

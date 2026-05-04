@@ -185,7 +185,11 @@
         <div v-else-if="sidebarStore.activeModule !== 'vault' || sidebarStore.vaultStatus.isVerified" class="empty-editor-state">
           <i class="fas fa-book-open"></i>
           <p>选择或创建一篇笔记开始写作</p>
-          <button class="primary-btn" @click="handleCreateNote">
+          <button
+            v-if="canCreateNoteInCurrentContext"
+            class="primary-btn"
+            @click="() => handleCreateNote()"
+          >
             <i class="fas fa-plus"></i> 新建笔记
           </button>
         </div>
@@ -243,6 +247,7 @@ const {
   showBreadcrumb,
   isDarkMode,
   displayTitle,
+  canCreateNoteInCurrentContext,
 
   // Stores
   sidebarStore,

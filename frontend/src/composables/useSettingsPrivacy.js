@@ -13,8 +13,7 @@ export function useSettingsPrivacy() {
     message_mode: 'all',
     show_read_status: true,
     auto_reply_enabled: false,
-    auto_reply_text: '',
-    notify_new_message: true
+    auto_reply_text: ''
   })
 
   // 可发现性设置（防用户枚举）
@@ -63,7 +62,13 @@ export function useSettingsPrivacy() {
           'Content-Type': 'application/json',
           'X-CSRFToken': csrfToken
         },
-        body: JSON.stringify(privacy.value)
+        body: JSON.stringify({
+          allow_messages: privacy.value.allow_messages,
+          message_mode: privacy.value.message_mode,
+          show_read_status: privacy.value.show_read_status,
+          auto_reply_enabled: privacy.value.auto_reply_enabled,
+          auto_reply_text: privacy.value.auto_reply_text
+        })
       })
       const data = await res.json()
       if (res.ok && data.status === 'success') {

@@ -7,13 +7,16 @@ import { ref, watch, nextTick, computed, onUnmounted } from 'vue'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
 import { useVaultStore } from '@/stores/vault'
+import { convertUbbMarkupInHtml, hasUbbMarkup } from '@/utils/ubb'
 
 export function useNoteEditor(props, emit, editorElRef) {
   // ==================== 状态管理 ====================
   let editorInstance = null
   let isEditorReady = false
   let isUserEditing = false
+  let isApplyingUbbTransform = false
   let autoSaveTimer = null
+  let ubbTransformTimer = null
 
   // 获取加密状态和解密工具
   const { isKeyValid, tryRecoverKeyFromSession } = useVaultEncryption()
@@ -58,6 +61,74 @@ export function useNoteEditor(props, emit, editorElRef) {
 
     return props.modelValue.content || ''
   })
+
+  const normalizeEditorContent = (content) => {
+    const currentContent = content || ''
+    return hasUbbMarkup(currentContent) ? convertUbbMarkupInHtml(currentContent) : currentContent
+  }
+
+  const hasCompletedUbbMarkup = (content) => {
+    const currentContent = String(content || '')
+    return (
+      /\[\/(?:b|i|u|img|audio|movie|qqmusic|wymusic|url|forecolor|code|text|codo)\]/i.test(currentContent)
+      || /\[now\]/i.test(currentContent)
+    )
+  }
+
+  const scheduleUbbTransformInEditor = (delay = 220) => {
+    if (!editorInstance || isApplyingUbbTransform) {
+      return
+    }
+
+    const currentContent = editorInstance.getContent()
+    if (!hasUbbMarkup(currentContent) || !hasCompletedUbbMarkup(currentContent)) {
+      return
+    }
+
+    clearTimeout(ubbTransformTimer)
+    ubbTransformTimer = setTimeout(() => {
+      applyUbbTransformInEditor()
+    }, delay)
+  }
+
+  const applyUbbTransformInEditor = () => {
+    if (!editorInstance || isApplyingUbbTransform) {
+      return
+    }
+
+    const currentContent = editorInstance.getContent()
+    if (!hasUbbMarkup(currentContent)) {
+      return
+    }
+
+    const normalizedContent = normalizeEditorContent(currentContent)
+    if (!normalizedContent || normalizedContent === currentContent) {
+      return
+    }
+
+    let bookmark = null
+    try {
+      bookmark = editorInstance.selection?.getBookmark?.(2, true) || null
+    } catch (e) {
+      bookmark = null
+    }
+
+    isApplyingUbbTransform = true
+    try {
+      editorInstance.setContent(normalizedContent)
+      if (bookmark) {
+        try {
+          editorInstance.selection?.moveToBookmark?.(bookmark)
+        } catch (e) {
+          // Ignore bookmark restore errors after structure changes.
+        }
+      }
+      editorInstance.setDirty(true)
+      emit('change', normalizedContent)
+    } finally {
+      isApplyingUbbTransform = false
+    }
+  }
 
   // ==================== 解密逻辑 ====================
   let latestEditorDecryptId = 0
@@ -228,7 +299,7 @@ export function useNoteEditor(props, emit, editorElRef) {
     init_instance_callback: (editor) => {
       setTimeout(() => {
         if (!isEditorReady) {
-          const content = props.modelValue.content || ''
+          const content = normalizeEditorContent(props.modelValue.content || '')
           if (content) {
             editor.setContent(content)
             editor.getBody().innerHTML = content
@@ -282,7 +353,7 @@ export function useNoteEditor(props, emit, editorElRef) {
           const maxRetries = 5
 
           try {
-            const content = displayContent.value || ''
+            const content = normalizeEditorContent(displayContent.value || '')
 
             editor.setContent(content)
             editor.getBody().innerHTML = content || '<p><br></p>'
@@ -312,11 +383,12 @@ export function useNoteEditor(props, emit, editorElRef) {
       })
 
       const handleContentChange = () => {
-        if (!isEditorReady) {
+        if (!isEditorReady || isApplyingUbbTransform) {
           return
         }
         isUserEditing = true
         emit('change', editor.getContent())
+        scheduleUbbTransformInEditor()
         clearTimeout(autoSaveTimer)
         autoSaveTimer = setTimeout(() => {
           const content = editor.getContent()
@@ -334,6 +406,13 @@ export function useNoteEditor(props, emit, editorElRef) {
       editor.on('undo', handleContentChange)
       editor.on('redo', handleContentChange)
       editor.on('ExecCommand', handleContentChange)
+      editor.on('blur', applyUbbTransformInEditor)
+      editor.on('PastePostProcess', () => {
+        setTimeout(applyUbbTransformInEditor, 0)
+      })
+      editor.on('SetContent', () => {
+        clearTimeout(ubbTransformTimer)
+      })
     }
   })
 
@@ -355,12 +434,12 @@ export function useNoteEditor(props, emit, editorElRef) {
   }
 
   const getContent = () => {
-    return editorInstance ? editorInstance.getContent() : ''
+    return editorInstance ? normalizeEditorContent(editorInstance.getContent()) : ''
   }
 
   const setContent = (content) => {
     if (editorInstance) {
-      editorInstance.setContent(content || '')
+      editorInstance.setContent(normalizeEditorContent(content || ''))
     }
   }
 
@@ -389,7 +468,7 @@ export function useNoteEditor(props, emit, editorElRef) {
       if (props.isSecret && isKeyValid.value) {
         decryptNoteContent()
       } else {
-        const content = props.modelValue.content || ''
+        const content = normalizeEditorContent(props.modelValue.content || '')
         localTitle.value = props.modelValue.title || ''
         editorInstance.setContent(content)
         editorInstance.setDirty(false)
@@ -419,7 +498,7 @@ export function useNoteEditor(props, emit, editorElRef) {
     if (newContent && editorInstance && isEditorReady) {
       const currentContent = editorInstance.getContent()
       if (!currentContent || currentContent === props.modelValue.content) {
-        editorInstance.setContent(newContent)
+        editorInstance.setContent(normalizeEditorContent(newContent))
         editorInstance.setDirty(false)
       }
     }
@@ -434,7 +513,7 @@ export function useNoteEditor(props, emit, editorElRef) {
       if (newContent && newContent.length > 0) {
         const currentEditorContent = editorInstance.getContent()
         if (!currentEditorContent || currentEditorContent === oldContent || currentEditorContent === '') {
-          editorInstance.setContent(newContent)
+          editorInstance.setContent(normalizeEditorContent(newContent))
           editorInstance.setDirty(false)
         }
       }
@@ -456,6 +535,8 @@ export function useNoteEditor(props, emit, editorElRef) {
 
   // ==================== 生命周期 ====================
   onUnmounted(() => {
+    clearTimeout(ubbTransformTimer)
+    clearTimeout(autoSaveTimer)
     isEditorReady = false
     isInitializing.value = false
     destroyEditor()

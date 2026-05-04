@@ -2,13 +2,18 @@
 """私信 / 对话设置 / 屏蔽 / 用户搜索与公开资料相关视图"""
 import json
 import logging
+import mimetypes
+import os
+import threading
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import models
 from django.db.models import Q, Count
-from django.http import JsonResponse, HttpResponse
+from django.http import FileResponse, Http404, JsonResponse, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -17,6 +22,10 @@ from ..models import Note, ProfileLike
 
 logger = logging.getLogger(__name__)
 
+
+def blocked_message_attachment_media_api(request, path=None):
+    return HttpResponse('私信附件只能通过受控接口访问', status=403)
+
 # 撤回时间窗口（秒）
 RECALL_WINDOW_SECONDS = 120
 
@@ -24,6 +33,27 @@ RECALL_WINDOW_SECONDS = 120
 NEW_CONV_DAILY_LIMIT = 5
 # 同一对话的新私信邮件节流窗口（秒）
 EMAIL_NOTIFY_WINDOW_SECONDS = 15 * 60
+MESSAGE_ATTACHMENT_MAX_COUNT = 6
+MESSAGE_IMAGE_MAX_SIZE = 10 * 1024 * 1024
+MESSAGE_AUDIO_MAX_SIZE = 12 * 1024 * 1024
+MESSAGE_VIDEO_MAX_SIZE = 120 * 1024 * 1024
+MESSAGE_FILE_MAX_SIZE = 25 * 1024 * 1024
+MESSAGE_IMAGE_MIME_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+MESSAGE_AUDIO_MIME_TYPES = {'audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav'}
+MESSAGE_VIDEO_MIME_TYPES = {'video/mp4', 'video/webm', 'video/quicktime'}
+MESSAGE_FILE_MIME_TYPES = {
+    'application/pdf',
+    'application/zip',
+    'application/x-zip-compressed',
+    'text/plain',
+    'text/markdown',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
 
 
 # ------------------------------------------------------------------
@@ -128,7 +158,55 @@ def _message_payload(msg, viewer=None):
         'is_read': msg.is_read,
         'read_at': msg.read_at.isoformat() if msg.read_at else None,
         'is_own': (viewer is not None and viewer.id == msg.sender_id),
+        'attachments': [_attachment_payload(a) for a in msg.attachments.all()],
     }
+
+
+def _attachment_payload(attachment):
+    return {
+        'id': attachment.id,
+        'type': attachment.attachment_type,
+        'name': attachment.original_name,
+        'mime_type': attachment.mime_type,
+        'size': attachment.size,
+        'url': f'/api/messages/attachments/{attachment.id}/file/',
+    }
+
+
+def _message_preview(msg):
+    if msg.content:
+        return msg.content
+    first_attachment = msg.attachments.first()
+    if not first_attachment:
+        return ''
+    if first_attachment.attachment_type == 'image':
+        return '[图片]'
+    if first_attachment.attachment_type == 'audio':
+        return '[语音]'
+    if first_attachment.attachment_type == 'video':
+        return '[视频]'
+    return f'[文件] {first_attachment.original_name}'
+
+
+def _normalize_attachment_ids(raw_ids):
+    if raw_ids in (None, ''):
+        return []
+    if not isinstance(raw_ids, list):
+        raise ValueError('attachment_ids must be a list')
+    ids = []
+    seen = set()
+    for raw_id in raw_ids:
+        try:
+            attachment_id = int(raw_id)
+        except (TypeError, ValueError):
+            raise ValueError('attachment_ids contains invalid id')
+        if attachment_id <= 0 or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        ids.append(attachment_id)
+    if len(ids) > MESSAGE_ATTACHMENT_MAX_COUNT:
+        raise ValueError(f'一次最多发送 {MESSAGE_ATTACHMENT_MAX_COUNT} 个附件')
+    return ids
 
 
 def _is_new_conversation(sender, recipient):
@@ -190,11 +268,19 @@ def _maybe_send_new_message_email(sender, recipient, content):
             f"    {snippet}\n\n"
             f"登录后前往「私信」查看完整对话。\n\n"
             f"---\n"
-            f"如不希望再收到此类通知，可在「设置 → 隐私与通信」中关闭邮件提醒。"
+            f"如不希望再收到此类通知，可在「设置 → 通知设置」中关闭新消息邮件提醒。"
         )
-        SmartEmailSender().send_email(subject, body, [recipient.email])
         pref.last_email_notified_at = now
         pref.save(update_fields=['last_email_notified_at', 'updated_at'])
+
+        def send_email_notification():
+            success, method = SmartEmailSender().send_email(subject, body, [recipient.email])
+            if not success:
+                logger.warning("新私信邮件通知发送失败: recipient=%s", recipient.id)
+            else:
+                logger.info("新私信邮件通知已发送: recipient=%s, method=%s", recipient.id, method)
+
+        threading.Thread(target=send_email_notification, daemon=True).start()
     except Exception as e:
         logger.warning(f"新私信邮件通知失败: {e}")
 
@@ -207,16 +293,17 @@ def _maybe_send_new_message_email(sender, recipient, content):
 def send_message_api(request):
     """发送私信"""
     try:
-        from ..models import Message, MessagePreference, UserBlocklist, NewConversationQuotaLog, UserFollow
+        from ..models import Message, MessageAttachment, MessagePreference, UserBlocklist, NewConversationQuotaLog, UserFollow
 
         data = json.loads(request.body)
         recipient_id = data.get('recipient_id')
         try:
             content = _body_string(data, 'content')
+            attachment_ids = _normalize_attachment_ids(data.get('attachment_ids'))
         except ValueError as exc:
             return JsonResponse({'error': str(exc)}, status=400)
 
-        if not recipient_id or not content:
+        if not recipient_id or (not content and not attachment_ids):
             return JsonResponse({'error': '缺少必需参数'}, status=400)
         if len(content) > 5000:
             return JsonResponse({'error': '消息内容不能超过5000字'}, status=400)
@@ -260,6 +347,18 @@ def send_message_api(request):
             if not is_followed_by_recipient:
                 return JsonResponse({'error': '对方仅接收其已关注用户的私信'}, status=403)
 
+        attachments = []
+        if attachment_ids:
+            attachments = list(
+                MessageAttachment.objects.filter(
+                    id__in=attachment_ids,
+                    uploader=request.user,
+                    message__isnull=True,
+                )
+            )
+            if len(attachments) != len(attachment_ids):
+                return JsonResponse({'error': '附件不存在、已发送或无权使用'}, status=400)
+
         # 新对话限流：超出免验证配额时必须通过 Turnstile
         is_new_conv = _is_new_conversation(request.user, recipient)
         turnstile_passed = False
@@ -301,6 +400,8 @@ def send_message_api(request):
             recipient=recipient,
             content=content,
         )
+        if attachments:
+            MessageAttachment.objects.filter(id__in=[a.id for a in attachments]).update(message=message)
 
         # 记录新对话配额日志（总是记录，便于审计；限流字段标记是否走了 Turnstile）
         if is_new_conv:
@@ -325,7 +426,7 @@ def send_message_api(request):
         sender_settings.save()
 
         # 异步兜底：邮件通知（尊重 notify_new_message + 15 分钟聚合）
-        _maybe_send_new_message_email(request.user, recipient, content)
+        _maybe_send_new_message_email(request.user, recipient, content or _message_preview(message))
 
         # 发送动作也触发一次阅后即焚清理（若发送者或对方有超 TTL 的旧已读消息）
         _apply_disappearing(request.user, recipient, sender_settings)
@@ -339,6 +440,165 @@ def send_message_api(request):
     except Exception as e:
         logger.error(f"发送私信错误: {e}")
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["POST"])
+@login_required
+def upload_message_attachment_api(request):
+    """上传私信附件。附件先归属于上传者，发送消息时再绑定。"""
+    try:
+        from ..models import MessageAttachment
+
+        uploaded = request.FILES.get('file')
+        if not uploaded:
+            return JsonResponse({'error': '没有找到上传的文件'}, status=400)
+
+        original_name = os.path.basename(uploaded.name or 'attachment')[:255]
+        mime_type = uploaded.content_type or mimetypes.guess_type(original_name)[0] or 'application/octet-stream'
+        size = uploaded.size or 0
+        is_image = mime_type in MESSAGE_IMAGE_MIME_TYPES
+        is_audio = mime_type in MESSAGE_AUDIO_MIME_TYPES
+        is_video = mime_type in MESSAGE_VIDEO_MIME_TYPES
+
+        if is_image:
+            if size > MESSAGE_IMAGE_MAX_SIZE:
+                return JsonResponse({'error': '图片不能超过 10MB'}, status=400)
+            attachment_type = 'image'
+        elif is_audio:
+            if size > MESSAGE_AUDIO_MAX_SIZE:
+                return JsonResponse({'error': '语音不能超过 12MB'}, status=400)
+            attachment_type = 'audio'
+        elif is_video:
+            if size > MESSAGE_VIDEO_MAX_SIZE:
+                return JsonResponse({'error': '视频不能超过 120MB'}, status=400)
+            attachment_type = 'video'
+        elif mime_type in MESSAGE_FILE_MIME_TYPES:
+            if size > MESSAGE_FILE_MAX_SIZE:
+                return JsonResponse({'error': '文件不能超过 25MB'}, status=400)
+            attachment_type = 'file'
+        else:
+            return JsonResponse({'error': '暂不支持该文件类型'}, status=400)
+
+        attachment = MessageAttachment.objects.create(
+            uploader=request.user,
+            file=uploaded,
+            original_name=original_name,
+            attachment_type=attachment_type,
+            mime_type=mime_type,
+            size=size,
+        )
+        return JsonResponse({
+            'status': 'success',
+            'attachment': _attachment_payload(attachment),
+        }, status=201)
+    except Exception as e:
+        logger.error(f"上传私信附件失败: {e}", exc_info=True)
+        return JsonResponse({'error': '上传失败，请稍后重试'}, status=500)
+
+
+@require_http_methods(["GET"])
+@login_required
+def message_attachment_file_api(request, attachment_id):
+    """受控访问私信附件，仅会话双方或待发送附件上传者可访问。"""
+    from ..models import MessageAttachment
+
+    attachment = get_object_or_404(MessageAttachment.objects.select_related('message'), id=attachment_id)
+    message = attachment.message
+    if message is None:
+        if attachment.uploader_id != request.user.id:
+            return HttpResponse('无权访问此附件', status=403)
+    elif request.user.id not in (message.sender_id, message.recipient_id) or not message.visible_to(request.user):
+        return HttpResponse('无权访问此附件', status=403)
+
+    try:
+        file_path = os.path.normpath(attachment.file.path)
+        media_root = os.path.normpath(settings.MEDIA_ROOT)
+        if file_path != media_root and not file_path.startswith(media_root + os.sep):
+            raise Http404
+        response = FileResponse(open(file_path, 'rb'), content_type=attachment.mime_type or 'application/octet-stream')
+    except (FileNotFoundError, ValueError):
+        raise Http404
+
+    disposition = 'inline' if attachment.attachment_type in ('image', 'audio', 'video') else 'attachment'
+    fallback_name = attachment.original_name.encode('ascii', 'ignore').decode('ascii') or 'attachment'
+    fallback_name = fallback_name.replace('"', '')
+    response['Content-Disposition'] = (
+        f'{disposition}; filename="{fallback_name}"; filename*=UTF-8\'\'{quote(attachment.original_name)}'
+    )
+    return response
+
+
+@require_http_methods(["GET"])
+@login_required
+def review_reported_attachment(request, attachment_id):
+    """仅允许管理员审查存在待处理举报工单的私信附件。"""
+    from ..models import AttachmentReport, MessageAttachment
+
+    if not (request.user.is_staff or request.user.is_superuser):
+        return HttpResponseForbidden('仅管理员可审查被举报附件')
+
+    attachment = get_object_or_404(MessageAttachment.objects.select_related('message'), id=attachment_id)
+    has_pending_report = AttachmentReport.objects.filter(
+        attachment=attachment,
+        status='pending'
+    ).exists()
+    if not has_pending_report:
+        return HttpResponseForbidden('无查看权限或工单已结案')
+
+    try:
+        file_path = os.path.normpath(attachment.file.path)
+        media_root = os.path.normpath(settings.MEDIA_ROOT)
+        if file_path != media_root and not file_path.startswith(media_root + os.sep):
+            raise Http404
+        response = FileResponse(open(file_path, 'rb'), content_type=attachment.mime_type or 'application/octet-stream')
+    except (FileNotFoundError, ValueError):
+        raise Http404
+
+    fallback_name = attachment.original_name.encode('ascii', 'ignore').decode('ascii') or 'attachment'
+    fallback_name = fallback_name.replace('"', '')
+    response['Content-Disposition'] = (
+        f'inline; filename="{fallback_name}"; filename*=UTF-8\'\'{quote(attachment.original_name)}'
+    )
+    return response
+
+
+@require_http_methods(["POST"])
+@login_required
+def report_message_attachment_api(request, attachment_id):
+    """私信当事人举报指定附件，创建待处理附件举报工单。"""
+    from ..models import AttachmentReport, MessageAttachment
+
+    attachment = get_object_or_404(
+        MessageAttachment.objects.select_related('message'),
+        id=attachment_id
+    )
+    message = attachment.message
+    if message is None or request.user.id not in (message.sender_id, message.recipient_id):
+        return HttpResponseForbidden('只有私信参与者才能举报该附件')
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    reason = _body_string(data, 'reason', 'other')[:120]
+    detail = _body_string(data, 'detail', '')[:1000]
+    report, created = AttachmentReport.objects.get_or_create(
+        attachment=attachment,
+        reporter=request.user,
+        status='pending',
+        defaults={
+            'reason': reason,
+            'detail': detail,
+        }
+    )
+
+    return JsonResponse({
+        'status': 'success',
+        'message': '附件举报已提交，我们会尽快处理',
+        'report_id': report.id,
+        'created': created,
+    }, status=201 if created else 200)
 
 
 @require_http_methods(["GET"])
@@ -482,7 +742,7 @@ def get_message_conversations_api(request):
             if scope == 'unread' and unread == 0:
                 continue
 
-            preview = last_msg.content or ''
+            preview = _message_preview(last_msg)
             conversations.append({
                 'user_id': peer.id,
                 'username': peer.username,
@@ -829,6 +1089,9 @@ def report_user_api(request):
             except Message.DoesNotExist:
                 message = None
 
+        if message is not None and request.user.id not in (message.sender_id, message.recipient_id):
+            return JsonResponse({'error': '只有私信参与者才能举报该内容'}, status=403)
+
         MessageReport.objects.create(
             reporter=request.user,
             reported_user=reported_user,
@@ -836,6 +1099,21 @@ def report_user_api(request):
             reason=reason,
             detail=detail,
         )
+
+        if message is not None:
+            from ..models import AttachmentReport
+
+            for attachment in message.attachments.all():
+                AttachmentReport.objects.get_or_create(
+                    attachment=attachment,
+                    reporter=request.user,
+                    status='pending',
+                    defaults={
+                        'reason': reason,
+                        'detail': detail,
+                    }
+                )
+
         return JsonResponse({'status': 'success', 'message': '举报已提交，我们会尽快处理'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
@@ -870,6 +1148,7 @@ def get_message_preference_api(request):
                 'auto_reply_enabled': pref.auto_reply_enabled,
                 'auto_reply_text': pref.auto_reply_text,
                 'notify_new_message': pref.notify_new_message,
+                'browser_new_message': pref.browser_new_message,
             }
         })
     except Exception as e:
@@ -896,7 +1175,9 @@ def update_message_preference_api(request):
         if 'auto_reply_text' in data:
             pref.auto_reply_text = data['auto_reply_text'][:500]
         if 'notify_new_message' in data:
-            pref.notify_new_message = data['notify_new_message']
+            pref.notify_new_message = bool(data['notify_new_message'])
+        if 'browser_new_message' in data:
+            pref.browser_new_message = bool(data['browser_new_message'])
         pref.save()
         return JsonResponse({'status': 'success', 'message': '设置已更新'})
     except json.JSONDecodeError:

@@ -8,12 +8,18 @@ import { useClientCrypto } from '@composables/useClientCrypto'
 import { useVaultStore } from '@/stores/vault'
 
 export function useNoteListItem(props, emit) {
+  const LONG_PRESS_DELAY_MS = 520
+  const LONG_PRESS_MOVE_THRESHOLD_PX = 12
+
   // ==================== 状态 ====================
   const isDragging = ref(false)
   const isEditing = ref(false)
   const editingTitle = ref('')
   const titleInput = ref(null)
   const decryptedTitle = ref('')
+  let longPressTimer = null
+  let touchStartPoint = null
+  let suppressNextClick = false
 
   // ==================== Composables ====================
   const { decryptContent } = useClientCrypto()
@@ -184,7 +190,12 @@ export function useNoteListItem(props, emit) {
   }
 
   // ==================== 事件处理 ====================
-  function handleClick() {
+  function handleClick(event) {
+    if (suppressNextClick) {
+      suppressNextClick = false
+      return
+    }
+
     // 【关键修复】如果是回收站中的加密笔记且未解锁，先触发解锁流程
     if (props.note.is_secret && isInTrash.value && !vaultStore.isUnlocked) {
       console.log('[NoteListItem] Encrypted note in trash clicked without DEK, triggering unlock')
@@ -192,14 +203,90 @@ export function useNoteListItem(props, emit) {
       return
     }
     emit('click', props.note)
+    if (isMobileDevice()) {
+      openContextMenuFromEvent(event)
+    }
   }
 
   function handleContextMenu(event) {
+    openContextMenuFromEvent(event)
+  }
+
+  function openContextMenuFromEvent(event) {
+    const x = Number.isFinite(event?.clientX) && event.clientX > 0
+      ? event.clientX
+      : Math.round(window.innerWidth / 2)
+    const y = Number.isFinite(event?.clientY) && event.clientY > 0
+      ? event.clientY
+      : Math.round(window.innerHeight / 2)
+    openContextMenuAt(x, y)
+  }
+
+  function openContextMenuAt(x, y) {
     emit('contextmenu', {
       note: props.note,
-      x: event.clientX,
-      y: event.clientY
+      x,
+      y
     })
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer)
+      longPressTimer = null
+    }
+  }
+
+  function isInteractiveTouchTarget(target) {
+    return !!target?.closest?.('button, input, textarea, select, a, .note-actions, .drag-handle')
+  }
+
+  function isMobileDevice() {
+    const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches
+    const narrowViewport = window.matchMedia?.('(max-width: 768px)').matches
+    const touchDevice = navigator.maxTouchPoints > 0
+    const mobileUA = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent || '')
+    return !!((touchDevice && coarsePointer) || (touchDevice && narrowViewport) || mobileUA)
+  }
+
+  function handleTouchStart(event) {
+    if (isEditing.value || event.touches.length !== 1 || isInteractiveTouchTarget(event.target)) return
+
+    const touch = event.touches[0]
+    touchStartPoint = { x: touch.clientX, y: touch.clientY }
+    clearLongPressTimer()
+    longPressTimer = window.setTimeout(() => {
+      if (!touchStartPoint) return
+      suppressNextClick = true
+      openContextMenuAt(touchStartPoint.x, touchStartPoint.y)
+      if (navigator.vibrate) navigator.vibrate(10)
+      clearLongPressTimer()
+    }, LONG_PRESS_DELAY_MS)
+  }
+
+  function handleTouchMove(event) {
+    if (!touchStartPoint || event.touches.length !== 1) {
+      clearLongPressTimer()
+      return
+    }
+
+    const touch = event.touches[0]
+    const dx = touch.clientX - touchStartPoint.x
+    const dy = touch.clientY - touchStartPoint.y
+    if (Math.hypot(dx, dy) > LONG_PRESS_MOVE_THRESHOLD_PX) {
+      touchStartPoint = null
+      clearLongPressTimer()
+    }
+  }
+
+  function handleTouchEnd() {
+    touchStartPoint = null
+    clearLongPressTimer()
+  }
+
+  function handleTouchCancel() {
+    touchStartPoint = null
+    clearLongPressTimer()
   }
 
   function handleFavorite() {
@@ -240,6 +327,10 @@ export function useNoteListItem(props, emit) {
     handleDragEnd,
     handleClick,
     handleContextMenu,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+    handleTouchCancel,
     handleFavorite,
     handleTrash,
     handleRestore,

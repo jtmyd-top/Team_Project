@@ -12,7 +12,7 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
-from ..models import Note, Profile, ProfileLike
+from ..models import MessagePreference, Note, Profile, ProfileLike
 from .upload import _delayed_delete_file
 
 logger = logging.getLogger(__name__)
@@ -354,6 +354,7 @@ def notification_preferences(request):
     except Profile.DoesNotExist:
         profile = Profile.objects.create(user=user)
         logger.info(f"Created profile for user {user.id} in notification_preferences")
+    message_pref, _ = MessagePreference.objects.get_or_create(user=user)
 
     if request.method == "GET":
         # 返回当前的通知偏好设置
@@ -365,6 +366,9 @@ def notification_preferences(request):
                 "notify_password_reset": profile.notify_password_reset,
                 "notify_note_activities": profile.notify_note_activities,
                 "notify_profile_likes": profile.notify_profile_likes,
+                "email_messages": message_pref.notify_new_message,
+                "browser_enabled": message_pref.browser_new_message,
+                "browser_messages": message_pref.browser_new_message,
             }
         })
 
@@ -398,21 +402,40 @@ def notification_preferences(request):
             profile.notify_profile_likes = bool(data["notify_profile_likes"])
             update_fields.append("notify_profile_likes")
 
+        message_update_fields = []
+        if "email_messages" in data:
+            message_pref.notify_new_message = bool(data["email_messages"])
+            message_update_fields.append("notify_new_message")
+        if "notify_new_message" in data:
+            message_pref.notify_new_message = bool(data["notify_new_message"])
+            if "notify_new_message" not in message_update_fields:
+                message_update_fields.append("notify_new_message")
+        if "browser_enabled" in data:
+            message_pref.browser_new_message = bool(data["browser_enabled"])
+            message_update_fields.append("browser_new_message")
+        if "browser_messages" in data:
+            message_pref.browser_new_message = bool(data["browser_messages"])
+            if "browser_new_message" not in message_update_fields:
+                message_update_fields.append("browser_new_message")
+
         # 保存更新
         if update_fields:
             profile.save(update_fields=update_fields)
             logger.info(f"Updated notification preferences for user {user.id}: {update_fields}")
+        if message_update_fields:
+            message_pref.save(update_fields=message_update_fields + ["updated_at"])
+            logger.info(f"Updated message notification preferences for user {user.id}: {message_update_fields}")
 
+        if update_fields or message_update_fields:
             return JsonResponse({
                 "status": "success",
                 "message": "通知偏好设置已更新",
-                "updated_fields": update_fields
+                "updated_fields": update_fields + message_update_fields
             })
-        else:
-            return JsonResponse({
-                "status": "warning",
-                "message": "没有需要更新的字段"
-            })
+        return JsonResponse({
+            "status": "warning",
+            "message": "没有需要更新的字段"
+        })
 
 
 # ==================== 主题设置 API ====================

@@ -31,6 +31,8 @@ from ..utils.misc import get_sidebar_cache_key, log_action
 
 logger = logging.getLogger(__name__)
 
+VAULT_PENDING_ENCRYPTION_GUARDS_SESSION_KEY = 'vault_pending_encryption_guards'
+
 
 # === 共享辅助 ===
 
@@ -121,6 +123,90 @@ def check_note_secret_operation_permission(note, operation):
         }
         return False, messages.get(operation, f'保密柜的筆記無法執行 {operation} 操作。')
     return True, None
+
+
+def _coerce_non_negative_int(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _get_vault_pending_encryption_guards(request):
+    guards = request.session.get(VAULT_PENDING_ENCRYPTION_GUARDS_SESSION_KEY)
+    return guards if isinstance(guards, dict) else {}
+
+
+def _set_vault_pending_encryption_guard(request, note):
+    guards = _get_vault_pending_encryption_guards(request).copy()
+    guards[str(note.id)] = {
+        'original_content_length': len(note.content or ""),
+        'created_at': timezone.now().isoformat(),
+    }
+    request.session[VAULT_PENDING_ENCRYPTION_GUARDS_SESSION_KEY] = guards
+    request.session.modified = True
+
+
+def _clear_vault_pending_encryption_guard(request, note_id):
+    guards = _get_vault_pending_encryption_guards(request).copy()
+    if str(note_id) in guards:
+        del guards[str(note_id)]
+        request.session[VAULT_PENDING_ENCRYPTION_GUARDS_SESSION_KEY] = guards
+        request.session.modified = True
+
+
+def validate_vault_encryption_content_update(request, note, data, will_be_secret=None):
+    """
+    Server-side guard for the first encrypted save after a note enters the vault.
+    The server cannot decrypt E2E ciphertext, so it enforces the conversion
+    protocol: the client must declare the plaintext source length it encrypted,
+    and that length must not be shorter than the server-side pre-toggle snapshot.
+    """
+    if 'content' not in data:
+        return True, None, False
+
+    if will_be_secret is None:
+        will_be_secret = note.is_secret
+
+    guard = _get_vault_pending_encryption_guards(request).get(str(note.id))
+    direct_secret_conversion = (not note.is_secret and data.get('is_secret') is True)
+
+    if not guard and not direct_secret_conversion:
+        return True, None, False
+
+    original_length = None
+    if isinstance(guard, dict):
+        original_length = _coerce_non_negative_int(guard.get('original_content_length'))
+
+    client_original_length = _coerce_non_negative_int(data.get('vault_original_content_length'))
+    if original_length is None:
+        original_length = client_original_length
+    elif client_original_length is not None:
+        original_length = max(original_length, client_original_length)
+
+    if original_length is None:
+        original_length = len(note.content or "")
+
+    source_length = _coerce_non_negative_int(data.get('vault_source_content_length'))
+
+    if will_be_secret and source_length is None:
+        return False, '安全中止：缺少待加密内容长度校验信息。为避免笔记内容丢失，已取消纳入保密柜。', False
+
+    current_length = len(note.content or "")
+    if current_length < original_length:
+        return False, (
+            f'安全中止：待加密内容长度异常变短（当前 {current_length}，原始 {original_length}）。'
+            '为避免笔记内容丢失，已取消纳入保密柜。'
+        ), False
+
+    if will_be_secret and source_length < original_length:
+        return False, (
+            f'安全中止：待加密内容长度异常变短（当前 {source_length}，原始 {original_length}）。'
+            '为避免笔记内容丢失，已取消纳入保密柜。'
+        ), False
+
+    return True, None, bool(guard or direct_secret_conversion)
 
 
 def build_note_response_data(note, include_content=True, include_all_fields=True):
@@ -531,6 +617,10 @@ def note_detail_api(request, note_id):
             if not allowed:
                 return JsonResponse({'error': error_msg}, status=403)
 
+        allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(request, note, data)
+        if not allowed:
+            return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
+
         note.title = data.get('title', note.title)
         note.is_public = data.get('is_public', note.is_public)
         if 'content' in data:
@@ -539,6 +629,8 @@ def note_detail_api(request, note_id):
         if note.is_public and not note.public_id:
             note.public_id = uuid.uuid4()
         note.save()
+        if clear_vault_guard:
+            _clear_vault_pending_encryption_guard(request, note.id)
         if note.content and len(BeautifulSoup(note.content, 'html.parser').get_text()) > 20:
 
             auto_generate_tags_for_note(Note, note, created=True)
@@ -590,6 +682,17 @@ def note_detail_api(request, note_id):
                     return JsonResponse({'error': error_msg}, status=403)
 
             # 只更新提供的字段
+            was_secret = note.is_secret
+            will_be_secret = data.get('is_secret', note.is_secret)
+            allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(
+                request,
+                note,
+                data,
+                will_be_secret=will_be_secret,
+            )
+            if not allowed:
+                return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
+
             if 'title' in data:
                 note.title = data['title']
             if 'is_public' in data:
@@ -598,8 +701,8 @@ def note_detail_api(request, note_id):
                 note.content = data['content']
             if 'is_secret' in data:
                 note.is_secret = data['is_secret']
-                # 如果移出保密柜，确保笔记不是公开的（安全考虑）
-                if not data['is_secret'] and note.is_public:
+                # 进入保密柜的笔记不能继续公开访问。
+                if note.is_secret and note.is_public:
                     note.is_public = False
             if 'folder_id' in data:
                 folder_id = data['folder_id']
@@ -616,6 +719,13 @@ def note_detail_api(request, note_id):
                 note.public_id = uuid.uuid4()
 
             note.save()
+            if clear_vault_guard:
+                _clear_vault_pending_encryption_guard(request, note.id)
+            if 'is_secret' in data:
+                if not was_secret and note.is_secret and 'content' not in data:
+                    _set_vault_pending_encryption_guard(request, note)
+                elif was_secret and not note.is_secret:
+                    _clear_vault_pending_encryption_guard(request, note.id)
 
             # 如果更新了内容，自动生成标签
             if 'content' in data and note.content and len(BeautifulSoup(note.content, 'html.parser').get_text()) > 20:
@@ -804,6 +914,10 @@ def update_note_api(request, note_id):
         title = data.get('title')
         content = data.get('content')
 
+        allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(request, note, data)
+        if not allowed:
+            return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
+
         # 更新笔记（前端已处理加密，后端直接存储）
         if title is not None:
             note.title = title
@@ -812,6 +926,8 @@ def update_note_api(request, note_id):
 
         note.last_modified_by = user
         note.save()
+        if clear_vault_guard:
+            _clear_vault_pending_encryption_guard(request, note.id)
 
         # 清除侧边栏缓存
         try:
@@ -895,7 +1011,14 @@ def toggle_secret_api(request, note_id):
             return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
 
         # 切换 is_secret 标记
+        was_secret = note.is_secret
         note.is_secret = not note.is_secret
+        if not was_secret and note.is_secret:
+            _set_vault_pending_encryption_guard(request, note)
+            if note.is_public:
+                note.is_public = False
+        else:
+            _clear_vault_pending_encryption_guard(request, note.id)
         note.save()
 
         # 清除侧边栏缓存

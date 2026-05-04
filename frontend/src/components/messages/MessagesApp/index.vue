@@ -233,7 +233,66 @@
               <i class="fas fa-times"></i>
             </button>
           </div>
-          <div class="composer-row">
+          <div v-if="pendingAttachments.length" class="attachment-tray">
+            <div
+              v-for="(attachment, index) in pendingAttachments"
+              :key="attachment.id"
+              class="pending-attachment"
+              :class="`type-${attachment.type}`"
+            >
+              <img
+                v-if="attachment.type === 'image'"
+                :src="attachment.url"
+                :alt="attachment.name"
+                class="pending-image"
+              />
+              <i v-else class="fas fa-file"></i>
+              <span class="pending-name">{{ attachment.name }}</span>
+              <button class="pending-remove" @click="removePendingAttachment(index)" title="移除附件">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+          <div v-if="showEmojiPicker" class="emoji-picker">
+            <button
+              v-for="emoji in emojiChoices"
+              :key="emoji"
+              class="emoji-btn"
+              @click="appendEmoji(emoji)"
+            >
+              {{ emoji }}
+            </button>
+          </div>
+          <div class="composer-shell">
+            <button class="tool-btn" @click="showEmojiPicker = !showEmojiPicker" title="表情">
+              <i class="fas fa-face-smile"></i>
+            </button>
+            <button
+              class="tool-btn"
+              :class="{ recording: isRecordingVoice }"
+              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
+              @click="toggleVoiceRecording"
+              :title="isRecordingVoice ? '停止录音' : '语音消息'"
+            >
+              <i :class="isRecordingVoice ? 'fas fa-stop' : 'fas fa-microphone'"></i>
+            </button>
+            <button
+              class="tool-btn"
+              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
+              @click="openFilePicker"
+              title="添加图片或文件"
+            >
+              <i v-if="!isUploadingAttachment" class="fas fa-paperclip"></i>
+              <i v-else class="fas fa-spinner fa-spin"></i>
+            </button>
+            <input
+              ref="fileInputRef"
+              class="hidden-file-input"
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,audio/webm,audio/ogg,audio/mpeg,audio/mp4,audio/wav,.pdf,.txt,.md,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+              @change="onAttachmentSelected"
+            />
             <textarea
               v-model="newMessage"
               class="message-input"
@@ -243,22 +302,22 @@
               maxlength="5000"
               ref="inputRef"
             ></textarea>
-            <div class="composer-side">
-              <span class="char-count" :class="{ warn: newMessage.length > 4500 }">
-                {{ newMessage.length }}/5000
-              </span>
-              <button
-                class="send-btn"
-                @click="sendMessage()"
-                :disabled="isSending || !newMessage.trim()"
-              >
-                <i v-if="!isSending" class="fas fa-paper-plane"></i>
-                <i v-else class="fas fa-spinner fa-spin"></i>
-                <span class="send-text">发送</span>
-              </button>
-            </div>
+            <span class="char-count" :class="{ warn: newMessage.length > 4500 }">
+              {{ newMessage.length }}/5000
+            </span>
+            <button
+              class="send-btn"
+              @click="sendMessage()"
+              :disabled="isSending || isUploadingAttachment || (!newMessage.trim() && pendingAttachments.length === 0)"
+            >
+              <i v-if="!isSending" class="fas fa-paper-plane"></i>
+              <i v-else class="fas fa-spinner fa-spin"></i>
+              <span class="send-text">发送</span>
+            </button>
           </div>
-          <span class="shortcut-hint">Enter 发送 / Shift+Enter 换行</span>
+          <span class="shortcut-hint">
+            {{ isRecordingVoice ? '正在录音，点击停止后会加入待发送附件' : 'Enter 发送 / Shift+Enter 换行' }}
+          </span>
         </div>
       </div>
     </main>
@@ -415,8 +474,11 @@ const currentSettings = ref({
 })
 const newMessage = ref('')
 const isSending = ref(false)
+const isUploadingAttachment = ref(false)
+const isRecordingVoice = ref(false)
 const messagesListRef = ref(null)
 const inputRef = ref(null)
+const fileInputRef = ref(null)
 const showNewMessageDialog = ref(false)
 const showChatMenu = ref(false)
 const showChatSearch = ref(false)
@@ -431,12 +493,20 @@ const mobileChatOpen = ref(false)
 const blockedPanelRef = ref(null)
 const replyDraft = ref(null)
 const forwardDraft = ref(null)
+const browserNotificationsEnabled = ref(false)
+const pendingAttachments = ref([])
+const showEmojiPicker = ref(false)
+const maxPendingAttachments = 6
+let voiceRecorder = null
+let voiceStream = null
+let voiceChunks = []
 
 // Turnstile 兜底：当日新对话超额
 const turnstileGate = ref({
   visible: false,
   siteKey: '',
   pendingContent: '',
+  pendingAttachmentIds: [],
   pendingRecipientId: null,
   quotaLimit: 5,
 })
@@ -446,6 +516,12 @@ const tabs = [
   { value: 'unread', label: '未读', icon: 'fas fa-envelope' },
   { value: 'archived', label: '归档', icon: 'fas fa-box-archive' },
   { value: 'blocked', label: '屏蔽', icon: 'fas fa-ban' },
+]
+
+const emojiChoices = [
+  '😀', '😄', '😂', '😊', '😍', '😘', '😎', '😭',
+  '😡', '👍', '👏', '🙏', '🎉', '❤️', '🔥', '✨',
+  '😅', '🤔', '👌', '💪', '🌹', '🍻', '💯', '😴',
 ]
 
 // ==== 璁＄畻灞炴€?====
@@ -567,6 +643,89 @@ function syncConversations(nextConversations) {
   conversations.value = merged
 }
 
+function conversationTimestamp(conv) {
+  const ts = new Date(conv?.last_message_time || '').getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
+let notificationSnapshotReady = false
+let notificationSnapshot = new Map()
+
+function updateBrowserNotificationSnapshot(nextConversations) {
+  const nextSnapshot = new Map()
+  for (const conv of nextConversations) {
+    nextSnapshot.set(conv.user_id, conversationTimestamp(conv))
+  }
+
+  if (!notificationSnapshotReady) {
+    notificationSnapshot = nextSnapshot
+    notificationSnapshotReady = true
+    return
+  }
+
+  const canNotify =
+    browserNotificationsEnabled.value &&
+    typeof window !== 'undefined' &&
+    'Notification' in window &&
+    Notification.permission === 'granted'
+
+  if (canNotify) {
+    for (const conv of nextConversations) {
+      const latestTs = nextSnapshot.get(conv.user_id) || 0
+      const previousTs = notificationSnapshot.get(conv.user_id) || 0
+      const isIncoming = conv.last_sender_id && conv.last_sender_id !== currentUserId.value
+      const hasUnread = (conv.unread_count || 0) > 0
+      const isCurrentVisibleConversation = selectedUserId.value === conv.user_id && !document.hidden
+
+      if (
+        latestTs > previousTs &&
+        isIncoming &&
+        hasUnread &&
+        !conv.is_muted &&
+        !isCurrentVisibleConversation
+      ) {
+        showBrowserMessageNotification(conv)
+      }
+    }
+  }
+
+  notificationSnapshot = nextSnapshot
+}
+
+function showBrowserMessageNotification(conv) {
+  const preview = String(conv.last_message || '').replace(/\s+/g, ' ').slice(0, 120)
+  try {
+    const notification = new Notification(`来自 ${conv.username} 的新私信`, {
+      body: preview || '你收到了一条新消息',
+      icon: conv.avatar || '/static/img/default-avatar.png',
+      tag: `dm-${conv.user_id}`,
+      renotify: true,
+    })
+    notification.onclick = () => {
+      window.focus()
+      scope.value = 'all'
+      selectedUserId.value = conv.user_id
+      mobileChatOpen.value = true
+      loadMessages()
+      loadConversations()
+      notification.close()
+    }
+  } catch (e) {
+    console.warn('浏览器通知显示失败:', e)
+  }
+}
+
+async function loadNotificationPreferences() {
+  try {
+    const r = await fetch('/api/notification-preferences/')
+    if (!r.ok) return
+    const data = await r.json()
+    browserNotificationsEnabled.value = !!data.preferences?.browser_enabled
+  } catch (e) {
+    console.warn('加载通知偏好失败:', e)
+  }
+}
+
 // ==== 加载 ====
 async function loadConversations() {
   if (scope.value === 'blocked') {
@@ -579,7 +738,9 @@ async function loadConversations() {
     const r = await fetch(`/api/messages/conversations/?scope=${scope.value}`)
     if (r.ok) {
       const d = await r.json()
-      syncConversations(d.conversations || [])
+      const nextConversations = d.conversations || []
+      updateBrowserNotificationSnapshot(nextConversations)
+      syncConversations(nextConversations)
     }
   } catch (e) {
     console.error(e)
@@ -618,6 +779,8 @@ function selectConversation(conv) {
   }
   selectedUserId.value = conv.user_id
   newMessage.value = ''
+  pendingAttachments.value = []
+  showEmojiPicker.value = false
   replyDraft.value = null
   highlightMessageId.value = null
   showChatMenu.value = false
@@ -627,9 +790,10 @@ function selectConversation(conv) {
 }
 
 async function sendMessage(turnstileToken = '') {
-  if (!newMessage.value.trim() || !selectedUserId.value) return
+  if ((!newMessage.value.trim() && pendingAttachments.value.length === 0) || !selectedUserId.value) return
   isSending.value = true
   const normalizedTurnstileToken = typeof turnstileToken === 'string' ? turnstileToken : ''
+  const attachmentIds = pendingAttachments.value.map((attachment) => attachment.id)
   const finalContent = replyDraft.value
     ? buildQuotedMessage(replyDraft.value, newMessage.value.trim())
     : newMessage.value.trim()
@@ -637,11 +801,14 @@ async function sendMessage(turnstileToken = '') {
     const payload = {
       recipient_id: selectedUserId.value,
       content: finalContent,
+      attachment_ids: attachmentIds,
     }
     if (normalizedTurnstileToken) payload.turnstile_token = normalizedTurnstileToken
     const d = await apiPost('/api/messages/send/', payload)
     messages.value.push(d.message)
     newMessage.value = ''
+    pendingAttachments.value = []
+    showEmojiPicker.value = false
     replyDraft.value = null
     resetComposerHeight()
     await nextTick()
@@ -649,7 +816,7 @@ async function sendMessage(turnstileToken = '') {
     loadConversations()
   } catch (e) {
     if (e?.data?.need_turnstile) {
-      await openTurnstileGate(finalContent, selectedUserId.value, e.data.quota_limit)
+      await openTurnstileGate(finalContent, selectedUserId.value, e.data.quota_limit, attachmentIds)
       return
     }
     ElMessage.error(e.message)
@@ -658,11 +825,12 @@ async function sendMessage(turnstileToken = '') {
   }
 }
 
-async function openTurnstileGate(pendingContent, recipientId, quotaLimit) {
+async function openTurnstileGate(pendingContent, recipientId, quotaLimit, pendingAttachmentIds = []) {
   turnstileGate.value = {
     visible: true,
     siteKey: turnstileGate.value.siteKey || '',
     pendingContent,
+    pendingAttachmentIds,
     pendingRecipientId: recipientId,
     quotaLimit: quotaLimit || 5,
   }
@@ -682,26 +850,30 @@ async function openTurnstileGate(pendingContent, recipientId, quotaLimit) {
 function cancelTurnstileGate() {
   turnstileGate.value.visible = false
   turnstileGate.value.pendingContent = ''
+  turnstileGate.value.pendingAttachmentIds = []
   turnstileGate.value.pendingRecipientId = null
   ElMessage.info('已取消人机验证，消息未发送')
 }
 
 async function onTurnstileVerified(token) {
   const pending = turnstileGate.value.pendingContent
+  const pendingAttachmentIds = [...(turnstileGate.value.pendingAttachmentIds || [])]
   const pendingRecipient = turnstileGate.value.pendingRecipientId
   const normalizedTurnstileToken = typeof token === 'string' ? token : ''
   turnstileGate.value.visible = false
-  if (!normalizedTurnstileToken || !pending || !pendingRecipient) return
+  if (!normalizedTurnstileToken || (!pending && pendingAttachmentIds.length === 0) || !pendingRecipient) return
   // 保持现有输入不动，直接用暂存内容 + token 重新投递
   isSending.value = true
   try {
     const d = await apiPost('/api/messages/send/', {
       recipient_id: pendingRecipient,
       content: pending,
+      attachment_ids: pendingAttachmentIds,
       turnstile_token: normalizedTurnstileToken,
     })
     messages.value.push(d.message)
     newMessage.value = ''
+    pendingAttachments.value = []
     replyDraft.value = null
     resetComposerHeight()
     await nextTick()
@@ -712,6 +884,7 @@ async function onTurnstileVerified(token) {
   } finally {
     isSending.value = false
     turnstileGate.value.pendingContent = ''
+    turnstileGate.value.pendingAttachmentIds = []
     turnstileGate.value.pendingRecipientId = null
   }
 }
@@ -747,6 +920,129 @@ function formatForwardTime(iso) {
   if (!iso) return ''
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function openFilePicker() {
+  if (isUploadingAttachment.value || pendingAttachments.value.length >= maxPendingAttachments) return
+  fileInputRef.value?.click()
+}
+
+async function uploadAttachmentFile(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await fetch('/api/messages/attachments/upload/', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': csrfToken.value },
+    body: formData,
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || `${file.name} 上传失败`)
+  pendingAttachments.value.push(data.attachment)
+}
+
+async function onAttachmentSelected(event) {
+  const files = Array.from(event.target.files || [])
+  event.target.value = ''
+  if (!files.length) return
+  const remaining = maxPendingAttachments - pendingAttachments.value.length
+  if (remaining <= 0) {
+    ElMessage.warning(`一次最多发送 ${maxPendingAttachments} 个附件`)
+    return
+  }
+  if (files.length > remaining) {
+    ElMessage.warning(`最多还能添加 ${remaining} 个附件`)
+  }
+  isUploadingAttachment.value = true
+  try {
+    for (const file of files.slice(0, remaining)) {
+      await uploadAttachmentFile(file)
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '附件上传失败')
+  } finally {
+    isUploadingAttachment.value = false
+  }
+}
+
+function removePendingAttachment(index) {
+  pendingAttachments.value.splice(index, 1)
+}
+
+function appendEmoji(emoji) {
+  newMessage.value += emoji
+  showEmojiPicker.value = false
+  nextTick(() => inputRef.value?.focus())
+}
+
+function getSupportedVoiceMimeType() {
+  if (typeof MediaRecorder === 'undefined') return ''
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+}
+
+async function toggleVoiceRecording() {
+  if (isRecordingVoice.value) {
+    stopVoiceRecording()
+    return
+  }
+  if (pendingAttachments.value.length >= maxPendingAttachments) {
+    ElMessage.warning(`一次最多发送 ${maxPendingAttachments} 个附件`)
+    return
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    ElMessage.error('当前浏览器不支持录音')
+    return
+  }
+  try {
+    const mimeType = getSupportedVoiceMimeType()
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    voiceChunks = []
+    voiceRecorder = new MediaRecorder(voiceStream, mimeType ? { mimeType } : undefined)
+    voiceRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) voiceChunks.push(event.data)
+    }
+    voiceRecorder.onstop = handleVoiceRecordingStop
+    voiceRecorder.start()
+    isRecordingVoice.value = true
+  } catch (e) {
+    cleanupVoiceRecording()
+    ElMessage.error('无法使用麦克风，请检查浏览器权限')
+  }
+}
+
+function stopVoiceRecording() {
+  if (voiceRecorder && voiceRecorder.state !== 'inactive') {
+    voiceRecorder.stop()
+  }
+}
+
+async function handleVoiceRecordingStop() {
+  const mimeType = voiceRecorder?.mimeType || 'audio/webm'
+  const chunks = [...voiceChunks]
+  cleanupVoiceRecording()
+  if (!chunks.length) return
+  const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
+  const blob = new Blob(chunks, { type: mimeType })
+  const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType })
+  isUploadingAttachment.value = true
+  try {
+    await uploadAttachmentFile(file)
+    ElMessage.success('语音已加入待发送')
+  } catch (e) {
+    ElMessage.error(e.message || '语音上传失败')
+  } finally {
+    isUploadingAttachment.value = false
+  }
+}
+
+function cleanupVoiceRecording() {
+  isRecordingVoice.value = false
+  voiceRecorder = null
+  voiceChunks = []
+  if (voiceStream) {
+    voiceStream.getTracks().forEach((track) => track.stop())
+    voiceStream = null
+  }
 }
 
 function canRecallMessage(m) {
@@ -815,6 +1111,8 @@ function startNewConversation(userId) {
   scope.value = 'all'
   selectedUserId.value = userId
   newMessage.value = forwardDraft.value?.content || ''
+  pendingAttachments.value = []
+  showEmojiPicker.value = false
   replyDraft.value = null
   forwardDraft.value = null
   mobileChatOpen.value = true
@@ -1247,6 +1545,7 @@ function startPolling() {
 onMounted(() => {
   currentUserId.value = getUserId()
   csrfToken.value = getCsrfToken()
+  loadNotificationPreferences()
   loadConversations()
   startPolling()
   document.addEventListener('click', onGlobalClick)
@@ -1254,6 +1553,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (isRecordingVoice.value) stopVoiceRecording()
+  cleanupVoiceRecording()
   document.removeEventListener('click', onGlobalClick)
 })
 
@@ -2002,19 +2303,140 @@ watch(
   background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
 }
 
-.composer-row {
+.composer-shell {
   display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: flex-end;
-  gap: 10px;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 76%, var(--bg-primary) 24%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
 
-.composer-side {
+.composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--primary-color) 58%, var(--border-color));
+  background: var(--bg-primary);
+}
+
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-btn:hover:not(:disabled) {
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--bg-tertiary) 88%, transparent);
+}
+
+.tool-btn.recording {
+  color: #fff;
+  background: var(--danger-color, #ef4444);
+  animation: recordingPulse 1.2s ease-in-out infinite;
+}
+
+.tool-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@keyframes recordingPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, #ef4444 0%, transparent);
+  }
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.emoji-picker {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 4px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);
+}
+
+.emoji-btn {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 7px 0;
+}
+
+.emoji-btn:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+}
+
+.attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.pending-attachment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 150px) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  font-size: 12px;
+}
+
+.pending-attachment.type-image {
+  grid-template-columns: 34px minmax(0, 140px) auto;
+}
+
+.pending-image {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.pending-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.pending-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.pending-remove:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+  color: var(--danger-color, #ef4444);
 }
 
 .reply-draft-bar {
@@ -2061,18 +2483,29 @@ watch(
 }
 
 .message-input {
-  min-height: 52px;
+  min-height: 38px;
   max-height: 180px;
-  border-radius: 14px;
-  padding: 12px 14px;
-  height: 52px;
+  height: 38px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-input:focus {
+  background: transparent;
+  border: none;
 }
 
 .send-btn {
-  width: 88px;
-  height: 44px;
-  border-radius: 999px;
+  min-width: 82px;
+  width: auto;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 14px;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .send-text {
@@ -2100,6 +2533,36 @@ watch(
 
   .mobile-back-btn {
     display: flex;
+  }
+
+  .message-input-area {
+    padding: 10px 12px;
+  }
+
+  .composer-shell {
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+    gap: 4px;
+    padding: 7px;
+    border-radius: 16px;
+  }
+
+  .composer-shell .char-count {
+    display: none;
+  }
+
+  .tool-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .send-btn {
+    min-width: 42px;
+    width: 42px;
+    padding: 0;
+  }
+
+  .send-text {
+    display: none;
   }
 }
 

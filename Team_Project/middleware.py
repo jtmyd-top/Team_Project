@@ -3,6 +3,11 @@ Django 中间件 - 用于设置安全响应头、IP 封禁和保密柜锁定检�
 """
 import logging
 import json
+import time
+from urllib.parse import urlencode
+from django.conf import settings
+from django.contrib.auth import logout
+from django.shortcuts import redirect
 from django.http import JsonResponse, HttpResponse
 from django.template.loader import render_to_string
 from django.core.cache import cache
@@ -103,11 +108,15 @@ class ContentSecurityPolicyMiddleware:
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: "
             "https://cdn.jsdelivr.net "
+            "https://fastly.jsdelivr.net "
             "https://unpkg.com "
+            "https://cdnjs.cloudflare.com "
+            "https://live2d.03vps.cn "
+            "https://cubism.live2d.com "
             "https://static.cloudflareinsights.com "
             "https://challenges.cloudflare.com; "
-            "frame-src 'self' https://challenges.cloudflare.com; "
-            "connect-src 'self' https://static.cloudflareinsights.com https://challenges.cloudflare.com; "
+            "frame-src 'self' https://challenges.cloudflare.com https://i.y.qq.com https://y.qq.com https://music.163.com; "
+            "connect-src 'self' https://cdn.jsdelivr.net https://fastly.jsdelivr.net https://cdnjs.cloudflare.com https://live2d.03vps.cn https://static.cloudflareinsights.com https://challenges.cloudflare.com https://c6.y.qq.com https://i.y.qq.com https://y.qq.com https://music.163.com; "
             "worker-src 'self' blob:; "
             "style-src 'self' 'unsafe-inline' https:; "
             "img-src 'self' data: https: blob:; "
@@ -120,6 +129,112 @@ class ContentSecurityPolicyMiddleware:
 
         response['Content-Security-Policy'] = csp_header
         return response
+
+
+class SessionTimeoutMiddleware:
+    """
+    服务端登录态超时兜底。
+
+    保留 Django 的滚动过期行为，同时记录最近活动时间，避免首页在线人数只靠
+    expire_date 反推导致统计不准。
+    """
+
+    STARTED_AT_KEY = 'auth_started_at'
+    LAST_ACTIVITY_KEY = 'last_activity_at'
+    EXEMPT_PREFIXES = (
+        '/static/',
+        '/uploads/',
+        '/media/',
+        '/captcha/',
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.idle_timeout = int(getattr(settings, 'SESSION_IDLE_TIMEOUT', settings.SESSION_COOKIE_AGE))
+        logger.info(
+            "SessionTimeoutMiddleware initialized: idle=%ss",
+            self.idle_timeout,
+        )
+
+    def __call__(self, request):
+        if self._should_check(request):
+            expired_response = self._expire_if_needed(request)
+            if expired_response is not None:
+                return expired_response
+            self._touch(request)
+
+        response = self.get_response(request)
+
+        if getattr(request, 'user', None) is not None and request.user.is_authenticated:
+            self._ensure_metadata(request)
+
+        return response
+
+    def _should_check(self, request):
+        if getattr(request, 'user', None) is None or not request.user.is_authenticated:
+            return False
+        return not any(request.path.startswith(prefix) for prefix in self.EXEMPT_PREFIXES)
+
+    def _expire_if_needed(self, request):
+        now = int(time.time())
+        started_at = request.session.get(self.STARTED_AT_KEY)
+        last_activity_at = request.session.get(self.LAST_ACTIVITY_KEY)
+
+        if not started_at:
+            request.session[self.STARTED_AT_KEY] = now
+
+        if not last_activity_at:
+            request.session[self.LAST_ACTIVITY_KEY] = now
+            return None
+
+        if self.idle_timeout > 0 and now - int(last_activity_at) > self.idle_timeout:
+            return self._expire(request, 'idle_timeout')
+
+        return None
+
+    def _touch(self, request):
+        now = int(time.time())
+        request.session[self.LAST_ACTIVITY_KEY] = now
+        request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+
+    def _ensure_metadata(self, request):
+        now = int(time.time())
+        changed = False
+
+        if not request.session.get(self.STARTED_AT_KEY):
+            request.session[self.STARTED_AT_KEY] = now
+            changed = True
+
+        if not request.session.get(self.LAST_ACTIVITY_KEY):
+            request.session[self.LAST_ACTIVITY_KEY] = now
+            changed = True
+
+        if changed:
+            request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+
+    def _expire(self, request, reason):
+        user_id = getattr(request.user, 'id', None)
+        logger.info("Session expired for user %s: %s", user_id, reason)
+        logout(request)
+
+        if self._is_api_request(request):
+            return JsonResponse({
+                'status': 'session_expired',
+                'code': 'session_expired',
+                'message': '登录已过期，请重新登录。',
+            }, status=401)
+
+        login_url = settings.LOGIN_URL if str(settings.LOGIN_URL).startswith('/') else f'/{settings.LOGIN_URL}/'
+        query = urlencode({'next': request.get_full_path()})
+        return redirect(f'{login_url}?{query}')
+
+    def _is_api_request(self, request):
+        return (
+            request.path.startswith('/api/')
+            or 'application/json' in request.headers.get('Accept', '')
+            or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            or 'application/json' in request.headers.get('Content-Type', '')
+        )
 
 
 class VaultLockMiddleware:

@@ -68,6 +68,7 @@ MIDDLEWARE = [
     'Team_Project.middleware.IPBanMiddleware',  # IP 封禁中间件（在认证之前拦截）
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'Team_Project.middleware.SessionTimeoutMiddleware',  # 服务端会话超时兜底
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'Team_Project.middleware.ContentSecurityPolicyMiddleware',  # CSP 响应头中间件
@@ -178,9 +179,9 @@ DJANGO_REDIS_LOGGER = 'django_redis'
 #    3 小时 * 60 分钟/小时 * 60 秒/分钟 = 10800 秒
 SESSION_COOKIE_AGE = 10800
 
-# 2. 每次请求都保存并刷新 Session 的有效期
-#    这是实现“闲置”超时的关键。只要用户还在与网站交互（发起请求），
-#    3小时的倒计时就会被重置。
+# 2. 每次请求都保存并刷新 Session 的有效期，保留“有活动就续期”的滚动过期行为。
+#    SessionTimeoutMiddleware 额外维护 last_activity_at，供在线用户统计使用。
+SESSION_IDLE_TIMEOUT = int(os.getenv('SESSION_IDLE_TIMEOUT', SESSION_COOKIE_AGE))
 SESSION_SAVE_EVERY_REQUEST = True
 #mail设定
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
