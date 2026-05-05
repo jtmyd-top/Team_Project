@@ -753,7 +753,7 @@ def note_detail_api(request, note_id):
             return JsonResponse(response_data)
         except Exception as e:
             logger.error(f"更新笔记 {note_id} 时发生错误: {e}", exc_info=True)
-            return JsonResponse({'error': f'更新失败: {str(e)}'}, status=500)
+            return JsonResponse({'error': '更新失败，请稍后重试'}, status=500)
 
     # --- 4. DELETE 请求处理 (已优化) ---
     if request.method == 'DELETE':

@@ -1,5 +1,20 @@
 ﻿<template>
-  <div class="bubble-row" :class="{ own: msg.is_own }" :data-msg-id="msg.id">
+  <div
+    class="bubble-row"
+    :class="{ own: msg.is_own, selectable: selectable, selected: selected }"
+    :data-msg-id="msg.id"
+    @click="toggleSelected"
+  >
+    <button
+      v-if="selectable"
+      class="message-select"
+      type="button"
+      :class="{ active: selected }"
+      @click.stop="emitToggleSelected"
+      :title="selected ? '取消选择' : '选择消息'"
+    >
+      <i class="fas" :class="selected ? 'fa-check-circle' : 'fa-circle'"></i>
+    </button>
     <div class="bubble-wrap">
       <div
         class="bubble"
@@ -73,9 +88,11 @@ import { hasUbbMarkup, hydrateUbbDom, renderCommentUbb } from '@/utils/ubb'
 const props = defineProps({
   msg: { type: Object, required: true },
   highlight: { type: String, default: '' },
+  selectable: { type: Boolean, default: false },
+  selected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['context-menu'])
+const emit = defineEmits(['context-menu', 'toggle-selected'])
 
 // Backend fields (recommended):
 // msg.is_read: boolean read receipt flag; msg.read_at: optional ISO timestamp.
@@ -162,6 +179,15 @@ function emitContextMenu(x, y) {
   emit('context-menu', { msg: props.msg, x, y })
 }
 
+function emitToggleSelected() {
+  emit('toggle-selected', props.msg)
+}
+
+function toggleSelected() {
+  if (!props.selectable) return
+  emitToggleSelected()
+}
+
 function clearTouchHold() {
   if (touchHoldTimer) {
     clearTimeout(touchHoldTimer)
@@ -210,10 +236,37 @@ onUpdated(() => {
   display: flex;
   align-items: flex-end;
   justify-content: flex-start;
+  gap: 10px;
 }
 
 .bubble-row.own {
   justify-content: flex-end;
+}
+
+.bubble-row.selectable {
+  cursor: pointer;
+}
+
+.bubble-row.selected .bubble {
+  box-shadow: 0 0 0 2px color-mix(in srgb, #60a5fa 55%, transparent);
+}
+
+.message-select {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.message-select.active {
+  color: #3b82f6;
 }
 
 .bubble-wrap {

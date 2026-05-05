@@ -1058,6 +1058,9 @@ class Message(models.Model):
     # 撤回：双方均不可见（发送者 2 分钟内可撤回 / 阅后即焚触发）
     is_recalled = models.BooleanField(default=False, verbose_name="已撤回")
     recalled_at = models.DateTimeField(null=True, blank=True, verbose_name="撤回时间")
+    was_reported = models.BooleanField(default=False, verbose_name="是否曾被举报")
+    pending_purge_at = models.DateTimeField(null=True, blank=True, verbose_name="计划物理清理时间")
+    purged_at = models.DateTimeField(null=True, blank=True, verbose_name="实际物理清理时间")
 
     class Meta:
         verbose_name = "私信"
@@ -1066,6 +1069,8 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=['sender', 'recipient', '-created_at']),
             models.Index(fields=['recipient', 'is_read']),
+            models.Index(fields=['pending_purge_at']),
+            models.Index(fields=['was_reported']),
         ]
 
     def __str__(self):
@@ -1116,6 +1121,7 @@ class MessageAttachment(models.Model):
     mime_type = models.CharField(max_length=120, blank=True, verbose_name="MIME 类型")
     size = models.PositiveIntegerField(default=0, verbose_name="文件大小")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="上传时间")
+    was_reported = models.BooleanField(default=False, verbose_name="是否曾被举报")
 
     class Meta:
         verbose_name = "私信附件"
@@ -1124,6 +1130,7 @@ class MessageAttachment(models.Model):
         indexes = [
             models.Index(fields=['uploader', 'message']),
             models.Index(fields=['message', 'created_at']),
+            models.Index(fields=['was_reported']),
         ]
 
     def __str__(self):
@@ -1158,6 +1165,13 @@ class AttachmentReport(models.Model):
     )
     reason = models.CharField(max_length=120, blank=True, verbose_name="举报原因")
     detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    pending_dedup_key = models.CharField(
+        max_length=16,
+        null=True,
+        blank=True,
+        editable=False,
+        verbose_name="待处理去重标记",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="举报时间")
     handled_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
     handled_by = models.ForeignKey(
@@ -1173,11 +1187,21 @@ class AttachmentReport(models.Model):
         verbose_name = "私信附件举报"
         verbose_name_plural = "私信附件举报"
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['attachment', 'reporter', 'pending_dedup_key'],
+                name='uniq_pending_attachment_report_per_reporter',
+            ),
+        ]
         indexes = [
             models.Index(fields=['attachment', 'status']),
             models.Index(fields=['status', '-created_at']),
             models.Index(fields=['reporter', '-created_at']),
         ]
+
+    def save(self, *args, **kwargs):
+        self.pending_dedup_key = 'pending' if self.status == 'pending' else None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.reporter.username} 举报附件 {self.attachment_id} ({self.get_status_display()})"

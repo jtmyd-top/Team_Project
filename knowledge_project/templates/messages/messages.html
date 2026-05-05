@@ -20,6 +20,10 @@
 <script>
 // 注入用户ID
 window.currentUserId = {{ user.id }};
+window.MESSAGE_REALTIME = {
+  enabled: {{ realtime_enabled|yesno:"true,false" }},
+  wsPath: "{{ realtime_ws_path|escapejs }}"
+};
 </script>
 
 <div id="messages-app"></div>

@@ -540,6 +540,17 @@ class AttachmentReportAdmin(admin.ModelAdmin):
     readonly_fields = ('attachment', 'reporter', 'reason', 'detail', 'created_at', 'handled_at', 'handled_by', 'review_link')
     actions = ['mark_removed', 'mark_dismissed']
 
+    def save_model(self, request, obj, form, change):
+        if change and obj.status != 'pending':
+            from django.utils import timezone
+
+            previous_status = type(obj).objects.only('status').get(pk=obj.pk).status
+            if previous_status == 'pending' and obj.handled_at is None:
+                obj.handled_at = timezone.now()
+                obj.handled_by = request.user
+            obj.pending_dedup_key = 'pending' if obj.status == 'pending' else None
+        super().save_model(request, obj, form, change)
+
     @admin.display(description='审查入口')
     def review_link(self, obj):
         if obj.status != 'pending':
@@ -556,6 +567,7 @@ class AttachmentReportAdmin(admin.ModelAdmin):
         from django.utils import timezone
         queryset.filter(status='pending').update(
             status='removed',
+            pending_dedup_key=None,
             handled_at=timezone.now(),
             handled_by=request.user,
         )
@@ -565,6 +577,7 @@ class AttachmentReportAdmin(admin.ModelAdmin):
         from django.utils import timezone
         queryset.filter(status='pending').update(
             status='dismissed',
+            pending_dedup_key=None,
             handled_at=timezone.now(),
             handled_by=request.user,
         )

@@ -323,10 +323,10 @@ def vault_init(request):
         })
 
     except Exception as e:
-        logger.error(f"Vault init error: {e}")
+        logger.error(f"Vault init error: {e}", exc_info=True)
         return JsonResponse({
             'status': 'error',
-            'message': f'保险柜初始化失败: {str(e)}'
+            'message': '保险柜初始化失败，请稍后重试'
         }, status=500)
 
 
@@ -484,8 +484,8 @@ def vault_export(request):
         )
 
     except Exception as e:
-        logger.error(f"Vault export error: {e}")
+        logger.error(f"Vault export error: {e}", exc_info=True)
         return JsonResponse({
             'status': 'error',
-            'message': f'导出失败: {str(e)}'
+            'message': '导出失败，请稍后重试'
         }, status=500)

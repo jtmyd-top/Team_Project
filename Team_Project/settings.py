@@ -1,6 +1,7 @@
 # settings.py
 
 import os
+import importlib.util
 from pathlib import Path
 from django.urls import reverse_lazy
 from dotenv import load_dotenv
@@ -37,6 +38,8 @@ CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_env.split(',') if o.strip()] or
 # 设置为 True 时，模板会从 Vite 开发服务器 (localhost:5173) 加载资源
 # 设置为 False 时，模板会从 static/dist/ 加载构建后的资源
 VITE_DEV_MODE = os.getenv('VITE_DEV_MODE', 'False').lower() in ['true', '1', 't']
+CHANNELS_AVAILABLE = importlib.util.find_spec('channels') is not None
+CHANNELS_REDIS_AVAILABLE = importlib.util.find_spec('channels_redis') is not None
 
 
 # --- 3. INSTALLED_APPS (只保留 django-ckeditor-5) ---
@@ -51,6 +54,9 @@ INSTALLED_APPS = [
     'django_ckeditor_5',  # 只保留这一个
     'captcha',  # django-simple-captcha
 ]
+
+if CHANNELS_AVAILABLE:
+    INSTALLED_APPS.append('channels')
 
 # django-extensions 提供 runserver_plus（HTTPS dev server），仅在已安装时启用
 try:
@@ -90,6 +96,7 @@ TEMPLATES = [
     },
 ]
 WSGI_APPLICATION = 'Team_Project.wsgi.application'
+ASGI_APPLICATION = 'Team_Project.asgi.application'
 
 
 # --- 5. 数据库 (只保留一份) ---
@@ -208,6 +215,37 @@ SMTP_PROXY_USERNAME = os.getenv('SMTP_PROXY_USERNAME')  # 代理用户名（可�
 SMTP_PROXY_PASSWORD = os.getenv('SMTP_PROXY_PASSWORD')  # 代理密码（可选）
 EMAIL_FALLBACK_TO_PROXY = os.getenv('EMAIL_FALLBACK_TO_PROXY', 'True').lower() in ['true', '1', 't']
 EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '30'))  # 连接超时时间（秒）
+
+# --- 实时私信 / WebSocket ---
+REALTIME_MESSAGES_ENABLED = CHANNELS_AVAILABLE and (
+    os.getenv('REALTIME_MESSAGES_ENABLED', 'True').lower() in ['true', '1', 't']
+)
+REALTIME_MESSAGES_PATH = os.getenv('REALTIME_MESSAGES_PATH', '/ws/messages/')
+WS_CLIENT_INACTIVITY_TIMEOUT = int(os.getenv('WS_CLIENT_INACTIVITY_TIMEOUT', '300'))
+
+if REALTIME_MESSAGES_ENABLED:
+    channel_redis_url = (
+        os.getenv('CHANNEL_REDIS_URL')
+        or os.getenv('redis1')
+        or 'redis://127.0.0.1:6379/2'
+    )
+    if CHANNELS_REDIS_AVAILABLE:
+        CHANNEL_LAYERS = {
+            'default': {
+                'BACKEND': 'channels_redis.core.RedisChannelLayer',
+                'CONFIG': {
+                    'hosts': [channel_redis_url],
+                    'expiry': 10,
+                    'group_expiry': 86400,
+                },
+            },
+        }
+    else:
+        CHANNEL_LAYERS = {
+            'default': {
+                'BACKEND': 'channels.layers.InMemoryChannelLayer',
+            },
+        }
 
 # --- Cloudflare Turnstile Configuration ---
 CLOUDFLARE_TURNSTILE_SITE_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SITE_KEY')

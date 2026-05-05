@@ -174,7 +174,7 @@ def upload_avatar(request):
 
     except Exception as e:
         logger.error(f"上传文件失败: {str(e)}", exc_info=True)
-        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "上传失败，请稍后重试"}, status=500)
 
 
 @login_required

@@ -200,7 +200,8 @@ def note_comments_api(request, note_id):
         data = [serialize_comment(c) for c in top_comments]
         return JsonResponse({'comments': data, 'total': NoteComment.objects.filter(note=note).count()})
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error("获取评论列表失败: %s", e, exc_info=True)
+        return JsonResponse({'error': '服务器错误'}, status=500)
 
 
 @require_http_methods(["POST"])
@@ -251,7 +252,8 @@ def note_comment_create_api(request, note_id):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error("创建评论失败: %s", e, exc_info=True)
+        return JsonResponse({'error': '服务器错误'}, status=500)
 
 
 @require_http_methods(["DELETE"])
@@ -265,7 +267,8 @@ def note_comment_delete_api(request, comment_id):
         comment.delete()
         return JsonResponse({'status': 'deleted'})
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error("删除评论失败: %s", e, exc_info=True)
+        return JsonResponse({'error': '服务器错误'}, status=500)
 
 
 @require_http_methods(["GET"])

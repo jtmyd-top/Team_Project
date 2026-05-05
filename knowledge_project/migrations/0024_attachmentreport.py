@@ -20,6 +20,7 @@ class Migration(migrations.Migration):
                 ('status', models.CharField(choices=[('pending', '待处理'), ('removed', '已违规删除'), ('dismissed', '已驳回误报')], default='pending', max_length=20, verbose_name='处理状态')),
                 ('reason', models.CharField(blank=True, max_length=120, verbose_name='举报原因')),
                 ('detail', models.TextField(blank=True, max_length=1000, verbose_name='补充说明')),
+                ('pending_dedup_key', models.CharField(blank=True, editable=False, max_length=16, null=True, verbose_name='待处理去重标记')),
                 ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='举报时间')),
                 ('handled_at', models.DateTimeField(blank=True, null=True, verbose_name='处理时间')),
                 ('attachment', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='reports', to='knowledge_project.messageattachment', verbose_name='关联附件')),
@@ -31,6 +32,7 @@ class Migration(migrations.Migration):
                 'verbose_name_plural': '私信附件举报',
                 'ordering': ['-created_at'],
                 'indexes': [models.Index(fields=['attachment', 'status'], name='knowledge_p_attachm_58c78e_idx'), models.Index(fields=['status', '-created_at'], name='knowledge_p_status_8f4cb4_idx'), models.Index(fields=['reporter', '-created_at'], name='knowledge_p_reporte_46bcc1_idx')],
+                'constraints': [models.UniqueConstraint(fields=('attachment', 'reporter', 'pending_dedup_key'), name='uniq_pending_attachment_report_per_reporter')],
             },
         ),
     ]

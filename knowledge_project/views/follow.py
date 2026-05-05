@@ -48,8 +48,8 @@ def follow_user_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"关注用户错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error("关注用户错误: %s", e, exc_info=True)
+        return JsonResponse({'error': '服务器错误'}, status=500)
 
 
 @require_http_methods(["POST"])
@@ -77,8 +77,8 @@ def unfollow_user_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"取消关注错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error("取消关注错误: %s", e, exc_info=True)
+        return JsonResponse({'error': '服务器错误'}, status=500)
 
 
 @require_http_methods(["GET"])
@@ -107,5 +107,5 @@ def follow_status_api(request, user_id):
             'is_self': request.user.is_authenticated and request.user == target,
         })
     except Exception as e:
-        logger.error(f"查询关注状态错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error("查询关注状态错误: %s", e, exc_info=True)
+        return JsonResponse({'error': '服务器错误'}, status=500)

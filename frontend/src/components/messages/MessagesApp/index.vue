@@ -81,6 +81,10 @@
 
       <!-- 对话列表 -->
       <div v-else class="conversations-list">
+        <div v-if="scope === 'archived'" class="scope-hint">
+          <i class="fas fa-circle-info"></i>
+          <span>新消息到达时将自动恢复到全部会话</span>
+        </div>
         <div v-if="loadingConversations" class="empty-state">
           <i class="fas fa-spinner fa-spin"></i>
         </div>
@@ -134,6 +138,13 @@
             </div>
           </div>
           <div class="chat-actions">
+            <button
+              class="action-btn"
+              @click="toggleSelectionMode"
+              :title="selectionMode ? '取消多选' : '多选消息'"
+            >
+              <i class="fas" :class="selectionMode ? 'fa-xmark' : 'fa-check-double'"></i>
+            </button>
             <button class="action-btn" @click="showChatSearch = true" title="在对话中搜索">
               <i class="fas fa-search"></i>
             </button>
@@ -187,6 +198,16 @@
           <i class="fas fa-fire-alt"></i>
           已开启阅后即焚 · {{ formatTtl(currentSettings.disappearing_ttl_seconds) }}内消息将自动销毁        </div>
 
+        <div v-if="selectionMode" class="selection-banner">
+          <span>已选择 {{ selectedMessageIds.size }} 条消息</span>
+          <div class="selection-actions">
+            <button class="link-btn" @click="clearSelectedMessages">清空选择</button>
+            <button class="toolbar-btn danger" :disabled="selectedMessageIds.size === 0" @click="deleteSelectedMessages">
+              删除所选
+            </button>
+          </div>
+        </div>
+
         <!-- 消息列表 -->
         <div class="messages-list" ref="messagesListRef">
           <div v-if="loadingMessages" class="messages-state">
@@ -210,12 +231,31 @@
                   :data-msg-id="m.id"
                   :msg="m"
                   :highlight="highlightMessageId === m.id ? globalSearch : ''"
+                  :selectable="selectionMode"
+                  :selected="selectedMessageIds.has(m.id)"
                   @context-menu="onMessageContextMenu"
+                  @toggle-selected="toggleMessageSelected"
                 />
+              </div>
+              <div v-if="typingIndicator.visible" class="typing-indicator">
+                <span class="typing-dots"><i></i><i></i><i></i></span>
+                <span>{{ typingIndicator.username || selectedConversation?.username || '对方' }} 正在输入...</span>
               </div>
             </div>
           </template>
         </div>
+        <button
+          v-if="showScrollToBottom"
+          class="scroll-bottom-btn"
+          type="button"
+          title="回到底部"
+          @click="jumpToLatest"
+        >
+          <i class="fas fa-arrow-down"></i>
+          <span v-if="scrollBottomUnreadCount > 0" class="scroll-bottom-badge">
+            {{ scrollBottomUnreadCount > 99 ? '99+' : scrollBottomUnreadCount }}
+          </span>
+        </button>
 
         <!-- 输入区 -->
         <div v-if="peerBlockedByMe" class="blocked-tip">
@@ -298,7 +338,7 @@
               class="message-input"
               placeholder="输入消息... Enter 发送，Shift+Enter 换行"
               @keydown.enter="handleComposerEnter"
-              @input="autoGrowComposer"
+              @input="onComposerInput"
               maxlength="5000"
               ref="inputRef"
             ></textarea>
@@ -361,11 +401,20 @@
       <button class="dm-item" @click="messageCtxAction('quote')">
         <i class="fas fa-quote-left"></i> 引用
       </button>
+      <button class="dm-item" @click="messageCtxAction('multi_select')">
+        <i class="fas fa-check-double"></i> 多选
+      </button>
       <button class="dm-item" @click="messageCtxAction('forward')">
         <i class="fas fa-share"></i> 转发
       </button>
       <button class="dm-item" @click="messageCtxAction('copy')">
         <i class="fas fa-copy"></i> 复制
+      </button>
+      <button class="dm-item" @click="messageCtxAction('report')">
+        <i class="fas fa-flag"></i> 举报
+      </button>
+      <button class="dm-item danger" @click="messageCtxAction('delete')">
+        <i class="fas fa-trash-alt"></i> 删除
       </button>
       <button
         v-if="messageCtxMenu.msg?.is_own && canRecallMessage(messageCtxMenu.msg)"
@@ -443,6 +492,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ChatWebSocket } from '@services/chatWebSocket'
 import NewMessageDialog from '@components/messages/NewMessageDialog/index.vue'
 import ConversationItem from '@components/messages/ConversationItem/index.vue'
 import MessageBubble from '@components/messages/MessageBubble/index.vue'
@@ -486,6 +536,12 @@ const showDisappearingDialog = ref(false)
 const reportTarget = ref(null)
 const ctxMenu = ref({ visible: false, x: 0, y: 0, conv: null })
 const messageCtxMenu = ref({ visible: false, x: 0, y: 0, msg: null })
+const selectionMode = ref(false)
+const selectedMessageIds = ref(new Set())
+const typingIndicator = ref({ visible: false, username: '' })
+const conversationDrafts = ref({})
+const showScrollToBottom = ref(false)
+const scrollBottomUnreadCount = ref(0)
 const globalSearch = ref('')
 const globalSearchResults = ref(null)
 const highlightMessageId = ref(null)
@@ -497,9 +553,13 @@ const browserNotificationsEnabled = ref(false)
 const pendingAttachments = ref([])
 const showEmojiPicker = ref(false)
 const maxPendingAttachments = 6
+const realtimeState = ref('disabled')
 let voiceRecorder = null
 let voiceStream = null
 let voiceChunks = []
+let chatSocket = null
+let typingTimer = null
+let typingHideTimer = null
 
 // Turnstile 兜底：当日新对话超额
 const turnstileGate = ref({
@@ -525,9 +585,10 @@ const emojiChoices = [
 ]
 
 // ==== 璁＄畻灞炴€?====
-const selectedConversation = computed(() =>
-  conversations.value.find((c) => c.user_id === selectedUserId.value)
-)
+const selectedConversation = computed(() => {
+  const currentId = normalizeUserId(selectedUserId.value)
+  return findConversationByUserId(currentId)
+})
 // 后端可选增强字段：
 // 1) selectedConversation.peer_online: Boolean 对方在线状态（无该字段时前端默认展示在线）
 // 2) message.reply_to_id / reply_preview: 若要持久化引用关系，后端需返回并保存这些字段
@@ -608,6 +669,103 @@ function getUserId() {
   )
 }
 
+function draftStorageKey() {
+  return `message_drafts:${currentUserId.value || getUserId()}`
+}
+
+function loadDraftsFromStorage() {
+  try {
+    conversationDrafts.value = JSON.parse(localStorage.getItem(draftStorageKey()) || '{}') || {}
+  } catch {
+    conversationDrafts.value = {}
+  }
+}
+
+function persistDrafts() {
+  localStorage.setItem(draftStorageKey(), JSON.stringify(conversationDrafts.value))
+}
+
+function currentDraftKey() {
+  const peerId = normalizeUserId(selectedUserId.value)
+  return peerId ? String(peerId) : ''
+}
+
+function saveCurrentDraft() {
+  const key = currentDraftKey()
+  if (!key) return
+  const next = { ...conversationDrafts.value }
+  const draft = newMessage.value.trim() ? newMessage.value : ''
+  if (draft) next[key] = draft
+  else delete next[key]
+  conversationDrafts.value = next
+  persistDrafts()
+}
+
+function applyDraftForConversation(peerId) {
+  const key = String(normalizeUserId(peerId) || '')
+  newMessage.value = key ? (conversationDrafts.value[key] || '') : ''
+  nextTick(autoGrowComposer)
+}
+
+function clearDraftForConversation(peerId) {
+  const key = String(normalizeUserId(peerId) || '')
+  if (!key || !(key in conversationDrafts.value)) return
+  const next = { ...conversationDrafts.value }
+  delete next[key]
+  conversationDrafts.value = next
+  persistDrafts()
+}
+
+function normalizeUserId(value) {
+  const normalized = Number(value)
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : null
+}
+
+function findConversationByUserId(userId) {
+  const normalizedUserId = normalizeUserId(userId)
+  return conversations.value.find((c) => normalizeUserId(c.user_id) === normalizedUserId)
+}
+
+function conversationVersion(conv) {
+  if (!conv) return ''
+  return [
+    conversationTimestamp(conv),
+    conv.last_message || '',
+    conv.last_sender_id || '',
+    conv.unread_count || 0,
+  ].join('|')
+}
+
+function applyDraftPreviews() {
+  for (const conv of conversations.value) {
+    const draft = conversationDrafts.value[String(normalizeUserId(conv.user_id) || '')]
+    conv.draft_preview = draft || ''
+  }
+}
+
+function resolveRealtimePeerId(event, message) {
+  const currentId = normalizeUserId(currentUserId.value || getUserId())
+  const explicitPeerId = normalizeUserId(event?.peer_id)
+  if (explicitPeerId) return explicitPeerId
+
+  const senderId = normalizeUserId(message?.sender_id)
+  const recipientId = normalizeUserId(message?.recipient_id)
+  if (senderId && senderId !== currentId) return senderId
+  if (recipientId && recipientId !== currentId) return recipientId
+  return senderId || recipientId
+}
+
+function eventBelongsToSelectedConversation(event, message) {
+  const selectedId = normalizeUserId(selectedUserId.value)
+  if (!selectedId) return false
+  return [
+    event?.peer_id,
+    message?.peer_id,
+    message?.sender_id,
+    message?.recipient_id,
+  ].some((value) => normalizeUserId(value) === selectedId)
+}
+
 async function apiPost(url, body) {
   const r = await fetch(url, {
     method: 'POST',
@@ -627,12 +785,182 @@ async function apiPost(url, body) {
   return d
 }
 
-function syncConversations(nextConversations) {
+function isRealtimeEnabled() {
+  return !!window.MESSAGE_REALTIME?.enabled
+}
+
+function normalizeIncomingMessage(message) {
+  return {
+    ...message,
+    attachments: Array.isArray(message?.attachments) ? message.attachments : [],
+  }
+}
+
+function upsertConversationPreviewFromMessage(message, peerId, { preserveOrder = false } = {}) {
+  const normalizedPeerId = normalizeUserId(peerId)
+  if (!normalizedPeerId) return
+  const existing = findConversationByUserId(normalizedPeerId)
+  const isActiveConversation =
+    normalizeUserId(selectedUserId.value) === normalizedPeerId && !document.hidden
+  const preview =
+    String(message.content || '').trim() ||
+    message.attachments?.[0]?.name ||
+    '[附件]'
+  const nextUnreadCount = message.is_own || isActiveConversation
+    ? 0
+    : ((existing?.unread_count || 0) + 1)
+  const patch = {
+    user_id: normalizedPeerId,
+    username: existing?.username || selectedConversation.value?.username || '',
+    avatar: existing?.avatar || selectedConversation.value?.avatar || '/static/img/default-avatar.png',
+    last_message: preview,
+    draft_preview: existing?.draft_preview || '',
+    last_message_time: message.created_at,
+    last_sender_id: message.sender_id,
+    unread_count: nextUnreadCount,
+    is_pinned: existing?.is_pinned || false,
+    pinned_at: existing?.pinned_at || null,
+    is_muted: existing?.is_muted || false,
+    is_archived: false,
+    disappearing_enabled: existing?.disappearing_enabled || false,
+    force_unread: existing?.force_unread || false,
+    is_blocked: existing?.is_blocked || false,
+  }
+
+  if (existing) {
+    Object.assign(existing, patch)
+  } else {
+    conversations.value.unshift(patch)
+  }
+
+  if (preserveOrder) {
+    conversations.value = [...conversations.value]
+    return
+  }
+
+  conversations.value = [...conversations.value].sort((a, b) => {
+    const aPinned = a.is_pinned ? 1 : 0
+    const bPinned = b.is_pinned ? 1 : 0
+    if (aPinned !== bPinned) return bPinned - aPinned
+    const aPinnedAt = a.pinned_at ? new Date(a.pinned_at).getTime() : 0
+    const bPinnedAt = b.pinned_at ? new Date(b.pinned_at).getTime() : 0
+    if (aPinnedAt !== bPinnedAt) return bPinnedAt - aPinnedAt
+    return conversationTimestamp(b) - conversationTimestamp(a)
+  })
+}
+
+function handleRealtimeEvent(event) {
+  if (!event?.type) return
+
+  if (event.type === 'new_message' && event.message) {
+    const incomingMessage = normalizeIncomingMessage(event.message)
+    const peerId = resolveRealtimePeerId(event, incomingMessage)
+    const isCurrentConversation = eventBelongsToSelectedConversation(event, incomingMessage)
+    const exists = messages.value.some((message) => message.id === incomingMessage.id)
+
+    if (isCurrentConversation && !exists) {
+      messages.value.push(incomingMessage)
+      const currentConv = findConversationByUserId(selectedUserId.value)
+      if (currentConv) currentConv.unread_count = 0
+      currentSettings.value.force_unread = false
+      scrollToBottomSoon()
+    }
+
+    if (isCurrentConversation) {
+      loadMessages({ silent: true })
+    }
+
+    upsertConversationPreviewFromMessage(incomingMessage, peerId, {
+      preserveOrder: !!incomingMessage.is_own,
+    })
+    return
+  }
+
+  if (event.type === 'message_read') {
+    const ids = new Set(event.message_ids || [])
+    if (ids.size > 0) {
+      messages.value = messages.value.map((message) =>
+        ids.has(message.id)
+          ? { ...message, is_read: true, read_at: new Date().toISOString() }
+          : message
+      )
+    }
+    const peerId = normalizeUserId(event.peer_id)
+    if (peerId) {
+      const conv = conversations.value.find((item) => normalizeUserId(item.user_id) === peerId)
+      if (conv) conv.unread_count = 0
+    }
+    return
+  }
+
+  if (event.type === 'message_recalled' && event.message_id) {
+    messages.value = messages.value.filter((message) => message.id !== event.message_id)
+    loadConversations({ silent: true })
+    return
+  }
+
+  if (event.type === 'typing') {
+    const peerId = normalizeUserId(event.peer_id)
+    if (peerId !== normalizeUserId(selectedUserId.value) || document.hidden) return
+    typingIndicator.value = {
+      visible: true,
+      username: event.username || selectedConversation.value?.username || '',
+    }
+    clearTimeout(typingHideTimer)
+    typingHideTimer = window.setTimeout(() => {
+      typingIndicator.value = { visible: false, username: '' }
+    }, 2000)
+    scrollToBottomSoon()
+  }
+}
+
+function initRealtimeMessages() {
+  if (!isRealtimeEnabled()) {
+    realtimeState.value = 'disabled'
+    return
+  }
+  chatSocket = new ChatWebSocket({
+    path: window.MESSAGE_REALTIME?.wsPath || '/ws/messages/',
+    onStatusChange: (status) => {
+      realtimeState.value = status
+    },
+    onEvent: handleRealtimeEvent,
+  })
+  chatSocket.connect()
+}
+
+function syncConversations(nextConversations, { preserveOrder = false } = {}) {
   const existingByUserId = new Map(
-    conversations.value.map((conversation) => [conversation.user_id, conversation])
+    conversations.value.map((conversation) => [normalizeUserId(conversation.user_id), conversation])
   )
+  if (preserveOrder) {
+    const nextByUserId = new Map(
+      nextConversations.map((conversation) => [normalizeUserId(conversation.user_id), conversation])
+    )
+    const merged = conversations.value
+      .map((existing) => {
+        const nextConversation = nextByUserId.get(normalizeUserId(existing.user_id))
+        if (!nextConversation) return existing
+        for (const key of Object.keys(existing)) {
+          if (!(key in nextConversation)) delete existing[key]
+        }
+        Object.assign(existing, nextConversation)
+        return existing
+      })
+      .filter((conversation) => nextByUserId.has(normalizeUserId(conversation.user_id)))
+
+    for (const nextConversation of nextConversations) {
+      if (!existingByUserId.has(normalizeUserId(nextConversation.user_id))) {
+        merged.push(nextConversation)
+      }
+    }
+
+    conversations.value = merged
+    return
+  }
+
   const merged = nextConversations.map((nextConversation) => {
-    const existing = existingByUserId.get(nextConversation.user_id)
+    const existing = existingByUserId.get(normalizeUserId(nextConversation.user_id))
     if (!existing) return nextConversation
     for (const key of Object.keys(existing)) {
       if (!(key in nextConversation)) delete existing[key]
@@ -727,31 +1055,49 @@ async function loadNotificationPreferences() {
 }
 
 // ==== 加载 ====
-async function loadConversations() {
+async function loadConversations({ silent = false, preserveOrder = false } = {}) {
   if (scope.value === 'blocked') {
     blockedPanelRef.value?.reload?.()
     conversations.value = []
     return
   }
-  loadingConversations.value = true
+  if (!silent) loadingConversations.value = true
   try {
+    const selectedId = normalizeUserId(selectedUserId.value)
+    const previousSelectedVersion = selectedId
+      ? conversationVersion(findConversationByUserId(selectedId))
+      : ''
     const r = await fetch(`/api/messages/conversations/?scope=${scope.value}`)
     if (r.ok) {
       const d = await r.json()
       const nextConversations = d.conversations || []
       updateBrowserNotificationSnapshot(nextConversations)
-      syncConversations(nextConversations)
+      syncConversations(nextConversations, { preserveOrder })
+      applyDraftPreviews()
+      const currentSelected = selectedId ? findConversationByUserId(selectedId) : null
+      const nextSelectedVersion = conversationVersion(currentSelected)
+      if (
+        selectedId &&
+        currentSelected &&
+        previousSelectedVersion &&
+        nextSelectedVersion &&
+        previousSelectedVersion !== nextSelectedVersion
+      ) {
+        currentSelected.unread_count = 0
+        currentSettings.value.force_unread = false
+        loadMessages({ silent: true })
+      }
     }
   } catch (e) {
     console.error(e)
   } finally {
-    loadingConversations.value = false
+    if (!silent) loadingConversations.value = false
   }
 }
 
-async function loadMessages() {
+async function loadMessages({ silent = false } = {}) {
   if (!selectedUserId.value) return
-  loadingMessages.value = true
+  if (!silent) loadingMessages.value = true
   try {
     const r = await fetch(`/api/messages/get/?user_id=${selectedUserId.value}`)
     if (r.ok) {
@@ -760,13 +1106,12 @@ async function loadMessages() {
       if (d.settings) {
         currentSettings.value = { ...currentSettings.value, ...d.settings }
       }
-      await nextTick()
-      scrollToBottom()
+      scrollToBottomSoon()
     }
   } catch (e) {
     console.error(e)
   } finally {
-    loadingMessages.value = false
+    if (!silent) loadingMessages.value = false
   }
 }
 
@@ -777,8 +1122,12 @@ function selectConversation(conv) {
     ElMessage.info('此用户已被你屏蔽')
     return
   }
+  saveCurrentDraft()
   selectedUserId.value = conv.user_id
-  newMessage.value = ''
+  hideTypingIndicator()
+  selectionMode.value = false
+  clearSelectedMessages()
+  applyDraftForConversation(conv.user_id)
   pendingAttachments.value = []
   showEmojiPicker.value = false
   replyDraft.value = null
@@ -805,15 +1154,19 @@ async function sendMessage(turnstileToken = '') {
     }
     if (normalizedTurnstileToken) payload.turnstile_token = normalizedTurnstileToken
     const d = await apiPost('/api/messages/send/', payload)
-    messages.value.push(d.message)
+    const sentMessage = normalizeIncomingMessage(d.message)
+    if (!messages.value.some((message) => message.id === sentMessage.id)) {
+      messages.value.push(sentMessage)
+    }
     newMessage.value = ''
     pendingAttachments.value = []
     showEmojiPicker.value = false
     replyDraft.value = null
     resetComposerHeight()
     await nextTick()
-    scrollToBottom()
-    loadConversations()
+    scrollToBottomSoon()
+    upsertConversationPreviewFromMessage(sentMessage, selectedUserId.value, { preserveOrder: true })
+    loadConversations({ silent: true, preserveOrder: true })
   } catch (e) {
     if (e?.data?.need_turnstile) {
       await openTurnstileGate(finalContent, selectedUserId.value, e.data.quota_limit, attachmentIds)
@@ -871,14 +1224,17 @@ async function onTurnstileVerified(token) {
       attachment_ids: pendingAttachmentIds,
       turnstile_token: normalizedTurnstileToken,
     })
-    messages.value.push(d.message)
+    const sentMessage = normalizeIncomingMessage(d.message)
+    if (!messages.value.some((message) => message.id === sentMessage.id)) {
+      messages.value.push(sentMessage)
+    }
     newMessage.value = ''
     pendingAttachments.value = []
     replyDraft.value = null
     resetComposerHeight()
-    await nextTick()
-    scrollToBottom()
-    loadConversations()
+    scrollToBottomSoon()
+    upsertConversationPreviewFromMessage(sentMessage, pendingRecipient, { preserveOrder: true })
+    loadConversations({ silent: true, preserveOrder: true })
   } catch (e) {
     ElMessage.error(e.message || '验证通过但发送失败，请稍后重试')
   } finally {
@@ -1093,6 +1449,25 @@ function handleComposerEnter(e) {
   sendMessage()
 }
 
+function onComposerInput() {
+  autoGrowComposer()
+  saveCurrentDraft()
+  applyDraftPreviews()
+  scheduleTypingNotice()
+}
+
+function scheduleTypingNotice() {
+  if (!selectedUserId.value || !newMessage.value.trim()) return
+  if (typingTimer) return
+  typingTimer = window.setTimeout(() => {
+    typingTimer = null
+  }, 1400)
+  chatSocket?.send?.({
+    type: 'typing',
+    peer_id: selectedUserId.value,
+  })
+}
+
 function autoGrowComposer() {
   const el = inputRef.value
   if (!el) return
@@ -1109,8 +1484,15 @@ function resetComposerHeight() {
 function startNewConversation(userId) {
   showNewMessageDialog.value = false
   scope.value = 'all'
+  saveCurrentDraft()
   selectedUserId.value = userId
-  newMessage.value = forwardDraft.value?.content || ''
+  hideTypingIndicator()
+  selectionMode.value = false
+  clearSelectedMessages()
+  applyDraftForConversation(userId)
+  if (!newMessage.value && forwardDraft.value?.content) {
+    newMessage.value = forwardDraft.value.content
+  }
   pendingAttachments.value = []
   showEmojiPicker.value = false
   replyDraft.value = null
@@ -1129,6 +1511,15 @@ function scrollToBottom() {
   if (messagesListRef.value) {
     messagesListRef.value.scrollTop = messagesListRef.value.scrollHeight
   }
+}
+
+function scrollToBottomSoon() {
+  nextTick(() => {
+    scrollToBottom()
+    requestAnimationFrame(scrollToBottom)
+    window.setTimeout(scrollToBottom, 80)
+    window.setTimeout(scrollToBottom, 240)
+  })
 }
 
 function formatShortTime(iso) {
@@ -1217,11 +1608,90 @@ function scrollToMessage(messageId) {
   nextTick(() => {
     const el = document.querySelector(`.messages-list [data-msg-id="${messageId}"]`)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    else scrollToBottom()
+    else scrollToBottomSoon()
   })
 }
 
 // ==== 消息操作 ====
+function toggleSelectionMode() {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) clearSelectedMessages()
+  closeMessageCtxMenu()
+}
+
+function clearSelectedMessages() {
+  selectedMessageIds.value = new Set()
+}
+
+function hideTypingIndicator() {
+  typingIndicator.value = { visible: false, username: '' }
+  clearTimeout(typingHideTimer)
+  typingHideTimer = null
+}
+
+function toggleMessageSelected(message) {
+  const next = new Set(selectedMessageIds.value)
+  if (next.has(message.id)) next.delete(message.id)
+  else next.add(message.id)
+  selectedMessageIds.value = next
+}
+
+function enterSelectionModeWithMessage(message) {
+  selectionMode.value = true
+  selectedMessageIds.value = new Set([message.id])
+  closeMessageCtxMenu()
+}
+
+async function deleteSingleMessage(message) {
+  try {
+    await ElMessageBox.confirm(
+      '删除后这条消息只会从你的视图中隐藏，确认删除？',
+      '删除消息',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await apiPost(`/api/messages/${message.id}/delete/`, { scope: 'self' })
+    messages.value = messages.value.filter((item) => item.id !== message.id)
+    const next = new Set(selectedMessageIds.value)
+    next.delete(message.id)
+    selectedMessageIds.value = next
+    if (selectedMessageIds.value.size === 0) selectionMode.value = false
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('已删除该消息')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function deleteSelectedMessages() {
+  const ids = [...selectedMessageIds.value]
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(
+      `删除后这些消息只会从你的视图中隐藏，共 ${ids.length} 条。确认删除？`,
+      '删除所选消息',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await apiPost('/api/messages/bulk-delete/', { message_ids: ids })
+    messages.value = messages.value.filter((message) => !selectedMessageIds.value.has(message.id))
+    clearSelectedMessages()
+    selectionMode.value = false
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('已删除所选消息')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
 async function recallMessage(m) {
   try {
     await ElMessageBox.confirm('撤回后双方都将看不到此消息，确认撤回吗？', '撤回消息', {
@@ -1459,6 +1929,10 @@ async function messageCtxAction(action) {
   const msg = messageCtxMenu.value.msg
   closeMessageCtxMenu()
   if (!msg) return
+  if (action === 'multi_select') {
+    enterSelectionModeWithMessage(msg)
+    return
+  }
   if (action === 'quote') {
     onQuoteMessage(msg)
     return
@@ -1471,8 +1945,29 @@ async function messageCtxAction(action) {
     await copyMessageContent(msg)
     return
   }
+  if (action === 'report') {
+    reportMessage(msg)
+    return
+  }
+  if (action === 'delete') {
+    await deleteSingleMessage(msg)
+    return
+  }
   if (action === 'recall') {
     await recallMessage(msg)
+  }
+}
+
+function reportMessage(msg) {
+  const targetUserId = msg.is_own ? msg.recipient_id : msg.sender_id
+  const targetUsername = msg.is_own
+    ? msg.recipient || selectedConversation.value?.username || ''
+    : msg.sender || selectedConversation.value?.username || ''
+  reportTarget.value = {
+    userId: targetUserId,
+    username: targetUsername,
+    messageId: msg.id,
+    snippet: String(msg.content || msg.attachments?.[0]?.name || '[附件]').slice(0, 120),
   }
 }
 
@@ -1537,8 +2032,8 @@ let pollTimer = null
 let lastContextMenuOpenedAt = 0
 function startPolling() {
   pollTimer = setInterval(() => {
-    if (scope.value !== 'blocked') loadConversations()
-  }, 15000)
+    if (scope.value !== 'blocked') loadConversations({ silent: true })
+  }, realtimeState.value === 'connected' ? 45000 : 15000)
 }
 
 // ==== 生命周期 ====
@@ -1547,14 +2042,18 @@ onMounted(() => {
   csrfToken.value = getCsrfToken()
   loadNotificationPreferences()
   loadConversations()
+  initRealtimeMessages()
   startPolling()
   document.addEventListener('click', onGlobalClick)
 })
 
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
+  clearTimeout(typingTimer)
+  clearTimeout(typingHideTimer)
   if (isRecordingVoice.value) stopVoiceRecording()
   cleanupVoiceRecording()
+  chatSocket?.close()
   document.removeEventListener('click', onGlobalClick)
 })
 
@@ -1570,7 +2069,7 @@ watch(selectedUserId, (v) => {
 watch(
   () => messages.value.length,
   (len, prev) => {
-    if (len > prev) nextTick(scrollToBottom)
+    if (len > prev) scrollToBottomSoon()
   }
 )
 </script>
@@ -1732,6 +2231,25 @@ watch(
   flex: 1;
   overflow-y: auto;
   padding: 6px 8px;
+}
+
+.scope-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 4px 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+}
+
+.scope-hint i {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .empty-state {
@@ -2049,6 +2567,24 @@ watch(
   border-bottom: 1px solid var(--border-color);
 }
 
+.selection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 20px;
+  background: color-mix(in srgb, #3b82f6 9%, var(--bg-secondary));
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .messages-list {
   flex: 1;
   overflow-y: auto;
@@ -2279,6 +2815,48 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 2px;
+  padding: 8px 12px;
+  width: fit-content;
+  max-width: 220px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.typing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  display: block;
+  animation: typing-bounce 1s infinite ease-in-out;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+  40% { transform: translateY(-3px); opacity: 1; }
 }
 
 .date-sep {
@@ -2638,12 +3216,3 @@ watch(
   background: var(--bg-tertiary, #f2f2f2);
 }
 </style>
-
-
-
-
-
-
-
-
-

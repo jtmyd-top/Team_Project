@@ -79,14 +79,32 @@ function normalizeMusicId(rawValue) {
 }
 
 function resolveMusicId(rawValue) {
-  const input = String(rawValue ?? '').trim()
-  if (!input) return null
+  const raw = String(rawValue ?? '').trim()
+  if (!raw) return null
 
+  // UBB 内容经过 escapeHtml 处理，& 会变成 &amp;，需先还原再解析
+  const input = raw.replace(/&amp;/gi, '&')
+
+  // 格式1：纯数字 songid（老版）
   const directNumericId = input.match(/^\d+$/)
   if (directNumericId) return { playerId: directNumericId[0], idType: 'songid' }
 
+  // 格式2：纯字母数字混合 songmid（直接传入）
+  const directSongMid = input.match(/^[A-Za-z0-9]+$/)
+  if (directSongMid) return { playerId: directSongMid[0], idType: 'songmid' }
+
+  // 格式3：老版带参 URL，匹配 ?songid=123 或 ?id=123
   const songIdFromQuery = input.match(/[?&]songid=(\d+)/i) || input.match(/[?&]id=(\d+)/i)
   if (songIdFromQuery) return { playerId: songIdFromQuery[1], idType: 'songid' }
+
+  // 格式4：新版带参 URL，匹配 ?songmid=abc 或 ?mid=abc
+  const songMidFromQuery = input.match(/[?&](?:songmid|mid)=([A-Za-z0-9]+)/i)
+  if (songMidFromQuery) return { playerId: songMidFromQuery[1], idType: 'songmid' }
+
+  // 格式5：路径包含 mid 的 URL，匹配 /song/abc 或 /songDetail/abc
+  const songMidFromPath = input.match(/\/(?:song|songDetail)\/([A-Za-z0-9]+)/i)
+  if (songMidFromPath) return { playerId: songMidFromPath[1], idType: 'songmid' }
+
   return null
 }
 

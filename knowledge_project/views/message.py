@@ -11,7 +11,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q, Count
 from django.http import FileResponse, Http404, JsonResponse, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, render
@@ -19,6 +19,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from ..models import Note, ProfileLike
+from ..realtime import push_user_event
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ RECALL_WINDOW_SECONDS = 120
 NEW_CONV_DAILY_LIMIT = 5
 # 同一对话的新私信邮件节流窗口（秒）
 EMAIL_NOTIFY_WINDOW_SECONDS = 15 * 60
+MESSAGE_PURGE_DELAY_DAYS = 7
 MESSAGE_ATTACHMENT_MAX_COUNT = 6
 MESSAGE_IMAGE_MAX_SIZE = 10 * 1024 * 1024
 MESSAGE_AUDIO_MAX_SIZE = 12 * 1024 * 1024
@@ -75,6 +77,94 @@ def _get_settings(user, peer):
     return settings
 
 
+def _server_error_response(log_message, exc, public_message='服务器错误'):
+    logger.error("%s: %s", log_message, exc, exc_info=True)
+    return JsonResponse({'error': public_message}, status=500)
+
+
+def _message_has_report_history(message):
+    if message.was_reported:
+        return True
+    if message.reports.exists():
+        return True
+    return message.attachments.filter(Q(was_reported=True) | Q(reports__isnull=False)).exists()
+
+
+def _message_has_blocking_dependencies(message):
+    # 引用/转发目前以纯文本形式保存，没有外键依赖。后续如果持久化 reply_to/forward_from，
+    # 这里应追加 exists() 检查，避免被引用源被物理删除。
+    return False
+
+
+def _message_can_be_scheduled_for_purge(message):
+    if not (message.deleted_for_sender and message.deleted_for_recipient):
+        return False
+    if message.is_recalled or message.was_reported:
+        return False
+    if _message_has_report_history(message):
+        return False
+    if _message_has_blocking_dependencies(message):
+        return False
+    return True
+
+
+def _refresh_message_purge_schedule(message):
+    if _message_can_be_scheduled_for_purge(message):
+        if not message.pending_purge_at:
+            message.pending_purge_at = timezone.now() + timedelta(days=MESSAGE_PURGE_DELAY_DAYS)
+            message.save(update_fields=['pending_purge_at'])
+        return True
+    if message.pending_purge_at:
+        message.pending_purge_at = None
+        message.save(update_fields=['pending_purge_at'])
+    return False
+
+
+def _refresh_purge_schedule_for_messages(messages):
+    scheduled_ids = []
+    for message in messages:
+        if _refresh_message_purge_schedule(message):
+            scheduled_ids.append(message.id)
+    return scheduled_ids
+
+
+def _push_new_message_events(message):
+    push_user_event(message.sender_id, {
+        'type': 'new_message',
+        'message': _message_payload(message, viewer=message.sender),
+        'peer_id': message.recipient_id,
+    })
+    push_user_event(message.recipient_id, {
+        'type': 'new_message',
+        'message': _message_payload(message, viewer=message.recipient),
+        'peer_id': message.sender_id,
+    })
+
+
+def _push_message_read_event(target_user_id, peer_id, message_ids, reader_id):
+    if not message_ids:
+        return
+    push_user_event(target_user_id, {
+        'type': 'message_read',
+        'message_ids': message_ids,
+        'reader_id': reader_id,
+        'peer_id': peer_id,
+    })
+
+
+def _push_message_recalled_event(message):
+    push_user_event(message.sender_id, {
+        'type': 'message_recalled',
+        'message_id': message.id,
+        'peer_id': message.recipient_id,
+    })
+    push_user_event(message.recipient_id, {
+        'type': 'message_recalled',
+        'message_id': message.id,
+        'peer_id': message.sender_id,
+    })
+
+
 def _visible_messages_qs(viewer, peer, viewer_settings=None):
     """返回在 viewer 视角下可见的 viewer<->peer 消息 queryset（按时间升序）"""
     from ..models import Message
@@ -94,7 +184,7 @@ def _visible_messages_qs(viewer, peer, viewer_settings=None):
     return qs.order_by('created_at')
 
 
-def _apply_disappearing(viewer, peer, viewer_settings=None):
+def _apply_disappearing(viewer, peer, viewer_settings=None, peer_settings=None):
     """懒惰清理：任一方开启阅后即焚且消息已读超过 TTL 即销毁。
 
     - 读取 viewer / peer 双方的 ConversationSettings
@@ -106,7 +196,8 @@ def _apply_disappearing(viewer, peer, viewer_settings=None):
 
     if viewer_settings is None:
         viewer_settings = ConversationSettings.objects.filter(user=viewer, peer=peer).first()
-    peer_settings = ConversationSettings.objects.filter(user=peer, peer=viewer).first()
+    if peer_settings is None:
+        peer_settings = ConversationSettings.objects.filter(user=peer, peer=viewer).first()
 
     ttls = []
     if viewer_settings and viewer_settings.disappearing_enabled:
@@ -176,7 +267,10 @@ def _attachment_payload(attachment):
 def _message_preview(msg):
     if msg.content:
         return msg.content
-    first_attachment = msg.attachments.first()
+    return _attachment_preview(msg.attachments.first())
+
+
+def _attachment_preview(first_attachment):
     if not first_attachment:
         return ''
     if first_attachment.attachment_type == 'image':
@@ -186,6 +280,36 @@ def _message_preview(msg):
     if first_attachment.attachment_type == 'video':
         return '[视频]'
     return f'[文件] {first_attachment.original_name}'
+
+
+def _serve_attachment_file(attachment, disposition=None):
+    try:
+        file_path = os.path.normpath(attachment.file.path)
+        media_root = os.path.normpath(settings.MEDIA_ROOT)
+        if file_path != media_root and not file_path.startswith(media_root + os.sep):
+            raise Http404
+        response = FileResponse(open(file_path, 'rb'), content_type=attachment.mime_type or 'application/octet-stream')
+    except (FileNotFoundError, ValueError):
+        raise Http404
+
+    if disposition is None:
+        disposition = 'inline' if attachment.attachment_type in ('image', 'audio', 'video') else 'attachment'
+    fallback_name = attachment.original_name.encode('ascii', 'ignore').decode('ascii') or 'attachment'
+    fallback_name = fallback_name.replace('"', '')
+    response['Content-Disposition'] = (
+        f'{disposition}; filename="{fallback_name}"; filename*=UTF-8\'\'{quote(attachment.original_name)}'
+    )
+    return response
+
+
+def _delete_attachment_files(attachments):
+    for attachment in attachments:
+        if attachment.file:
+            try:
+                attachment.file.delete(save=False)
+            except Exception as exc:
+                logger.warning("删除私信附件文件失败: attachment=%s, error=%s", attachment.id, exc, exc_info=True)
+        attachment.delete()
 
 
 def _normalize_attachment_ids(raw_ids):
@@ -240,6 +364,99 @@ def _body_string(data, field_name, default=''):
     raise ValueError(f"{field_name} must be a string")
 
 
+def _validate_send_message_input(data):
+    recipient_id = data.get('recipient_id')
+    content = _body_string(data, 'content')
+    attachment_ids = _normalize_attachment_ids(data.get('attachment_ids'))
+    if not recipient_id or (not content and not attachment_ids):
+        raise ValueError('缺少必需参数')
+    if len(content) > 5000:
+        raise ValueError('消息内容不能超过5000字')
+    return recipient_id, content, attachment_ids
+
+
+def _load_message_attachments(user, attachment_ids):
+    if not attachment_ids:
+        return []
+    from ..models import MessageAttachment
+
+    attachments = list(
+        MessageAttachment.objects.filter(
+            id__in=attachment_ids,
+            uploader=user,
+            message__isnull=True,
+        )
+    )
+    if len(attachments) != len(attachment_ids):
+        raise ValueError('附件不存在、已发送或无权使用')
+    return attachments
+
+
+def _check_send_permissions(sender, recipient):
+    from ..models import MessagePreference, UserBlocklist, UserFollow
+
+    if recipient == sender:
+        return JsonResponse({'error': '不能给自己发送私信'}, status=400), None
+
+    if UserBlocklist.objects.filter(user=recipient, blocked_user=sender).exists():
+        return JsonResponse({'error': '无法向此用户发送私信'}, status=403), None
+
+    pref, _ = MessagePreference.objects.get_or_create(user=recipient)
+    if UserBlocklist.objects.filter(user=sender, blocked_user=recipient).exists():
+        return JsonResponse({'error': '你已屏蔽此用户，解除屏蔽后才能发送私信'}, status=403), None
+    if not pref.allow_messages or pref.message_mode == 'disabled':
+        return JsonResponse({'error': '此用户未开启私信功能'}, status=403), None
+
+    if pref.message_mode == 'followers_only':
+        if not UserFollow.objects.filter(follower=sender, following=recipient).exists():
+            return JsonResponse({'error': '对方仅接收其关注者的私信'}, status=403), None
+    elif pref.message_mode == 'following_only':
+        if not UserFollow.objects.filter(follower=recipient, following=sender).exists():
+            return JsonResponse({'error': '对方仅接收其已关注用户的私信'}, status=403), None
+
+    return None, pref
+
+
+def _verify_new_conversation_quota(request, data, recipient):
+    is_new_conv = _is_new_conversation(request.user, recipient)
+    if not is_new_conv:
+        return False
+
+    quota_used = _today_new_conv_count(request.user)
+    if quota_used < NEW_CONV_DAILY_LIMIT:
+        return False
+
+    raw_turnstile_token = data.get('turnstile_token')
+    if raw_turnstile_token in (None, ''):
+        raise PermissionError('turnstile_required')
+    if not isinstance(raw_turnstile_token, str):
+        raise ValueError('人机验证参数无效，请重试')
+    turnstile_token = raw_turnstile_token.strip()
+    if not turnstile_token:
+        raise PermissionError('turnstile_required')
+
+    from ..utils.turnstile import verify_turnstile_token
+    from ..utils.request_utils import get_client_ip
+    if not verify_turnstile_token(turnstile_token, get_client_ip(request)):
+        raise PermissionError('turnstile_failed')
+    return True
+
+
+def _update_conversation_state(sender, recipient):
+    recipient_settings = _get_settings(recipient, sender)
+    recipient_settings.force_unread = False
+    if recipient_settings.is_archived:
+        recipient_settings.is_archived = False
+        recipient_settings.archived_at = None
+    recipient_settings.save()
+
+    sender_settings = _get_settings(sender, recipient)
+    sender_settings.last_read_at = timezone.now()
+    sender_settings.force_unread = False
+    sender_settings.save()
+    return sender_settings
+
+
 def _maybe_send_new_message_email(sender, recipient, content):
     """聚合邮件通知：同一接收者 15 分钟内至多一封。
 
@@ -253,8 +470,13 @@ def _maybe_send_new_message_email(sender, recipient, content):
         if not recipient.email:
             return
         now = timezone.now()
-        if pref.last_email_notified_at and \
-                (now - pref.last_email_notified_at).total_seconds() < EMAIL_NOTIFY_WINDOW_SECONDS:
+        cutoff = now - timedelta(seconds=EMAIL_NOTIFY_WINDOW_SECONDS)
+        claimed = MessagePreference.objects.filter(
+            Q(last_email_notified_at__isnull=True) | Q(last_email_notified_at__lte=cutoff),
+            pk=pref.pk,
+            notify_new_message=True,
+        ).update(last_email_notified_at=now)
+        if not claimed:
             return
 
         from ..utils.smart_email_sender import SmartEmailSender
@@ -270,8 +492,6 @@ def _maybe_send_new_message_email(sender, recipient, content):
             f"---\n"
             f"如不希望再收到此类通知，可在「设置 → 通知设置」中关闭新消息邮件提醒。"
         )
-        pref.last_email_notified_at = now
-        pref.save(update_fields=['last_email_notified_at', 'updated_at'])
 
         def send_email_notification():
             success, method = SmartEmailSender().send_email(subject, body, [recipient.email])
@@ -282,7 +502,7 @@ def _maybe_send_new_message_email(sender, recipient, content):
 
         threading.Thread(target=send_email_notification, daemon=True).start()
     except Exception as e:
-        logger.warning(f"新私信邮件通知失败: {e}")
+        logger.warning("新私信邮件通知失败: %s", e, exc_info=True)
 
 
 # ------------------------------------------------------------------
@@ -293,140 +513,69 @@ def _maybe_send_new_message_email(sender, recipient, content):
 def send_message_api(request):
     """发送私信"""
     try:
-        from ..models import Message, MessageAttachment, MessagePreference, UserBlocklist, NewConversationQuotaLog, UserFollow
+        from ..models import Message, MessageAttachment, NewConversationQuotaLog
 
         data = json.loads(request.body)
-        recipient_id = data.get('recipient_id')
         try:
-            content = _body_string(data, 'content')
-            attachment_ids = _normalize_attachment_ids(data.get('attachment_ids'))
+            recipient_id, content, attachment_ids = _validate_send_message_input(data)
         except ValueError as exc:
             return JsonResponse({'error': str(exc)}, status=400)
 
-        if not recipient_id or (not content and not attachment_ids):
-            return JsonResponse({'error': '缺少必需参数'}, status=400)
-        if len(content) > 5000:
-            return JsonResponse({'error': '消息内容不能超过5000字'}, status=400)
-
         recipient = get_object_or_404(User, id=recipient_id)
-        if recipient == request.user:
-            return JsonResponse({'error': '不能给自己发送私信'}, status=400)
+        permission_response, _ = _check_send_permissions(request.user, recipient)
+        if permission_response is not None:
+            return permission_response
 
-        # 检查是否被对方屏蔽
-        is_blocked = UserBlocklist.objects.filter(
-            user=recipient, blocked_user=request.user
-        ).exists()
-        if is_blocked:
-            return JsonResponse({'error': '无法向此用户发送私信'}, status=403)
-
-        # 检查接收者是否开启了私信
-        pref, _ = MessagePreference.objects.get_or_create(user=recipient)
-        blocked_by_sender = UserBlocklist.objects.filter(
-            user=request.user, blocked_user=recipient
-        ).exists()
-        if blocked_by_sender:
-            return JsonResponse({'error': '你已屏蔽此用户，解除屏蔽后才能发送私信'}, status=403)
-        if not pref.allow_messages or pref.message_mode == 'disabled':
-            return JsonResponse({'error': '此用户未开启私信功能'}, status=403)
-
-        # message_mode:
-        # - followers_only: 仅允许“关注了接收者”的用户私信（发送者 -> 接收者）
-        # - following_only: 仅允许“被接收者关注”的用户私信（接收者 -> 发送者）
-        if pref.message_mode == 'followers_only':
-            is_follower = UserFollow.objects.filter(
-                follower=request.user,
-                following=recipient
-            ).exists()
-            if not is_follower:
-                return JsonResponse({'error': '对方仅接收其关注者的私信'}, status=403)
-        elif pref.message_mode == 'following_only':
-            is_followed_by_recipient = UserFollow.objects.filter(
-                follower=recipient,
-                following=request.user
-            ).exists()
-            if not is_followed_by_recipient:
-                return JsonResponse({'error': '对方仅接收其已关注用户的私信'}, status=403)
-
-        attachments = []
-        if attachment_ids:
-            attachments = list(
-                MessageAttachment.objects.filter(
-                    id__in=attachment_ids,
-                    uploader=request.user,
-                    message__isnull=True,
-                )
-            )
-            if len(attachments) != len(attachment_ids):
-                return JsonResponse({'error': '附件不存在、已发送或无权使用'}, status=400)
+        attachments = _load_message_attachments(request.user, attachment_ids)
 
         # 新对话限流：超出免验证配额时必须通过 Turnstile
         is_new_conv = _is_new_conversation(request.user, recipient)
-        turnstile_passed = False
-        if is_new_conv:
+        try:
+            turnstile_passed = _verify_new_conversation_quota(request, data, recipient)
+        except PermissionError as exc:
+            if str(exc) == 'turnstile_failed':
+                return JsonResponse({
+                    'error': '人机验证失败，请重试',
+                    'need_turnstile': True,
+                }, status=403)
             quota_used = _today_new_conv_count(request.user)
-            if quota_used >= NEW_CONV_DAILY_LIMIT:
-                raw_turnstile_token = data.get('turnstile_token')
-                if raw_turnstile_token in (None, ''):
-                    return JsonResponse({
-                        'error': '今日新对话数量已达上限，请完成人机验证',
-                        'need_turnstile': True,
-                        'quota_used': quota_used,
-                        'quota_limit': NEW_CONV_DAILY_LIMIT,
-                    }, status=429)
-                if not isinstance(raw_turnstile_token, str):
-                    return JsonResponse({
-                        'error': '人机验证参数无效，请重试',
-                        'need_turnstile': True,
-                    }, status=400)
-                turnstile_token = raw_turnstile_token.strip()
-                if not turnstile_token:
-                    return JsonResponse({
-                        'error': '今日新对话数量已达上限，请完成人机验证',
-                        'need_turnstile': True,
-                        'quota_used': quota_used,
-                        'quota_limit': NEW_CONV_DAILY_LIMIT,
-                    }, status=429)
-                from ..utils.turnstile import verify_turnstile_token
-                from ..utils.request_utils import get_client_ip
-                if not verify_turnstile_token(turnstile_token, get_client_ip(request)):
-                    return JsonResponse({
-                        'error': '人机验证失败，请重试',
-                        'need_turnstile': True,
-                    }, status=403)
-                turnstile_passed = True
+            return JsonResponse({
+                'error': '今日新对话数量已达上限，请完成人机验证',
+                'need_turnstile': True,
+                'quota_used': quota_used,
+                'quota_limit': NEW_CONV_DAILY_LIMIT,
+            }, status=429)
 
-        message = Message.objects.create(
-            sender=request.user,
-            recipient=recipient,
-            content=content,
-        )
-        if attachments:
-            MessageAttachment.objects.filter(id__in=[a.id for a in attachments]).update(message=message)
-
-        # 记录新对话配额日志（总是记录，便于审计；限流字段标记是否走了 Turnstile）
-        if is_new_conv:
-            NewConversationQuotaLog.objects.create(
-                user=request.user,
-                peer=recipient,
-                turnstile_passed=turnstile_passed,
+        with transaction.atomic():
+            message = Message.objects.create(
+                sender=request.user,
+                recipient=recipient,
+                content=content,
             )
+            if attachments:
+                updated_count = MessageAttachment.objects.filter(
+                    id__in=attachment_ids,
+                    uploader=request.user,
+                    message__isnull=True,
+                ).update(message=message)
+                if updated_count != len(attachment_ids):
+                    raise ValueError('附件不存在、已发送或无权使用')
 
-        # 发送者端自动清除对方的 force_unread；新消息自动把对方从归档中拉回
-        recipient_settings = _get_settings(recipient, request.user)
-        recipient_settings.force_unread = False
-        if recipient_settings.is_archived:
-            recipient_settings.is_archived = False
-            recipient_settings.archived_at = None
-        recipient_settings.save()
+            # 记录新对话配额日志（总是记录，便于审计；限流字段标记是否走了 Turnstile）
+            if is_new_conv:
+                NewConversationQuotaLog.objects.create(
+                    user=request.user,
+                    peer=recipient,
+                    turnstile_passed=turnstile_passed,
+                )
 
-        # 发送者端：更新自己的 last_read_at，防止自己看到「未读」
-        sender_settings = _get_settings(request.user, recipient)
-        sender_settings.last_read_at = timezone.now()
-        sender_settings.force_unread = False
-        sender_settings.save()
+            sender_settings = _update_conversation_state(request.user, recipient)
 
-        # 异步兜底：邮件通知（尊重 notify_new_message + 15 分钟聚合）
-        _maybe_send_new_message_email(request.user, recipient, content or _message_preview(message))
+            preview_for_email = content or _attachment_preview(attachments[0] if attachments else None)
+            transaction.on_commit(
+                lambda: _maybe_send_new_message_email(request.user, recipient, preview_for_email)
+            )
+            transaction.on_commit(lambda: _push_new_message_events(message))
 
         # 发送动作也触发一次阅后即焚清理（若发送者或对方有超 TTL 的旧已读消息）
         _apply_disappearing(request.user, recipient, sender_settings)
@@ -437,9 +586,13 @@ def send_message_api(request):
         }, status=201)
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except IntegrityError as e:
+        logger.warning("发送私信数据库冲突: %s", e, exc_info=True)
+        return JsonResponse({'error': '请求冲突，请稍后重试'}, status=409)
     except Exception as e:
-        logger.error(f"发送私信错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('发送私信错误', e)
 
 
 @require_http_methods(["POST"])
@@ -510,22 +663,7 @@ def message_attachment_file_api(request, attachment_id):
     elif request.user.id not in (message.sender_id, message.recipient_id) or not message.visible_to(request.user):
         return HttpResponse('无权访问此附件', status=403)
 
-    try:
-        file_path = os.path.normpath(attachment.file.path)
-        media_root = os.path.normpath(settings.MEDIA_ROOT)
-        if file_path != media_root and not file_path.startswith(media_root + os.sep):
-            raise Http404
-        response = FileResponse(open(file_path, 'rb'), content_type=attachment.mime_type or 'application/octet-stream')
-    except (FileNotFoundError, ValueError):
-        raise Http404
-
-    disposition = 'inline' if attachment.attachment_type in ('image', 'audio', 'video') else 'attachment'
-    fallback_name = attachment.original_name.encode('ascii', 'ignore').decode('ascii') or 'attachment'
-    fallback_name = fallback_name.replace('"', '')
-    response['Content-Disposition'] = (
-        f'{disposition}; filename="{fallback_name}"; filename*=UTF-8\'\'{quote(attachment.original_name)}'
-    )
-    return response
+    return _serve_attachment_file(attachment)
 
 
 @require_http_methods(["GET"])
@@ -545,21 +683,7 @@ def review_reported_attachment(request, attachment_id):
     if not has_pending_report:
         return HttpResponseForbidden('无查看权限或工单已结案')
 
-    try:
-        file_path = os.path.normpath(attachment.file.path)
-        media_root = os.path.normpath(settings.MEDIA_ROOT)
-        if file_path != media_root and not file_path.startswith(media_root + os.sep):
-            raise Http404
-        response = FileResponse(open(file_path, 'rb'), content_type=attachment.mime_type or 'application/octet-stream')
-    except (FileNotFoundError, ValueError):
-        raise Http404
-
-    fallback_name = attachment.original_name.encode('ascii', 'ignore').decode('ascii') or 'attachment'
-    fallback_name = fallback_name.replace('"', '')
-    response['Content-Disposition'] = (
-        f'inline; filename="{fallback_name}"; filename*=UTF-8\'\'{quote(attachment.original_name)}'
-    )
-    return response
+    return _serve_attachment_file(attachment, disposition='inline')
 
 
 @require_http_methods(["POST"])
@@ -592,6 +716,13 @@ def report_message_attachment_api(request, attachment_id):
             'detail': detail,
         }
     )
+    if not attachment.was_reported:
+        attachment.was_reported = True
+        attachment.save(update_fields=['was_reported'])
+    if message and not message.was_reported:
+        message.was_reported = True
+        message.pending_purge_at = None
+        message.save(update_fields=['was_reported', 'pending_purge_at'])
 
     return JsonResponse({
         'status': 'success',
@@ -623,6 +754,7 @@ def get_messages_api(request):
 
         # 强制求值为列表，后续的 is_read / is_recalled 更新不影响这份快照
         messages_list = list(messages_qs)
+        unread_ids = [m.id for m in messages_list if m.sender_id == other_user.id and not m.is_read]
 
         # 标记接收到的消息为已读（仅对 recipient=viewer 的未读消息）
         from ..models import Message
@@ -634,6 +766,7 @@ def get_messages_api(request):
         viewer_settings.last_read_at = timezone.now()
         viewer_settings.force_unread = False
         viewer_settings.save()
+        _push_message_read_event(other_user.id, request.user.id, unread_ids, request.user.id)
 
         # 第 2 次清理：若任一方 TTL=0，则本次刚标记已读的消息立即销毁（下次打开不可见）
         _apply_disappearing(request.user, other_user, viewer_settings)
@@ -650,8 +783,7 @@ def get_messages_api(request):
             'settings': _conversation_settings_payload(viewer_settings),
         })
     except Exception as e:
-        logger.error(f"获取私信列表错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('获取私信列表错误', e)
 
 
 def _conversation_settings_payload(cs):
@@ -695,7 +827,7 @@ def get_message_conversations_api(request):
         # 查询所有涉及 viewer 的 peer 用户 id
         msgs = Message.objects.filter(
             Q(sender=request.user) | Q(recipient=request.user)
-        ).exclude(is_recalled=True).order_by('-created_at')
+        ).exclude(is_recalled=True).prefetch_related('attachments').order_by('-created_at')
 
         # 排除对自己已删除
         msgs = msgs.exclude(Q(sender=request.user) & Q(deleted_for_sender=True))
@@ -711,20 +843,66 @@ def get_message_conversations_api(request):
             seen_peers.add(peer_id)
             ordered_peers.append((peer_id, m))
 
+        peer_ids = [peer_id for peer_id, _ in ordered_peers]
+        peer_map = User.objects.filter(id__in=peer_ids).select_related('profile').in_bulk()
+        existing_settings = ConversationSettings.objects.filter(
+            user=request.user,
+            peer_id__in=peer_ids,
+        )
+        settings_map = {cs.peer_id: cs for cs in existing_settings}
+        missing_settings = [
+            ConversationSettings(user=request.user, peer_id=peer_id)
+            for peer_id in peer_ids
+            if peer_id in peer_map and peer_id not in settings_map
+        ]
+        if missing_settings:
+            ConversationSettings.objects.bulk_create(missing_settings, ignore_conflicts=True)
+            settings_map = {
+                cs.peer_id: cs
+                for cs in ConversationSettings.objects.filter(user=request.user, peer_id__in=peer_ids)
+            }
+
+        peer_settings_map = {
+            cs.user_id: cs
+            for cs in ConversationSettings.objects.filter(user_id__in=peer_ids, peer=request.user)
+        }
+
         blocked_ids = set(
             UserBlocklist.objects.filter(user=request.user).values_list('blocked_user_id', flat=True)
         )
 
+        unread_filter = Q()
+        for peer_id in peer_ids:
+            cs = settings_map.get(peer_id)
+            peer_filter = Q(sender_id=peer_id)
+            if cs and cs.cleared_before:
+                peer_filter &= Q(created_at__gt=cs.cleared_before)
+            unread_filter |= peer_filter
+        if unread_filter:
+            unread_map = {
+                row['sender_id']: row['total']
+                for row in Message.objects.filter(
+                    unread_filter,
+                    recipient=request.user,
+                    is_read=False,
+                    is_recalled=False,
+                    deleted_for_recipient=False,
+                ).values('sender_id').annotate(total=Count('id'))
+            }
+        else:
+            unread_map = {}
+
         conversations = []
         for peer_id, last_msg in ordered_peers:
-            try:
-                peer = User.objects.get(id=peer_id)
-            except User.DoesNotExist:
+            peer = peer_map.get(peer_id)
+            if peer is None:
                 continue
-            cs = _get_settings(request.user, peer)
+            cs = settings_map[peer_id]
+            peer_cs = peer_settings_map.get(peer_id)
 
             # 懒惰清理：任一方开启阅后即焚时，遍历到此对话就触发一次
-            _apply_disappearing(request.user, peer, cs)
+            if cs.disappearing_enabled or (peer_cs and peer_cs.disappearing_enabled):
+                _apply_disappearing(request.user, peer, cs, peer_cs)
 
             # 过滤 scope
             if scope == 'archived' and not cs.is_archived:
@@ -738,7 +916,9 @@ def get_message_conversations_api(request):
             if cs.cleared_before and last_msg.created_at <= cs.cleared_before:
                 continue
 
-            unread = _count_unread(request.user, peer, cs)
+            unread = unread_map.get(peer_id, 0)
+            if unread == 0 and cs.force_unread:
+                unread = 1
             if scope == 'unread' and unread == 0:
                 continue
 
@@ -772,8 +952,7 @@ def get_message_conversations_api(request):
 
         return JsonResponse({'status': 'success', 'conversations': conversations})
     except Exception as e:
-        logger.error(f"获取对话列表错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('获取对话列表错误', e)
 
 
 # ------------------------------------------------------------------
@@ -803,14 +982,16 @@ def delete_message_api(request, message_id):
         if scope == 'both':
             if msg.sender_id != request.user.id:
                 return JsonResponse({'error': '只有发送者可以撤回'}, status=403)
-            age = (timezone.now() - msg.created_at).total_seconds()
-            if age > RECALL_WINDOW_SECONDS:
+            if msg.created_at < timezone.now() - timedelta(seconds=RECALL_WINDOW_SECONDS):
                 return JsonResponse({
                     'error': f'发送超过 {RECALL_WINDOW_SECONDS // 60} 分钟的消息不能撤回'
                 }, status=403)
-            msg.is_recalled = True
-            msg.recalled_at = timezone.now()
-            msg.save(update_fields=['is_recalled', 'recalled_at'])
+            with transaction.atomic():
+                msg.is_recalled = True
+                msg.recalled_at = timezone.now()
+                msg.pending_purge_at = None
+                msg.save(update_fields=['is_recalled', 'recalled_at', 'pending_purge_at'])
+                transaction.on_commit(lambda: _push_message_recalled_event(msg))
             return JsonResponse({'status': 'success', 'scope': 'both'})
 
         # scope == self
@@ -819,10 +1000,65 @@ def delete_message_api(request, message_id):
         if request.user.id == msg.recipient_id:
             msg.deleted_for_recipient = True
         msg.save(update_fields=['deleted_for_sender', 'deleted_for_recipient'])
-        return JsonResponse({'status': 'success', 'scope': 'self'})
+        scheduled = _refresh_message_purge_schedule(msg)
+        return JsonResponse({'status': 'success', 'scope': 'self', 'scheduled_for_purge': scheduled})
     except Exception as e:
-        logger.error(f"删除消息错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('删除消息错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def bulk_delete_messages_api(request):
+    """批量删除消息，仅在当前用户视图中隐藏。双方都删除后进入 7 天延迟物理清理队列。"""
+    try:
+        from ..models import Message
+        data = json.loads(request.body)
+        raw_ids = data.get('message_ids') or []
+        if not isinstance(raw_ids, list):
+            return JsonResponse({'error': 'message_ids 必须是数组'}, status=400)
+
+        message_ids = []
+        for value in raw_ids[:200]:
+            try:
+                message_ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        message_ids = list(dict.fromkeys(message_ids))
+        if not message_ids:
+            return JsonResponse({'error': '请选择要删除的消息'}, status=400)
+
+        messages = list(
+            Message.objects.filter(id__in=message_ids)
+            .filter(Q(sender=request.user) | Q(recipient=request.user))
+            .prefetch_related('attachments__reports', 'reports')
+        )
+        found_ids = {message.id for message in messages}
+        if len(found_ids) != len(message_ids):
+            return JsonResponse({'error': '部分消息不存在或无权删除'}, status=403)
+
+        sender_ids = [message.id for message in messages if message.sender_id == request.user.id]
+        recipient_ids = [message.id for message in messages if message.recipient_id == request.user.id]
+
+        with transaction.atomic():
+            if sender_ids:
+                Message.objects.filter(id__in=sender_ids).update(deleted_for_sender=True)
+            if recipient_ids:
+                Message.objects.filter(id__in=recipient_ids).update(deleted_for_recipient=True)
+
+            refreshed = list(
+                Message.objects.filter(id__in=message_ids).prefetch_related('attachments__reports', 'reports')
+            )
+            scheduled_ids = _refresh_purge_schedule_for_messages(refreshed)
+
+        return JsonResponse({
+            'status': 'success',
+            'deleted_ids': message_ids,
+            'scheduled_for_purge_ids': scheduled_ids,
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Exception as e:
+        return _server_error_response('批量删除私信错误', e)
 
 
 @require_http_methods(["POST"])
@@ -843,8 +1079,7 @@ def clear_conversation_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"清空对话错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('清空对话错误', e)
 
 
 # ------------------------------------------------------------------
@@ -860,20 +1095,22 @@ def mark_conversation_read_api(request):
         peer_id = data.get('user_id')
         peer = get_object_or_404(User, id=peer_id)
 
-        Message.objects.filter(
+        unread_qs = Message.objects.filter(
             sender=peer, recipient=request.user, is_read=False
-        ).update(is_read=True, read_at=timezone.now())
+        )
+        unread_ids = list(unread_qs.values_list('id', flat=True))
+        unread_qs.update(is_read=True, read_at=timezone.now())
 
         cs = _get_settings(request.user, peer)
         cs.last_read_at = timezone.now()
         cs.force_unread = False
         cs.save(update_fields=['last_read_at', 'force_unread', 'updated_at'])
+        _push_message_read_event(peer.id, request.user.id, unread_ids, request.user.id)
         return JsonResponse({'status': 'success'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"标记已读错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('标记已读错误', e)
 
 
 @require_http_methods(["POST"])
@@ -891,8 +1128,7 @@ def mark_conversation_unread_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"标记未读错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('标记未读错误', e)
 
 
 def _toggle_field(request, field_name, timestamp_field=None):
@@ -964,8 +1200,7 @@ def set_disappearing_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"阅后即焚设置错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('阅后即焚设置错误', e)
 
 
 @require_http_methods(["GET"])
@@ -1017,8 +1252,7 @@ def search_messages_api(request):
             })
         return JsonResponse({'status': 'success', 'results': results})
     except Exception as e:
-        logger.error(f"消息搜索错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('消息搜索错误', e)
 
 
 @require_http_methods(["GET"])
@@ -1054,8 +1288,7 @@ def export_conversation_api(request):
         response['Content-Disposition'] = f'attachment; filename="{fname}"'
         return response
     except Exception as e:
-        logger.error(f"导出聊天记录错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('导出聊天记录错误', e)
 
 
 # ------------------------------------------------------------------
@@ -1101,9 +1334,16 @@ def report_user_api(request):
         )
 
         if message is not None:
+            if not message.was_reported:
+                message.was_reported = True
+                message.pending_purge_at = None
+                message.save(update_fields=['was_reported', 'pending_purge_at'])
             from ..models import AttachmentReport
 
             for attachment in message.attachments.all():
+                if not attachment.was_reported:
+                    attachment.was_reported = True
+                    attachment.save(update_fields=['was_reported'])
                 AttachmentReport.objects.get_or_create(
                     attachment=attachment,
                     reporter=request.user,
@@ -1118,8 +1358,7 @@ def report_user_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"举报错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('举报错误', e)
 
 
 # ------------------------------------------------------------------
@@ -1152,8 +1391,7 @@ def get_message_preference_api(request):
             }
         })
     except Exception as e:
-        logger.error(f"获取私信设置错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('获取私信设置错误', e)
 
 
 @require_http_methods(["POST"])
@@ -1183,8 +1421,7 @@ def update_message_preference_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"更新私信设置错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('更新私信设置错误', e)
 
 
 # ------------------------------------------------------------------
@@ -1214,8 +1451,7 @@ def block_user_api(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Exception as e:
-        logger.error(f"屏蔽用户错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('屏蔽用户错误', e)
 
 
 @require_http_methods(["POST"])
@@ -1233,8 +1469,7 @@ def unblock_user_api(request):
         ).delete()
         return JsonResponse({'status': 'success', 'message': '已取消屏蔽'})
     except Exception as e:
-        logger.error(f"取消屏蔽错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('取消屏蔽错误', e)
 
 
 @require_http_methods(["GET"])
@@ -1256,8 +1491,7 @@ def get_blocked_users_api(request):
             })
         return JsonResponse({'status': 'success', 'blocked_users': blocked_list})
     except Exception as e:
-        logger.error(f"获取屏蔽列表错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('获取屏蔽列表错误', e)
 
 
 # ------------------------------------------------------------------
@@ -1284,8 +1518,7 @@ def get_user_public_profile_api(request, user_id):
             'likes_count': likes_count,
         })
     except Exception as e:
-        logger.error(f"获取用户信息错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('获取用户信息错误', e)
 
 
 @require_http_methods(["GET"])
@@ -1343,13 +1576,12 @@ def search_users_api(request):
             found = None
         if found and viewer_id:
             from ..models import UserBlocklist
-            if UserBlocklist.objects.filter(user=found, blocked_user_id=viewer_id).exists():
+            if UserBlocklist.objects.filter(
+                (Q(user=found, blocked_user_id=viewer_id)) |
+                (Q(user_id=viewer_id, blocked_user=found))
+            ).exists():
                 found = None  # 对方屏蔽了搜索者，仍走中性文案
 
-        if found and viewer_id:
-            from ..models import UserBlocklist
-            if UserBlocklist.objects.filter(user_id=viewer_id, blocked_user=found).exists():
-                found = None
         if not found:
             return JsonResponse({'users': []})
 
@@ -1363,14 +1595,16 @@ def search_users_api(request):
             }],
         })
     except Exception as e:
-        logger.error(f"搜索用户错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('搜索用户错误', e)
 
 
 @login_required
 def messages_view(request):
     """私信页面"""
-    return render(request, 'messages/messages.html')
+    return render(request, 'messages/messages.html', {
+        'realtime_enabled': getattr(settings, 'REALTIME_MESSAGES_ENABLED', False),
+        'realtime_ws_path': getattr(settings, 'REALTIME_MESSAGES_PATH', '/ws/messages/'),
+    })
 
 
 # ------------------------------------------------------------------
@@ -1390,8 +1624,7 @@ def get_unread_messages_count_api(request):
         ).count()
         return JsonResponse({'status': 'success', 'unread_count': total})
     except Exception as e:
-        logger.error(f"获取未读数错误: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return _server_error_response('获取未读数错误', e)
 
 
 @require_http_methods(["GET", "POST"])
