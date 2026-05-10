@@ -64,7 +64,13 @@ MESSAGE_FILE_MIME_TYPES = {
     'application/vnd.ms-powerpoint',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
+MESSAGE_CONTENT_MAX_LENGTH = 5000
 MERGED_FORWARD_PREFIX = '__MERGED_FORWARD_V1__:'
+MERGED_FORWARD_MAX_ITEMS = 99
+MERGED_FORWARD_MAX_ENCODED_LENGTH = 100000
+MERGED_FORWARD_MAX_DEPTH = 3
+MERGED_FORWARD_MAX_SEARCHABLE_TEXT = 50000
+MERGED_FORWARD_MAX_FIELD_LENGTH = 12000
 
 
 # ------------------------------------------------------------------
@@ -91,24 +97,91 @@ def _server_error_response(log_message, exc, public_message='服务器错误'):
     return JsonResponse({'error': public_message}, status=500)
 
 
-def _parse_merged_forward(content):
+def _trim_text(value, max_length=MERGED_FORWARD_MAX_FIELD_LENGTH):
+    text = str(value or '')
+    return text[:max_length]
+
+
+def _normalize_merged_forward_attachment(attachment):
+    if not isinstance(attachment, dict):
+        return None
+    return {
+        'id': attachment.get('id'),
+        'type': _trim_text(attachment.get('type'), 32),
+        'name': _trim_text(attachment.get('name'), 255),
+        'mime_type': _trim_text(attachment.get('mime_type'), 120),
+        'size': attachment.get('size') or 0,
+        'url': _trim_text(attachment.get('url'), 1000),
+    }
+
+
+def _normalize_merged_forward_item(item):
+    if not isinstance(item, dict):
+        return None
+    attachments = item.get('attachments')
+    if not isinstance(attachments, list):
+        attachments = []
+    return {
+        'id': item.get('id'),
+        'sender': _trim_text(item.get('sender') or '未知用户', 120),
+        'avatar': _trim_text(item.get('avatar') or '/static/img/default-avatar.png', 1000),
+        'is_own': item.get('is_own') is True,
+        'content': _trim_text(item.get('content')),
+        'preview': _trim_text(item.get('preview') or item.get('content')),
+        'time': _trim_text(item.get('time'), 80),
+        'attachments': [
+            normalized for normalized in (
+                _normalize_merged_forward_attachment(attachment)
+                for attachment in attachments[:MESSAGE_ATTACHMENT_MAX_COUNT]
+            )
+            if normalized
+        ],
+    }
+
+
+def _parse_merged_forward(content, validate_limits=False):
     raw = (content or '').strip()
     if not raw.startswith(MERGED_FORWARD_PREFIX):
         return None
+    if validate_limits and len(raw) > MERGED_FORWARD_MAX_ENCODED_LENGTH:
+        raise ValueError(f'合并转发内容过长，请减少消息数量后再试')
     try:
         encoded = raw[len(MERGED_FORWARD_PREFIX):].encode('ascii')
         decoded = base64.b64decode(encoded, validate=True).decode('utf-8')
         data = json.loads(decoded)
     except (UnicodeDecodeError, binascii.Error, ValueError, TypeError, json.JSONDecodeError):
+        if validate_limits:
+            raise ValueError('合并转发内容格式无效')
         return None
     if not isinstance(data, dict) or data.get('type') != 'merged_forward':
+        if validate_limits:
+            raise ValueError('合并转发内容格式无效')
         return None
     items = data.get('items')
     if not isinstance(items, list):
+        if validate_limits:
+            raise ValueError('合并转发内容格式无效')
         return None
-    data['items'] = items
-    data['count'] = int(data.get('count') or len(items) or 0)
-    return data
+    if validate_limits and len(items) > MERGED_FORWARD_MAX_ITEMS:
+        raise ValueError(f'每次最多只能合并转发 {MERGED_FORWARD_MAX_ITEMS} 条消息')
+
+    normalized_items = [_normalize_merged_forward_item(item) for item in items]
+    normalized_items = [item for item in normalized_items if item]
+    if validate_limits and not normalized_items:
+        raise ValueError('合并转发内容不能为空')
+
+    try:
+        count = int(data.get('count') or len(normalized_items) or 0)
+    except (TypeError, ValueError):
+        count = len(normalized_items)
+
+    return {
+        'type': 'merged_forward',
+        'title': _trim_text(data.get('title') or '聊天记录', 200),
+        'source': _trim_text(data.get('source'), 200),
+        'count': count,
+        'items': normalized_items,
+    }
 
 
 def _merged_forward_preview(content):
@@ -123,6 +196,78 @@ def _merged_forward_preview(content):
         preview = str(item.get('preview') or item.get('content') or '[附件]')
         lines.append(f'{sender}: {preview}')
     return '[聊天记录] ' + (' / '.join(lines) or str(data.get('title') or '聊天记录'))
+
+
+def _merged_forward_searchable_text(data, depth=0):
+    if not data or depth > MERGED_FORWARD_MAX_DEPTH:
+        return ''
+    parts = [
+        str(data.get('title') or ''),
+        str(data.get('source') or ''),
+    ]
+    for item in data.get('items', [])[:MERGED_FORWARD_MAX_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        parts.append(str(item.get('sender') or ''))
+        content = str(item.get('content') or '')
+        nested = _parse_merged_forward(content) if depth < MERGED_FORWARD_MAX_DEPTH else None
+        if nested:
+            parts.append(_merged_forward_searchable_text(nested, depth + 1))
+        else:
+            parts.append(content)
+        parts.append(str(item.get('preview') or ''))
+        attachments = item.get('attachments') if isinstance(item.get('attachments'), list) else []
+        for attachment in attachments[:MESSAGE_ATTACHMENT_MAX_COUNT]:
+            if isinstance(attachment, dict):
+                parts.append(str(attachment.get('name') or ''))
+    return '\n'.join(part for part in parts if part).strip()[:MERGED_FORWARD_MAX_SEARCHABLE_TEXT]
+
+
+def _message_searchable_text(content, attachments=None):
+    merged = _parse_merged_forward(content)
+    if merged:
+        searchable = _merged_forward_searchable_text(merged)
+    else:
+        searchable = str(content or '')
+    for attachment in attachments or []:
+        searchable += f"\n{getattr(attachment, 'original_name', '') or ''}"
+    return searchable.strip()[:MERGED_FORWARD_MAX_SEARCHABLE_TEXT]
+
+
+def _validate_message_content(content):
+    if not content:
+        return
+    if content.startswith(MERGED_FORWARD_PREFIX):
+        _parse_merged_forward(content, validate_limits=True)
+        return
+    if len(content) > MESSAGE_CONTENT_MAX_LENGTH:
+        raise ValueError(f'消息内容不能超过{MESSAGE_CONTENT_MAX_LENGTH}字')
+
+
+def _message_search_q(query):
+    return Q(content__icontains=query) | Q(searchable_text__icontains=query)
+
+
+def _message_search_snippet(message, query, max_length=220):
+    text = (message.searchable_text or '').strip()
+    if query and query.lower() not in text.lower():
+        text = ''
+    if not text:
+        text = _message_preview(message)
+    text = ' '.join(str(text or '').split())
+    if len(text) <= max_length:
+        return text
+
+    lowered = text.lower()
+    index = lowered.find(query.lower()) if query else -1
+    if index < 0:
+        return text[:max_length - 1] + '…'
+    start = max(0, index - max_length // 3)
+    end = min(len(text), start + max_length)
+    start = max(0, end - max_length)
+    prefix = '…' if start > 0 else ''
+    suffix = '…' if end < len(text) else ''
+    return prefix + text[start:end] + suffix
 
 
 def _message_has_report_history(message):
@@ -438,8 +583,7 @@ def _validate_send_message_input(data):
     attachment_ids = _normalize_attachment_ids(data.get('attachment_ids'))
     if not recipient_id or (not content and not attachment_ids):
         raise ValueError('缺少必需参数')
-    if len(content) > 5000:
-        raise ValueError('消息内容不能超过5000字')
+    _validate_message_content(content)
     return recipient_id, content, attachment_ids
 
 
@@ -657,6 +801,7 @@ def send_message_api(request):
                 sender=request.user,
                 recipient=recipient,
                 content=content,
+                searchable_text=_message_searchable_text(content, attachments),
             )
             if attachments:
                 updated_count = MessageAttachment.objects.filter(
@@ -745,6 +890,7 @@ def forward_message_api(request):
             content = source_message.content or _attachment_preview(source_message.attachments.first())
         if not content and not source_message.attachments.exists():
             return JsonResponse({'error': '原消息为空，无法转发'}, status=400)
+        _validate_message_content(content)
 
         with transaction.atomic():
             forwarded_message = Message.objects.create(
@@ -752,7 +898,9 @@ def forward_message_api(request):
                 recipient=recipient,
                 content=content,
             )
-            _clone_forwarded_attachments(source_message, request.user, forwarded_message)
+            forwarded_attachments = _clone_forwarded_attachments(source_message, request.user, forwarded_message)
+            forwarded_message.searchable_text = _message_searchable_text(content, forwarded_attachments)
+            forwarded_message.save(update_fields=['searchable_text'])
 
             if is_new_conv:
                 NewConversationQuotaLog.objects.create(
@@ -939,7 +1087,7 @@ def get_messages_api(request):
 
         messages_qs = _visible_messages_qs(request.user, other_user, viewer_settings)
         if query:
-            messages_qs = messages_qs.filter(content__icontains=query)
+            messages_qs = messages_qs.filter(_message_search_q(query))
 
         # 强制求值为列表，后续的 is_read / is_recalled 更新不影响这份快照
         messages_list = list(messages_qs)
@@ -1418,7 +1566,7 @@ def search_messages_api(request):
             return JsonResponse({'results': []})
         qs = Message.objects.filter(
             Q(sender=request.user) | Q(recipient=request.user)
-        ).exclude(is_recalled=True).filter(content__icontains=q).order_by('-created_at')[:40]
+        ).exclude(is_recalled=True).filter(_message_search_q(q)).order_by('-created_at')[:40]
 
         results = []
         for m in qs:
@@ -1436,6 +1584,8 @@ def search_messages_api(request):
                 'peer_username': peer.username,
                 'peer_avatar': _get_avatar_url(peer),
                 'content': m.content,
+                'content_preview': _message_preview(m),
+                'search_snippet': _message_search_snippet(m, q),
                 'created_at': m.created_at.isoformat(),
                 'is_own': m.sender_id == request.user.id,
             })

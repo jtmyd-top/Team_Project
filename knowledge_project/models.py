@@ -1048,7 +1048,8 @@ class Message(models.Model):
         related_name='received_messages',
         verbose_name="接收者"
     )
-    content = models.TextField(max_length=5000, verbose_name="消息内容")
+    content = models.TextField(verbose_name="消息内容")
+    searchable_text = models.TextField(blank=True, default='', verbose_name="搜索文本")
     is_read = models.BooleanField(default=False, verbose_name="已读")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="发送时间")
     read_at = models.DateTimeField(null=True, blank=True, verbose_name="读取时间")

@@ -1,8 +1,14 @@
-const MERGED_FORWARD_PREFIX = '__MERGED_FORWARD_V1__:'
+export const MERGED_FORWARD_PREFIX = '__MERGED_FORWARD_V1__:'
+export const MERGED_FORWARD_MAX_ITEMS = 99
+export const MERGED_FORWARD_MAX_ENCODED_LENGTH = 100000
 
 export function encodeMergedForward(payload) {
   const json = JSON.stringify(payload || {})
-  return `${MERGED_FORWARD_PREFIX}${toBase64(json)}`
+  const encoded = `${MERGED_FORWARD_PREFIX}${toBase64(json)}`
+  if (encoded.length > MERGED_FORWARD_MAX_ENCODED_LENGTH) {
+    throw new Error('合并转发内容过长，请减少消息数量后再试')
+  }
+  return encoded
 }
 
 export function parseMergedForward(content) {
@@ -17,7 +23,7 @@ export function parseMergedForward(content) {
       title: String(data.title || '聊天记录'),
       source: String(data.source || ''),
       count: Number(data.count || data.items.length) || data.items.length,
-      items: data.items.map(normalizeForwardItem).filter(Boolean),
+      items: data.items.slice(0, MERGED_FORWARD_MAX_ITEMS).map(normalizeForwardItem).filter(Boolean),
     }
   } catch {
     return null
@@ -31,6 +37,21 @@ export function mergedForwardPreview(content, fallback = '') {
     .slice(0, 3)
     .map((item) => `${item.sender}: ${item.preview || item.content || '[附件]'}`)
   return `[聊天记录] ${lines.join(' / ') || data.title}`
+}
+
+export function mergedForwardPlainText(content, fallback = '') {
+  const data = parseMergedForward(content)
+  if (!data) return fallback
+  const lines = [`[聊天记录] ${data.title}`]
+  if (data.source) lines.push(data.source)
+  data.items.forEach((item) => {
+    const attachmentText = (item.attachments || [])
+      .map((attachment) => `[附件] ${attachment.name || '未命名文件'}`)
+      .join(' ')
+    const body = item.content || item.preview || attachmentText || '[附件]'
+    lines.push(`${item.sender}: ${body}`)
+  })
+  return lines.join('\n')
 }
 
 function normalizeForwardItem(item) {

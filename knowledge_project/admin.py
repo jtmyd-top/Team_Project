@@ -497,7 +497,7 @@ class MessageAdmin(admin.ModelAdmin):
     list_display = ('id', 'sender', 'recipient', 'short_content', 'is_read',
                     'is_recalled', 'deleted_for_sender', 'deleted_for_recipient', 'created_at')
     list_filter = ('is_read', 'is_recalled', 'created_at')
-    search_fields = ('sender__username', 'recipient__username', 'content')
+    search_fields = ('sender__username', 'recipient__username', 'content', 'searchable_text')
     readonly_fields = ('created_at', 'read_at', 'recalled_at')
 
     def short_content(self, obj):

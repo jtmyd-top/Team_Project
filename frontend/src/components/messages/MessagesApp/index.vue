@@ -65,7 +65,7 @@
             </div>
             <p class="result-snippet">
               <span v-if="r.is_own">我：</span>
-              <span v-html="highlightText(r.content, globalSearch)"></span>
+              <span v-html="highlightText(searchResultText(r), globalSearch)"></span>
             </p>
           </div>
         </div>
@@ -620,7 +620,13 @@ import ReportUserDialog from '@components/messages/ReportUserDialog/index.vue'
 import DisappearingSettingDialog from '@components/messages/DisappearingSettingDialog/index.vue'
 import MergedForwardDialog from '@components/messages/MergedForwardDialog/index.vue'
 import Turnstile from '@components/common/Turnstile/index.vue'
-import { encodeMergedForward, mergedForwardPreview, parseMergedForward } from '@/utils/mergedForward'
+import {
+  encodeMergedForward,
+  mergedForwardPlainText,
+  mergedForwardPreview,
+  MERGED_FORWARD_MAX_ITEMS,
+  parseMergedForward,
+} from '@/utils/mergedForward'
 
 // ==== 甯搁噺 ====
 const recallWindowSeconds = 120
@@ -1506,14 +1512,17 @@ function buildForwardMessage(m) {
 }
 
 function buildChatlogForward(messagesToForward) {
+  if (messagesToForward.length > MERGED_FORWARD_MAX_ITEMS) {
+    throw new Error(`每次最多只能合并转发 ${MERGED_FORWARD_MAX_ITEMS} 条消息`)
+  }
   const peerName = selectedConversation.value?.username || '对方'
-  const items = messagesToForward
+  const items = [...messagesToForward]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     .map((message) => {
       const senderLabel = message.is_own ? currentUserName() : (message.sender || peerName || '对方')
       const mergedForward = parseMergedForward(message.content)
       const text = mergedForward
-        ? mergedForwardPreview(message.content, '')
+        ? mergedForwardPlainText(message.content, mergedForwardPreview(message.content, ''))
         : (String(message.content || '').trim() || attachmentSummary(message))
       const preview = singleLine(text).slice(0, 220)
       return {
@@ -1980,6 +1989,11 @@ function clearGlobalSearch() {
   globalSearchResults.value = null
 }
 
+function searchResultText(result) {
+  if (result?.search_snippet) return result.search_snippet
+  return result?.content_preview || mergedForwardPreview(result?.content, '') || result?.content || ''
+}
+
 async function jumpToResult(r) {
   clearGlobalSearch()
   selectedUserId.value = r.peer_id
@@ -2091,9 +2105,20 @@ async function deleteSelectedMessages() {
 async function forwardSelectedAsChatlog() {
   const selected = getSelectedMessages()
   if (!selected.length) return
+  if (selected.length > MERGED_FORWARD_MAX_ITEMS) {
+    ElMessage.warning(`每次最多只能合并转发 ${MERGED_FORWARD_MAX_ITEMS} 条消息`)
+    return
+  }
+  let content = ''
+  try {
+    content = buildChatlogForward(selected)
+  } catch (e) {
+    ElMessage.error(e.message || '合并转发内容过长，请减少消息数量后再试')
+    return
+  }
   forwardDraft.value = {
     sourceMessageId: null,
-    content: buildChatlogForward(selected),
+    content,
     autoSendChatlog: true,
   }
   showNewMessageDialog.value = true
