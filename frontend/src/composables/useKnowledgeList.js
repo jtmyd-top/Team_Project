@@ -269,6 +269,13 @@ export function useKnowledgeList() {
         currentNoteId.value = noteId
         sidebarStore.setCurrentNoteId(noteId)
         viewMode.value = 'edit'
+
+        const importedDraft = readImportedMessageDraft()
+        if (importedDraft) {
+          currentNoteData.value.title = importedDraft.title || '聊天摘录'
+          currentNoteData.value.content = importedDraft.content || ''
+          hasUnsavedChanges.value = true
+        }
       } else {
         throw new Error('创建失败：未返回笔记 ID')
       }
@@ -648,6 +655,23 @@ export function useKnowledgeList() {
       }
     } catch (e) {
       // 组件卸载时，静默处理错误
+    }
+  }
+
+  function readImportedMessageDraft() {
+    try {
+      const raw = sessionStorage.getItem('knowledgeMessageNoteDraft')
+      if (!raw) return null
+      sessionStorage.removeItem('knowledgeMessageNoteDraft')
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return null
+      return {
+        title: String(parsed.title || '').trim(),
+        content: String(parsed.content || ''),
+      }
+    } catch (e) {
+      sessionStorage.removeItem('knowledgeMessageNoteDraft')
+      return null
     }
   }
 

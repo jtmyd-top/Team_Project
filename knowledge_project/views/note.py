@@ -1082,6 +1082,7 @@ def public_notes_api(request):
             'id': note.id,
             'title': note.title,
             'public_url': f"/notes/public/{note.public_id}/",
+            'author_id': note.author.id if note.author else None,
             'author': note.author.username if note.author else "匿名作者",
             'author_avatar': author_avatar,
             'updated_at': note.updated_at.strftime("%Y年%m月%d日"),

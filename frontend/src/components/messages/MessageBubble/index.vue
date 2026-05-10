@@ -18,14 +18,35 @@
     <div class="bubble-wrap">
       <div
         class="bubble"
-        :class="{ own: msg.is_own, highlighted: highlighted }"
+        :class="{ own: msg.is_own, highlighted: highlighted, 'merged-container': mergedForward }"
         @contextmenu.prevent="emitContextMenu($event.clientX, $event.clientY)"
         @touchstart.passive="onTouchStart"
         @touchend="clearTouchHold"
         @touchcancel="clearTouchHold"
         @touchmove="onTouchMove"
       >
-        <div v-if="renderedContent" ref="messageTextRef" class="message-text" v-html="renderedContent"></div>
+        <button
+          v-if="mergedForward"
+          class="merged-forward-card"
+          type="button"
+          @click.stop="openMergedForward"
+        >
+          <span class="merged-forward-title">{{ mergedForward.title }}</span>
+          <span class="merged-forward-lines">
+            <span
+              v-for="(line, index) in mergedForwardPreviewLines"
+              :key="index"
+              class="merged-forward-line"
+            >
+              {{ line }}
+            </span>
+          </span>
+          <span class="merged-forward-footer">
+            <i class="fas fa-list-ul"></i>
+            聊天记录
+          </span>
+        </button>
+        <div v-else-if="renderedContent" ref="messageTextRef" class="message-text" v-html="renderedContent"></div>
         <div v-if="attachments.length" class="message-attachments">
           <div
             v-for="attachment in attachments"
@@ -84,6 +105,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref } from 'vue'
 import { enhanceCodeBlocks } from '@/composables/useCodeEnhancer'
 import { hasUbbMarkup, hydrateUbbDom, renderCommentUbb } from '@/utils/ubb'
+import { parseMergedForward } from '@/utils/mergedForward'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -92,7 +114,7 @@ const props = defineProps({
   selected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['context-menu', 'toggle-selected'])
+const emit = defineEmits(['context-menu', 'toggle-selected', 'open-merged-forward'])
 
 // Backend fields (recommended):
 // msg.is_read: boolean read receipt flag; msg.read_at: optional ISO timestamp.
@@ -107,8 +129,17 @@ const highlighted = computed(
 )
 
 const attachments = computed(() => Array.isArray(props.msg.attachments) ? props.msg.attachments : [])
+const mergedForward = computed(() => parseMergedForward(props.msg.content))
+const mergedForwardPreviewLines = computed(() => {
+  if (!mergedForward.value) return []
+  return mergedForward.value.items.slice(0, 3).map((item) => {
+    const text = item.preview || item.content || attachmentSummary(item)
+    return `${item.sender}: ${text || '[附件]'}`
+  })
+})
 
 const renderedContent = computed(() => {
+  if (mergedForward.value) return ''
   const rawContent = props.msg.content || ''
   let html = hasUbbMarkup(rawContent) ? renderCommentUbb(rawContent) : markdownToHtml(rawContent)
   if (props.highlight) {
@@ -175,12 +206,31 @@ function formatFileSize(size) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+function attachmentSummary(item) {
+  const itemAttachments = Array.isArray(item?.attachments) ? item.attachments : []
+  if (!itemAttachments.length) return ''
+  const first = itemAttachments[0]
+  if (first?.type === 'image') return '[图片]'
+  if (first?.type === 'audio') return '[语音]'
+  if (first?.type === 'video') return '[视频]'
+  return `[文件] ${first?.name || '附件'}`
+}
+
 function emitContextMenu(x, y) {
   emit('context-menu', { msg: props.msg, x, y })
 }
 
 function emitToggleSelected() {
   emit('toggle-selected', props.msg)
+}
+
+function openMergedForward() {
+  if (props.selectable) {
+    emitToggleSelected()
+    return
+  }
+  if (!mergedForward.value) return
+  emit('open-merged-forward', { message: props.msg, payload: mergedForward.value })
 }
 
 function toggleSelected() {
@@ -309,6 +359,14 @@ onUpdated(() => {
   outline-offset: 1px;
 }
 
+.bubble.merged-container {
+  padding: 0;
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .bubble-meta {
   display: inline-flex;
   align-items: center;
@@ -338,6 +396,58 @@ onUpdated(() => {
 
 .message-text + .message-attachments {
   margin-top: 8px;
+}
+
+.merged-forward-card {
+  width: min(320px, 72vw);
+  border: none;
+  border-radius: 8px;
+  background: #f1f1f1;
+  color: var(--text-primary, #0f172a);
+  padding: 12px 14px 10px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.bubble.own .merged-forward-card {
+  color: var(--text-primary, #0f172a);
+  background: #f1f1f1;
+}
+
+.merged-forward-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.merged-forward-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #dbe3ee) 80%, transparent);
+}
+
+.merged-forward-line {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.merged-forward-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #9ca3af;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .message-attachments {
@@ -532,6 +642,33 @@ onUpdated(() => {
   background: rgba(245, 158, 11, 0.18);
   color: inherit;
   font-size: 0.82em;
+}
+
+.bubble :deep(.ubb-chatlog) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 240px;
+  max-width: min(100%, 420px);
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-primary, #fff) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color, #dbe3ee) 82%, transparent);
+}
+
+.bubble :deep(.ubb-chatlog-title) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.bubble :deep(.ubb-chatlog-body) {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary, #475569);
 }
 
 @media (max-width: 768px) {

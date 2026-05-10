@@ -151,9 +151,11 @@ class SessionTimeoutMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
         self.idle_timeout = int(getattr(settings, 'SESSION_IDLE_TIMEOUT', settings.SESSION_COOKIE_AGE))
+        self.absolute_timeout = int(getattr(settings, 'SESSION_ABSOLUTE_TIMEOUT', settings.SESSION_COOKIE_AGE))
         logger.info(
-            "SessionTimeoutMiddleware initialized: idle=%ss",
+            "SessionTimeoutMiddleware initialized: idle=%ss absolute=%ss",
             self.idle_timeout,
+            self.absolute_timeout,
         )
 
     def __call__(self, request):
@@ -177,20 +179,29 @@ class SessionTimeoutMiddleware:
 
     def _expire_if_needed(self, request):
         now = int(time.time())
-        started_at = request.session.get(self.STARTED_AT_KEY)
-        last_activity_at = request.session.get(self.LAST_ACTIVITY_KEY)
+        started_at = self._session_int(request, self.STARTED_AT_KEY)
+        last_activity_at = self._session_int(request, self.LAST_ACTIVITY_KEY)
+        fallback_activity_at = last_activity_at if last_activity_at is not None else started_at
 
-        if not started_at:
-            request.session[self.STARTED_AT_KEY] = now
+        if started_at is None:
+            return self._expire(request, 'missing_started_at')
 
-        if not last_activity_at:
-            request.session[self.LAST_ACTIVITY_KEY] = now
-            return None
+        if self.absolute_timeout > 0 and started_at is not None and now - started_at > self.absolute_timeout:
+            return self._expire(request, 'absolute_timeout')
 
-        if self.idle_timeout > 0 and now - int(last_activity_at) > self.idle_timeout:
+        if self.idle_timeout > 0 and fallback_activity_at is not None and now - fallback_activity_at > self.idle_timeout:
             return self._expire(request, 'idle_timeout')
 
         return None
+
+    def _session_int(self, request, key):
+        value = request.session.get(key)
+        if value in (None, ''):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _touch(self, request):
         now = int(time.time())

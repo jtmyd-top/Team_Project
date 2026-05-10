@@ -64,7 +64,9 @@ const displayUnread = computed(() => {
 })
 
 const previewText = computed(() => {
-  const txt = props.conv.last_message || ''
+  const txt = props.conv.draft_preview
+    ? `[草稿] ${props.conv.draft_preview}`
+    : (props.conv.last_message || '')
   return txt.length > 40 ? txt.slice(0, 40) + '...' : txt
 })
 

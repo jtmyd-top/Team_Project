@@ -1,12 +1,12 @@
 import DOMPurify from 'dompurify'
 
 const EXCLUDED_PARENT_TAGS = new Set(['A', 'AUDIO', 'VIDEO', 'CODE', 'PRE', 'SCRIPT', 'STYLE', 'TEXTAREA'])
-const UBB_PATTERN = /\[(?:b|i|u|img|audio|movie|url|forecolor|qqmusic|wymusic|code|text|now|codo)(?:=[^\]]+)?\]/i
+const UBB_PATTERN = /\[(?:b|i|u|img|audio|movie|url|forecolor|qqmusic|wymusic|code|text|now|codo|chatlog)(?:=[^\]]+)?\]/i
 const SAFE_COLOR_PATTERN = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\(\s*[\d.\s%,]+\)|hsla?\(\s*[\d.\s%,]+\))$/i
 const COMMENT_PURITY_CONFIG = {
   USE_PROFILES: { html: true },
   ADD_TAGS: ['audio', 'video'],
-  ADD_ATTR: ['controls', 'preload', 'style', 'target', 'rel', 'class', 'src', 'playsinline', 'data-song-id', 'data-date', 'data-ubb-now'],
+  ADD_ATTR: ['controls', 'preload', 'style', 'target', 'rel', 'class', 'src', 'playsinline', 'data-song-id', 'data-date', 'data-ubb-now', 'data-chatlog-title'],
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 }
 
@@ -235,6 +235,20 @@ function applyUbbReplacements(input) {
       const targetDate = String(dateText ?? '').trim()
       if (!targetDate) return _
       return `<span class="ubb-countdown" data-date="${escapeAttribute(targetDate)}">${formatCountdown(targetDate)}</span>`
+    })
+
+    output = output.replace(/\[chatlog(?:\s+title="([^"]*)")?\]([\s\S]*?)\[\/chatlog\]/gi, (_, title, content) => {
+      const safeTitle = escapeHtml(String(title || '聊天记录').replace(/&quot;/g, '"'))
+      const renderedContent = convertUbbTextToHtml(content, { escapeText: true, preserveLineBreaks: true })
+      return `
+        <section class="ubb-chatlog" data-chatlog-title="${escapeAttribute(safeTitle)}">
+          <header class="ubb-chatlog-title">
+            <i class="fas fa-comments"></i>
+            <span>${safeTitle}</span>
+          </header>
+          <div class="ubb-chatlog-body">${renderedContent}</div>
+        </section>
+      `
     })
 
     output = applySimpleTag('b', 'strong', output)

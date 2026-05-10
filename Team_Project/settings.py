@@ -40,10 +40,18 @@ CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_env.split(',') if o.strip()] or
 VITE_DEV_MODE = os.getenv('VITE_DEV_MODE', 'False').lower() in ['true', '1', 't']
 CHANNELS_AVAILABLE = importlib.util.find_spec('channels') is not None
 CHANNELS_REDIS_AVAILABLE = importlib.util.find_spec('channels_redis') is not None
+DAPHNE_AVAILABLE = importlib.util.find_spec('daphne') is not None
 
 
 # --- 3. INSTALLED_APPS (只保留 django-ckeditor-5) ---
-INSTALLED_APPS = [
+# 注意：'daphne' 必须放在 INSTALLED_APPS 最前面，它会替换 runserver 命令为 ASGI 版本，
+# 使开发服务器同时支持 HTTP 和 WebSocket。如果不在最前，Django 会用默认的 WSGI runserver，
+# 此时 /ws/messages/ 连不上，typing/实时消息推送不工作。
+INSTALLED_APPS = []
+if DAPHNE_AVAILABLE and CHANNELS_AVAILABLE:
+    INSTALLED_APPS.append('daphne')
+
+INSTALLED_APPS += [
     'knowledge_project.apps.KnowledgeProjectConfig',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -131,7 +139,7 @@ USE_TZ = True
 
 
 # --- 7. 静态文件和媒体文件 (关键修正) ---
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 # 【修正】STATICFILES_DIRS 应该指向项目根目录下的 'static' 文件夹
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 # 【新增】运行 collectstatic 后，所有静态文件会被收集到这里
@@ -189,6 +197,9 @@ SESSION_COOKIE_AGE = 10800
 # 2. 每次请求都保存并刷新 Session 的有效期，保留“有活动就续期”的滚动过期行为。
 #    SessionTimeoutMiddleware 额外维护 last_activity_at，供在线用户统计使用。
 SESSION_IDLE_TIMEOUT = int(os.getenv('SESSION_IDLE_TIMEOUT', SESSION_COOKIE_AGE))
+
+# Absolute authenticated-session lifetime from login time. 0 disables the cap.
+SESSION_ABSOLUTE_TIMEOUT = int(os.getenv('SESSION_ABSOLUTE_TIMEOUT', SESSION_COOKIE_AGE))
 SESSION_SAVE_EVERY_REQUEST = True
 #mail设定
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

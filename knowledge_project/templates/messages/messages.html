@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
 <link rel="stylesheet" href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}">
 <link rel="stylesheet" href="{% static 'dist/assets/element.css' %}">
-<link rel="stylesheet" href="{% static 'dist/assets/messages.css' %}">
+<link rel="stylesheet" href="{% static 'dist/assets/messages.css' %}?v={{ messages_asset_version }}">
 <style>
   main {
     padding: 0 !important;
@@ -30,5 +30,5 @@ window.MESSAGE_REALTIME = {
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="{% static 'dist/messages.js' %}"></script>
+<script type="module" src="{% static 'dist/messages.js' %}?v={{ messages_asset_version }}"></script>
 {% endblock %}

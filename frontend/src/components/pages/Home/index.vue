@@ -70,7 +70,7 @@
           <!-- 搜索结果提示 -->
           <div v-if="isSearching" class="search-result-bar">
             <span class="search-result-text">
-              搜索 "<strong>{{ searchQuery }}</strong>" 找到 {{ articles.length }} 篇笔记
+              <strong>{{ searchResultLabel }}</strong>，共 {{ articles.length }} 篇笔记
             </span>
             <button class="search-result-clear" @click="clearSearch">清除搜索</button>
           </div>
@@ -312,6 +312,7 @@ const {
   hasMore,
   activeNav,
   activeNavLabel,
+  searchResultLabel,
   navGroups,
   activeContentType,
   activeSort,

@@ -6,6 +6,8 @@ const homeData = window.__HOME_DATA__ || {}
 const isAuthenticated = ref(homeData.isAuthenticated || false)
 const loginUrl = homeData.loginUrl || '/login/'
 const signupUrl = homeData.signupUrl || '/signup/'
+const initialAuthorFilter = new URLSearchParams(window.location.search).get('author') || ''
+const initialAuthorNameFilter = new URLSearchParams(window.location.search).get('author_name') || ''
 
 export function useHome() {
   // 状态
@@ -15,9 +17,11 @@ export function useHome() {
   const currentPage = ref(1)
   const itemsPerPage = 10
   const activeNav = ref('explore')
-  const isSearching = ref(false)
+  const isSearching = ref(!!initialAuthorFilter)
   const activeContentType = ref('all')
   const activeSort = ref('latest')
+  const authorFilter = ref(initialAuthorFilter)
+  const authorNameFilter = ref(initialAuthorNameFilter)
 
   // 收藏和历史相关状态
   const favoriteArticles = ref([])
@@ -109,6 +113,10 @@ export function useHome() {
       filtered = filtered.filter(a => a.type === activeContentType.value)
     }
 
+    if (authorFilter.value) {
+      filtered = filtered.filter(a => String(a.author_id || '') === String(authorFilter.value))
+    }
+
     // 应用搜索过滤
     const q = searchQuery.value.trim().toLowerCase()
     if (q) {
@@ -149,7 +157,13 @@ export function useHome() {
   })
 
   const activeNavLabel = computed(() => {
+    if (authorFilter.value) return `${authorNameFilter.value || '该用户'}的公开笔记`
     return navItems.value.find(item => item.id === activeNav.value)?.label || '探索发现'
+  })
+
+  const searchResultLabel = computed(() => {
+    if (authorFilter.value) return `查看 ${authorNameFilter.value || '该用户'} 的公开笔记`
+    return `搜索 "${searchQuery.value}"`
   })
 
   // 计算是否有更多数据
@@ -214,6 +228,7 @@ export function useHome() {
         return {
           id: article.id,
           title: article.title,
+          author_id: article.author_id,
           author: article.author,
           author_avatar: article.author_avatar || '/static/img/default-avatar.png',
           created_at: article.created_at,
@@ -265,6 +280,7 @@ export function useHome() {
         return {
           id: article.id,
           title: article.title,
+          author_id: article.author_id,
           author: article.author,
           author_avatar: article.author_avatar || '/static/img/default-avatar.png',
           created_at: article.created_at,
@@ -306,6 +322,7 @@ export function useHome() {
             return {
               id: article.id,
               title: article.title,
+              author_id: article.author_id,
               author: article.author,
               author_avatar: article.author_avatar || '/static/img/default-avatar.png',
               created_at: article.created_at,
@@ -395,8 +412,14 @@ export function useHome() {
   // 清除搜索
   const clearSearch = () => {
     searchQuery.value = ''
+    authorFilter.value = ''
+    authorNameFilter.value = ''
     isSearching.value = false
     currentPage.value = 1
+    const url = new URL(window.location.href)
+    url.searchParams.delete('author')
+    url.searchParams.delete('author_name')
+    window.history.replaceState({}, '', url)
   }
 
   const setContentType = (typeId) => {
@@ -437,6 +460,8 @@ export function useHome() {
     currentPage.value = 1
     activeContentType.value = 'all'
     searchQuery.value = ''
+    authorFilter.value = ''
+    authorNameFilter.value = ''
     isSearching.value = false
 
     // 根据导航类型加载数据
@@ -531,6 +556,7 @@ export function useHome() {
     hasMore,
     activeNav,
     activeNavLabel,
+    searchResultLabel,
     navItems,
     navGroups,
     activeContentType,

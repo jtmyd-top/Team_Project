@@ -1,16 +1,20 @@
 # knowledge_project/views/message.py
 """私信 / 对话设置 / 屏蔽 / 用户搜索与公开资料相关视图"""
+import base64
+import binascii
 import json
 import logging
 import mimetypes
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q, Count
 from django.http import FileResponse, Http404, JsonResponse, HttpResponse, HttpResponseForbidden
@@ -32,8 +36,12 @@ RECALL_WINDOW_SECONDS = 120
 
 # 每天主动发起新对话（陌生人）的免验证配额，超过后必须通过 Turnstile
 NEW_CONV_DAILY_LIMIT = 5
-# 同一对话的新私信邮件节流窗口（秒）
-EMAIL_NOTIFY_WINDOW_SECONDS = 15 * 60
+# 同一接收者的新私信邮件节流窗口（秒）
+EMAIL_NOTIFY_WINDOW_SECONDS = 30 * 60
+SESSION_LAST_ACTIVITY_KEY = 'last_activity_at'
+MESSAGES_PAGE_ACTIVE_AT_KEY = 'messages_page_active_at'
+ONLINE_SKIP_EMAIL_WINDOW_SECONDS = 5 * 60
+MESSAGES_PAGE_SKIP_EMAIL_WINDOW_SECONDS = 2 * 60
 MESSAGE_PURGE_DELAY_DAYS = 7
 MESSAGE_ATTACHMENT_MAX_COUNT = 6
 MESSAGE_IMAGE_MAX_SIZE = 10 * 1024 * 1024
@@ -56,6 +64,7 @@ MESSAGE_FILE_MIME_TYPES = {
     'application/vnd.ms-powerpoint',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
+MERGED_FORWARD_PREFIX = '__MERGED_FORWARD_V1__:'
 
 
 # ------------------------------------------------------------------
@@ -80,6 +89,40 @@ def _get_settings(user, peer):
 def _server_error_response(log_message, exc, public_message='服务器错误'):
     logger.error("%s: %s", log_message, exc, exc_info=True)
     return JsonResponse({'error': public_message}, status=500)
+
+
+def _parse_merged_forward(content):
+    raw = (content or '').strip()
+    if not raw.startswith(MERGED_FORWARD_PREFIX):
+        return None
+    try:
+        encoded = raw[len(MERGED_FORWARD_PREFIX):].encode('ascii')
+        decoded = base64.b64decode(encoded, validate=True).decode('utf-8')
+        data = json.loads(decoded)
+    except (UnicodeDecodeError, binascii.Error, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get('type') != 'merged_forward':
+        return None
+    items = data.get('items')
+    if not isinstance(items, list):
+        return None
+    data['items'] = items
+    data['count'] = int(data.get('count') or len(items) or 0)
+    return data
+
+
+def _merged_forward_preview(content):
+    data = _parse_merged_forward(content)
+    if not data:
+        return ''
+    lines = []
+    for item in data.get('items', [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        sender = str(item.get('sender') or '未知用户')
+        preview = str(item.get('preview') or item.get('content') or '[附件]')
+        lines.append(f'{sender}: {preview}')
+    return '[聊天记录] ' + (' / '.join(lines) or str(data.get('title') or '聊天记录'))
 
 
 def _message_has_report_history(message):
@@ -237,6 +280,7 @@ def _count_unread(user, peer, viewer_settings=None):
 
 
 def _message_payload(msg, viewer=None):
+    merged_forward = _parse_merged_forward(msg.content)
     return {
         'id': msg.id,
         'sender': msg.sender.username,
@@ -245,6 +289,8 @@ def _message_payload(msg, viewer=None):
         'recipient': msg.recipient.username,
         'recipient_id': msg.recipient_id,
         'content': msg.content,
+        'content_preview': _merged_forward_preview(msg.content) if merged_forward else '',
+        'merged_forward': merged_forward,
         'created_at': msg.created_at.isoformat(),
         'is_read': msg.is_read,
         'read_at': msg.read_at.isoformat() if msg.read_at else None,
@@ -264,7 +310,29 @@ def _attachment_payload(attachment):
     }
 
 
+def _clone_forwarded_attachments(source_message, sender, target_message):
+    from ..models import MessageAttachment
+
+    created = []
+    for source in source_message.attachments.all():
+        forwarded = MessageAttachment.objects.create(
+            uploader=sender,
+            message=target_message,
+            file=source.file.name,
+            original_name=source.original_name,
+            attachment_type=source.attachment_type,
+            mime_type=source.mime_type,
+            size=source.size,
+            was_reported=source.was_reported,
+        )
+        created.append(forwarded)
+    return created
+
+
 def _message_preview(msg):
+    merged_preview = _merged_forward_preview(msg.content)
+    if merged_preview:
+        return merged_preview
     if msg.content:
         return msg.content
     return _attachment_preview(msg.attachments.first())
@@ -458,16 +526,19 @@ def _update_conversation_state(sender, recipient):
 
 
 def _maybe_send_new_message_email(sender, recipient, content):
-    """聚合邮件通知：同一接收者 15 分钟内至多一封。
-
-    尊重 MessagePreference.notify_new_message 开关；失败只记日志，不影响主流程。
-    """
+    """低频私信邮件通知：只在用户明显离站时发送。"""
     try:
         from ..models import MessagePreference
         pref, _ = MessagePreference.objects.get_or_create(user=recipient)
         if not pref.notify_new_message:
             return
         if not recipient.email:
+            return
+        if _has_recent_active_session(recipient):
+            logger.info("跳过私信邮件通知：recipient=%s 最近仍在线", recipient.id)
+            return
+        if _has_recent_messages_page_session(recipient):
+            logger.info("跳过私信邮件通知：recipient=%s 正在使用私信页面", recipient.id)
             return
         now = timezone.now()
         cutoff = now - timedelta(seconds=EMAIL_NOTIFY_WINDOW_SECONDS)
@@ -503,6 +574,41 @@ def _maybe_send_new_message_email(sender, recipient, content):
         threading.Thread(target=send_email_notification, daemon=True).start()
     except Exception as e:
         logger.warning("新私信邮件通知失败: %s", e, exc_info=True)
+
+
+def _iter_user_sessions(user):
+    now = timezone.now()
+    for session in Session.objects.filter(expire_date__gte=now).iterator():
+        try:
+            data = session.get_decoded()
+        except Exception:
+            continue
+        if str(data.get('_auth_user_id') or '') == str(user.id):
+            yield data
+
+
+def _has_recent_active_session(user):
+    active_since = int(timezone.now().timestamp()) - ONLINE_SKIP_EMAIL_WINDOW_SECONDS
+    for data in _iter_user_sessions(user):
+        last_activity_at = data.get(SESSION_LAST_ACTIVITY_KEY)
+        try:
+            if last_activity_at and int(last_activity_at) >= active_since:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _has_recent_messages_page_session(user):
+    active_since = int(timezone.now().timestamp()) - MESSAGES_PAGE_SKIP_EMAIL_WINDOW_SECONDS
+    for data in _iter_user_sessions(user):
+        page_active_at = data.get(MESSAGES_PAGE_ACTIVE_AT_KEY)
+        try:
+            if page_active_at and int(page_active_at) >= active_since:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 # ------------------------------------------------------------------
@@ -593,6 +699,89 @@ def send_message_api(request):
         return JsonResponse({'error': '请求冲突，请稍后重试'}, status=409)
     except Exception as e:
         return _server_error_response('发送私信错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def forward_message_api(request):
+    """转发单条消息；若原消息包含附件，则为新消息创建新的附件记录并复用同一物理文件路径。"""
+    try:
+        from ..models import Message, NewConversationQuotaLog
+
+        data = json.loads(request.body)
+        source_message_id = data.get('message_id')
+        recipient_id = data.get('recipient_id')
+        if not source_message_id or not recipient_id:
+            return JsonResponse({'error': '缺少 message_id 或 recipient_id'}, status=400)
+
+        source_message = get_object_or_404(
+            Message.objects.select_related('sender', 'recipient').prefetch_related('attachments'),
+            id=source_message_id,
+        )
+        if request.user.id not in (source_message.sender_id, source_message.recipient_id):
+            return JsonResponse({'error': '无权转发该消息'}, status=403)
+
+        recipient = get_object_or_404(User, id=recipient_id)
+        permission_response, _ = _check_send_permissions(request.user, recipient)
+        if permission_response is not None:
+            return permission_response
+
+        is_new_conv = _is_new_conversation(request.user, recipient)
+        try:
+            turnstile_passed = _verify_new_conversation_quota(request, data, recipient)
+        except PermissionError as exc:
+            if str(exc) == 'turnstile_failed':
+                return JsonResponse({'error': '人机验证失败，请重试', 'need_turnstile': True}, status=403)
+            quota_used = _today_new_conv_count(request.user)
+            return JsonResponse({
+                'error': '今日新对话数量已达上限，请完成人机验证',
+                'need_turnstile': True,
+                'quota_used': quota_used,
+                'quota_limit': NEW_CONV_DAILY_LIMIT,
+            }, status=429)
+
+        content = _body_string(data, 'content', '').strip()
+        if not content:
+            content = source_message.content or _attachment_preview(source_message.attachments.first())
+        if not content and not source_message.attachments.exists():
+            return JsonResponse({'error': '原消息为空，无法转发'}, status=400)
+
+        with transaction.atomic():
+            forwarded_message = Message.objects.create(
+                sender=request.user,
+                recipient=recipient,
+                content=content,
+            )
+            _clone_forwarded_attachments(source_message, request.user, forwarded_message)
+
+            if is_new_conv:
+                NewConversationQuotaLog.objects.create(
+                    user=request.user,
+                    peer=recipient,
+                    turnstile_passed=turnstile_passed,
+                )
+
+            sender_settings = _update_conversation_state(request.user, recipient)
+            preview_for_email = content or _attachment_preview(forwarded_message.attachments.first())
+            transaction.on_commit(
+                lambda: _maybe_send_new_message_email(request.user, recipient, preview_for_email)
+            )
+            transaction.on_commit(lambda: _push_new_message_events(forwarded_message))
+
+        _apply_disappearing(request.user, recipient, sender_settings)
+        return JsonResponse({
+            'status': 'success',
+            'message': _message_payload(forwarded_message, viewer=request.user),
+        }, status=201)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except IntegrityError as e:
+        logger.warning("转发私信数据库冲突: %s", e, exc_info=True)
+        return JsonResponse({'error': '请求冲突，请稍后重试'}, status=409)
+    except Exception as e:
+        return _server_error_response('转发私信错误', e)
 
 
 @require_http_methods(["POST"])
@@ -1507,15 +1696,20 @@ def get_user_public_profile_api(request, user_id):
             total_views=models.Sum('views')
         )['total_views'] or 0
         likes_count = ProfileLike.objects.filter(profile=profile).count()
+        banner_url = profile.banner_image.url if profile.banner_image else ''
+        banner_is_video = bool(banner_url.lower().split('?', 1)[0].endswith(('.mp4', '.webm', '.ogg')))
         return JsonResponse({
             'status': 'success',
             'id': user.id,
             'username': user.username,
             'avatar': _get_avatar_url(user),
+            'banner_url': banner_url,
+            'banner_is_video': banner_is_video,
             'bio': profile.bio or '',
             'notes_count': notes_count,
             'views_count': views_count,
             'likes_count': likes_count,
+            'public_notes_url': f'/?author={user.id}&author_name={quote(user.username)}',
         })
     except Exception as e:
         return _server_error_response('获取用户信息错误', e)
@@ -1601,10 +1795,26 @@ def search_users_api(request):
 @login_required
 def messages_view(request):
     """私信页面"""
+    request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = int(timezone.now().timestamp())
+    request.session.modified = True
+    messages_bundle_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'dist', 'messages.js')
+    try:
+        messages_asset_version = int(os.path.getmtime(messages_bundle_path))
+    except OSError:
+        messages_asset_version = int(time.time())
     return render(request, 'messages/messages.html', {
         'realtime_enabled': getattr(settings, 'REALTIME_MESSAGES_ENABLED', False),
         'realtime_ws_path': getattr(settings, 'REALTIME_MESSAGES_PATH', '/ws/messages/'),
+        'messages_asset_version': messages_asset_version,
     })
+
+
+@require_http_methods(["POST"])
+@login_required
+def touch_messages_page_api(request):
+    request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = int(timezone.now().timestamp())
+    request.session.modified = True
+    return JsonResponse({'status': 'success'})
 
 
 # ------------------------------------------------------------------

@@ -199,17 +199,32 @@
           已开启阅后即焚 · {{ formatTtl(currentSettings.disappearing_ttl_seconds) }}内消息将自动销毁        </div>
 
         <div v-if="selectionMode" class="selection-banner">
-          <span>已选择 {{ selectedMessageIds.size }} 条消息</span>
+          <div class="selection-summary">
+            <span class="selection-icon"><i class="fas fa-check-double"></i></span>
+            <span>已选择 <strong>{{ selectedMessageIds.size }}</strong> 条消息</span>
+          </div>
           <div class="selection-actions">
-            <button class="link-btn" @click="clearSelectedMessages">清空选择</button>
+            <button class="link-btn" @click="clearSelectedMessages">
+              <i class="fas fa-xmark"></i>
+              清空选择
+            </button>
+            <button class="toolbar-btn primary" :disabled="selectedMessageIds.size === 0" @click="forwardSelectedAsChatlog">
+              <i class="fas fa-share"></i>
+              <span>合并转发</span>
+            </button>
+            <button class="toolbar-btn" :disabled="selectedMessageIds.size === 0" @click="saveSelectedAsNote">
+              <i class="fas fa-sticky-note"></i>
+              <span>存为笔记</span>
+            </button>
             <button class="toolbar-btn danger" :disabled="selectedMessageIds.size === 0" @click="deleteSelectedMessages">
-              删除所选
+              <i class="fas fa-trash-alt"></i>
+              <span>删除所选</span>
             </button>
           </div>
         </div>
 
         <!-- 消息列表 -->
-        <div class="messages-list" ref="messagesListRef">
+        <div class="messages-list" ref="messagesListRef" @scroll="onMessagesScroll">
           <div v-if="loadingMessages" class="messages-state">
             <i class="fas fa-spinner fa-spin"></i>
           </div>
@@ -235,6 +250,7 @@
                   :selected="selectedMessageIds.has(m.id)"
                   @context-menu="onMessageContextMenu"
                   @toggle-selected="toggleMessageSelected"
+                  @open-merged-forward="openMergedForwardDialog"
                 />
               </div>
               <div v-if="typingIndicator.visible" class="typing-indicator">
@@ -303,9 +319,36 @@
               {{ emoji }}
             </button>
           </div>
+          <div v-if="showCodeInput" class="code-input-panel">
+            <textarea
+              v-model="codeDraft"
+              class="code-input"
+              placeholder="粘贴代码或配置..."
+              spellcheck="false"
+              @keydown.ctrl.enter.prevent="sendCodeBlock"
+              @keydown.meta.enter.prevent="sendCodeBlock"
+            ></textarea>
+            <div class="code-input-actions">
+              <button class="code-action-btn ghost" type="button" @click="showCodeInput = false">
+                <i class="fas fa-xmark"></i>
+                <span>取消</span>
+              </button>
+              <button class="code-action-btn secondary" type="button" :disabled="!codeDraft.trim()" @click="insertCodeBlock">
+                <i class="fas fa-plus"></i>
+                <span>插入</span>
+              </button>
+              <button class="code-action-btn primary" type="button" :disabled="!codeDraft.trim() || isSending" @click="sendCodeBlock">
+                <i class="fas fa-paper-plane"></i>
+                <span>发送代码</span>
+              </button>
+            </div>
+          </div>
           <div class="composer-shell">
             <button class="tool-btn" @click="showEmojiPicker = !showEmojiPicker" title="表情">
               <i class="fas fa-face-smile"></i>
+            </button>
+            <button class="tool-btn" @click="toggleCodeInput" title="代码块">
+              <i class="fas fa-code"></i>
             </button>
             <button
               class="tool-btn"
@@ -450,6 +493,81 @@
       @submitted="reportTarget = null"
     />
 
+    <MergedForwardDialog
+      v-if="mergedForwardDialog.visible"
+      :payload="mergedForwardDialog.payload"
+      :current-user-name="currentUserName()"
+      @close="closeMergedForwardDialog"
+    />
+
+    <div v-if="peerProfile.visible" class="profile-card-overlay" @click.self="closePeerProfile">
+      <section class="profile-card-modal">
+        <button class="profile-card-close" type="button" title="关闭" @click="closePeerProfile">
+          <i class="fas fa-times"></i>
+        </button>
+
+        <div class="profile-cover-media">
+          <img
+            v-if="peerProfile.data.banner_url && !peerProfile.data.banner_is_video"
+            :src="peerProfile.data.banner_url"
+            alt="封面"
+            class="cover-img"
+          />
+          <video
+            v-else-if="peerProfile.data.banner_url && peerProfile.data.banner_is_video"
+            ref="peerProfileVideoRef"
+            :src="peerProfile.data.banner_url"
+            class="cover-img"
+            autoplay
+            loop
+            playsinline
+            :muted="peerProfile.videoMuted"
+          ></video>
+          <div v-else class="cover-gradient"></div>
+
+          <div v-if="peerProfile.data.banner_is_video" class="cover-video-controls">
+            <button class="cover-ctrl-btn" type="button" :title="peerProfile.videoPaused ? '播放' : '暂停'" @click.stop="togglePeerProfileVideo">
+              <i :class="peerProfile.videoPaused ? 'fas fa-play' : 'fas fa-pause'"></i>
+            </button>
+            <div class="cover-volume-ctrl">
+              <button class="cover-ctrl-btn" type="button" :title="peerProfile.videoMuted ? '开启声音' : '静音'" @click.stop="togglePeerProfileMute">
+                <i :class="peerProfile.videoMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up'"></i>
+              </button>
+              <div class="cover-volume-slider">
+                <input v-model.number="peerProfile.videoVolume" type="range" min="0" max="1" step="0.01" @input="updatePeerProfileVolume" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-card-body">
+          <img :src="peerProfile.data.avatar || '/static/img/default-avatar.png'" :alt="peerProfile.data.username" class="profile-card-avatar" />
+          <h3>{{ peerProfile.data.username }}</h3>
+          <p class="profile-card-bio">{{ peerProfile.data.bio || '暂无简介' }}</p>
+
+          <div class="profile-card-stats">
+            <a class="profile-stat" :href="peerProfile.data.public_notes_url || '#'">
+              <strong>{{ peerProfile.data.notes_count || 0 }}</strong>
+              <span>公开笔记</span>
+            </a>
+            <div class="profile-stat">
+              <strong>{{ peerProfile.data.views_count || 0 }}</strong>
+              <span>浏览</span>
+            </div>
+            <div class="profile-stat">
+              <strong>{{ peerProfile.data.likes_count || 0 }}</strong>
+              <span>点赞</span>
+            </div>
+          </div>
+
+          <a class="public-notes-link" :href="peerProfile.data.public_notes_url || '#'">
+            <i class="fas fa-book-open"></i>
+            查看公开笔记
+          </a>
+        </div>
+      </section>
+    </div>
+
     <DisappearingSettingDialog
       v-if="showDisappearingDialog && selectedUserId"
       :peer-id="selectedUserId"
@@ -500,7 +618,9 @@ import BlockedUsersPanel from '@components/messages/BlockedUsersPanel/index.vue'
 import ChatSearchDrawer from '@components/messages/ChatSearchDrawer/index.vue'
 import ReportUserDialog from '@components/messages/ReportUserDialog/index.vue'
 import DisappearingSettingDialog from '@components/messages/DisappearingSettingDialog/index.vue'
+import MergedForwardDialog from '@components/messages/MergedForwardDialog/index.vue'
 import Turnstile from '@components/common/Turnstile/index.vue'
+import { encodeMergedForward, mergedForwardPreview, parseMergedForward } from '@/utils/mergedForward'
 
 // ==== 甯搁噺 ====
 const recallWindowSeconds = 120
@@ -529,11 +649,13 @@ const isRecordingVoice = ref(false)
 const messagesListRef = ref(null)
 const inputRef = ref(null)
 const fileInputRef = ref(null)
+const peerProfileVideoRef = ref(null)
 const showNewMessageDialog = ref(false)
 const showChatMenu = ref(false)
 const showChatSearch = ref(false)
 const showDisappearingDialog = ref(false)
 const reportTarget = ref(null)
+const mergedForwardDialog = ref({ visible: false, payload: null })
 const ctxMenu = ref({ visible: false, x: 0, y: 0, conv: null })
 const messageCtxMenu = ref({ visible: false, x: 0, y: 0, msg: null })
 const selectionMode = ref(false)
@@ -552,14 +674,28 @@ const forwardDraft = ref(null)
 const browserNotificationsEnabled = ref(false)
 const pendingAttachments = ref([])
 const showEmojiPicker = ref(false)
+const showCodeInput = ref(false)
+const codeDraft = ref('')
+const peerProfile = ref({
+  visible: false,
+  loading: false,
+  videoMuted: true,
+  videoPaused: false,
+  videoVolume: 0.6,
+  data: {},
+})
 const maxPendingAttachments = 6
 const realtimeState = ref('disabled')
 let voiceRecorder = null
 let voiceStream = null
 let voiceChunks = []
 let chatSocket = null
-let typingTimer = null
+// 客户端节流定时器：同一会话内 1.4s 最多发一次 typing
+let typingThrottleTimer = null
+// 接收端 hide 定时器：2s 收不到新的 typing 事件则隐藏指示器
 let typingHideTimer = null
+// 输入框上一次是否非空，用于检测"有内容 → 空"的跳变以发送 typing_stop
+let composerWasNotEmpty = false
 
 // Turnstile 兜底：当日新对话超额
 const turnstileGate = ref({
@@ -568,6 +704,8 @@ const turnstileGate = ref({
   pendingContent: '',
   pendingAttachmentIds: [],
   pendingRecipientId: null,
+  pendingForwardMessageId: null,
+  pendingAutoSendChatlog: false,
   quotaLimit: 5,
 })
 
@@ -790,9 +928,13 @@ function isRealtimeEnabled() {
 }
 
 function normalizeIncomingMessage(message) {
+  const mergedForward = message?.merged_forward || parseMergedForward(message?.content)
+  const contentPreview = message?.content_preview || mergedForwardPreview(message?.content, '')
   return {
     ...message,
     attachments: Array.isArray(message?.attachments) ? message.attachments : [],
+    merged_forward: mergedForward,
+    content_preview: contentPreview,
   }
 }
 
@@ -803,6 +945,7 @@ function upsertConversationPreviewFromMessage(message, peerId, { preserveOrder =
   const isActiveConversation =
     normalizeUserId(selectedUserId.value) === normalizedPeerId && !document.hidden
   const preview =
+    mergedForwardPreview(message.content, '') ||
     String(message.content || '').trim() ||
     message.attachments?.[0]?.name ||
     '[附件]'
@@ -863,7 +1006,8 @@ function handleRealtimeEvent(event) {
       const currentConv = findConversationByUserId(selectedUserId.value)
       if (currentConv) currentConv.unread_count = 0
       currentSettings.value.force_unread = false
-      scrollToBottomSoon()
+      if (showScrollToBottom.value) scrollBottomUnreadCount.value += 1
+      else scrollToBottomSoon()
     }
 
     if (isCurrentConversation) {
@@ -911,6 +1055,14 @@ function handleRealtimeEvent(event) {
       typingIndicator.value = { visible: false, username: '' }
     }, 2000)
     scrollToBottomSoon()
+    return
+  }
+
+  if (event.type === 'typing_stop') {
+    const peerId = normalizeUserId(event.peer_id)
+    if (peerId !== normalizeUserId(selectedUserId.value)) return
+    // 对方停止输入或发送了消息，立即隐藏指示器，不再等 2 秒 timeout
+    hideTypingIndicator()
   }
 }
 
@@ -1102,7 +1254,7 @@ async function loadMessages({ silent = false } = {}) {
     const r = await fetch(`/api/messages/get/?user_id=${selectedUserId.value}`)
     if (r.ok) {
       const d = await r.json()
-      messages.value = d.messages || []
+      messages.value = (d.messages || []).map(normalizeIncomingMessage)
       if (d.settings) {
         currentSettings.value = { ...currentSettings.value, ...d.settings }
       }
@@ -1130,6 +1282,7 @@ function selectConversation(conv) {
   applyDraftForConversation(conv.user_id)
   pendingAttachments.value = []
   showEmojiPicker.value = false
+  forwardDraft.value = null
   replyDraft.value = null
   highlightMessageId.value = null
   showChatMenu.value = false
@@ -1140,6 +1293,9 @@ function selectConversation(conv) {
 
 async function sendMessage(turnstileToken = '') {
   if ((!newMessage.value.trim() && pendingAttachments.value.length === 0) || !selectedUserId.value) return
+  // 用户提交消息后，立即让对方屏幕清除"正在输入"提示，不必等 2s timeout
+  sendTypingStop()
+  composerWasNotEmpty = false
   isSending.value = true
   const normalizedTurnstileToken = typeof turnstileToken === 'string' ? turnstileToken : ''
   const attachmentIds = pendingAttachments.value.map((attachment) => attachment.id)
@@ -1147,6 +1303,26 @@ async function sendMessage(turnstileToken = '') {
     ? buildQuotedMessage(replyDraft.value, newMessage.value.trim())
     : newMessage.value.trim()
   try {
+    if (forwardDraft.value?.sourceMessageId && attachmentIds.length === 0) {
+      const forwardedMessage = await sendForwardedMessage(
+        forwardDraft.value.sourceMessageId,
+        selectedUserId.value,
+        finalContent,
+        normalizedTurnstileToken
+      )
+      clearDraftForConversation(selectedUserId.value)
+      newMessage.value = ''
+      applyDraftPreviews()
+      pendingAttachments.value = []
+      showEmojiPicker.value = false
+      replyDraft.value = null
+      forwardDraft.value = null
+      resetComposerHeight()
+      await nextTick()
+      scrollToBottomSoon()
+      upsertConversationPreviewFromMessage(forwardedMessage, selectedUserId.value, { preserveOrder: true })
+      return
+    }
     const payload = {
       recipient_id: selectedUserId.value,
       content: finalContent,
@@ -1158,7 +1334,9 @@ async function sendMessage(turnstileToken = '') {
     if (!messages.value.some((message) => message.id === sentMessage.id)) {
       messages.value.push(sentMessage)
     }
+    clearDraftForConversation(selectedUserId.value)
     newMessage.value = ''
+    applyDraftPreviews()
     pendingAttachments.value = []
     showEmojiPicker.value = false
     replyDraft.value = null
@@ -1178,13 +1356,35 @@ async function sendMessage(turnstileToken = '') {
   }
 }
 
-async function openTurnstileGate(pendingContent, recipientId, quotaLimit, pendingAttachmentIds = []) {
+async function sendForwardedMessage(sourceMessageId, recipientId, content, turnstileToken = '') {
+  const payload = {
+    message_id: sourceMessageId,
+    recipient_id: recipientId,
+    content,
+  }
+  if (turnstileToken) payload.turnstile_token = turnstileToken
+  const d = await apiPost('/api/messages/forward/', payload)
+  const forwardedMessage = normalizeIncomingMessage(d.message)
+  if (normalizeUserId(selectedUserId.value) === normalizeUserId(recipientId)) {
+    if (!messages.value.some((message) => message.id === forwardedMessage.id)) {
+      messages.value.push(forwardedMessage)
+    }
+    scrollToBottomSoon()
+  }
+  upsertConversationPreviewFromMessage(forwardedMessage, recipientId, { preserveOrder: true })
+  loadConversations({ silent: true, preserveOrder: true })
+  return forwardedMessage
+}
+
+async function openTurnstileGate(pendingContent, recipientId, quotaLimit, pendingAttachmentIds = [], options = {}) {
   turnstileGate.value = {
     visible: true,
     siteKey: turnstileGate.value.siteKey || '',
     pendingContent,
     pendingAttachmentIds,
     pendingRecipientId: recipientId,
+    pendingForwardMessageId: options.forwardMessageId ?? forwardDraft.value?.sourceMessageId ?? null,
+    pendingAutoSendChatlog: Boolean(options.autoSendChatlog),
     quotaLimit: quotaLimit || 5,
   }
   if (!turnstileGate.value.siteKey) {
@@ -1201,10 +1401,14 @@ async function openTurnstileGate(pendingContent, recipientId, quotaLimit, pendin
 }
 
 function cancelTurnstileGate() {
+  const wasAutoSendChatlog = turnstileGate.value.pendingAutoSendChatlog
   turnstileGate.value.visible = false
   turnstileGate.value.pendingContent = ''
   turnstileGate.value.pendingAttachmentIds = []
   turnstileGate.value.pendingRecipientId = null
+  turnstileGate.value.pendingForwardMessageId = null
+  turnstileGate.value.pendingAutoSendChatlog = false
+  if (wasAutoSendChatlog) forwardDraft.value = null
   ElMessage.info('已取消人机验证，消息未发送')
 }
 
@@ -1212,12 +1416,36 @@ async function onTurnstileVerified(token) {
   const pending = turnstileGate.value.pendingContent
   const pendingAttachmentIds = [...(turnstileGate.value.pendingAttachmentIds || [])]
   const pendingRecipient = turnstileGate.value.pendingRecipientId
+  const pendingForwardMessageId = turnstileGate.value.pendingForwardMessageId
+  const pendingAutoSendChatlog = turnstileGate.value.pendingAutoSendChatlog
   const normalizedTurnstileToken = typeof token === 'string' ? token : ''
   turnstileGate.value.visible = false
   if (!normalizedTurnstileToken || (!pending && pendingAttachmentIds.length === 0) || !pendingRecipient) return
   // 保持现有输入不动，直接用暂存内容 + token 重新投递
   isSending.value = true
   try {
+    if (pendingAutoSendChatlog && pendingAttachmentIds.length === 0) {
+      await sendChatlogForwardToUser(pendingRecipient, pending, normalizedTurnstileToken)
+      return
+    }
+    if (pendingForwardMessageId && pendingAttachmentIds.length === 0) {
+      const forwardedMessage = await sendForwardedMessage(
+        pendingForwardMessageId,
+        pendingRecipient,
+        pending,
+        normalizedTurnstileToken
+      )
+      clearDraftForConversation(pendingRecipient)
+      newMessage.value = ''
+      applyDraftPreviews()
+      pendingAttachments.value = []
+      replyDraft.value = null
+      forwardDraft.value = null
+      resetComposerHeight()
+      scrollToBottomSoon()
+      upsertConversationPreviewFromMessage(forwardedMessage, pendingRecipient, { preserveOrder: true })
+      return
+    }
     const d = await apiPost('/api/messages/send/', {
       recipient_id: pendingRecipient,
       content: pending,
@@ -1228,7 +1456,9 @@ async function onTurnstileVerified(token) {
     if (!messages.value.some((message) => message.id === sentMessage.id)) {
       messages.value.push(sentMessage)
     }
+    clearDraftForConversation(pendingRecipient)
     newMessage.value = ''
+    applyDraftPreviews()
     pendingAttachments.value = []
     replyDraft.value = null
     resetComposerHeight()
@@ -1242,6 +1472,8 @@ async function onTurnstileVerified(token) {
     turnstileGate.value.pendingContent = ''
     turnstileGate.value.pendingAttachmentIds = []
     turnstileGate.value.pendingRecipientId = null
+    turnstileGate.value.pendingForwardMessageId = null
+    turnstileGate.value.pendingAutoSendChatlog = false
   }
 }
 
@@ -1254,11 +1486,12 @@ function onTurnstileExpired() {
 }
 
 function createReplyDraft(m, mode = 'quote') {
+  const previewText = getReadableMessageText(m)
   return {
     id: m.id,
     mode,
     sender: m.sender || '对方',
-    preview: String(m.content || '').replace(/\s+/g, ' ').slice(0, 60),
+    preview: singleLine(previewText).slice(0, 60),
   }
 }
 
@@ -1269,7 +1502,67 @@ function buildQuotedMessage(draft, messageText) {
 function buildForwardMessage(m) {
   const senderLabel = m?.is_own ? '我' : m?.sender || '对方'
   const timeLabel = formatForwardTime(m?.created_at)
-  return `【转发自 ${senderLabel}${timeLabel ? ` ${timeLabel}` : ''}】\n${String(m?.content || '').trim()}`
+  return `【转发自 ${senderLabel}${timeLabel ? ` ${timeLabel}` : ''}】\n${getReadableMessageText(m)}`
+}
+
+function buildChatlogForward(messagesToForward) {
+  const peerName = selectedConversation.value?.username || '对方'
+  const items = messagesToForward
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map((message) => {
+      const senderLabel = message.is_own ? currentUserName() : (message.sender || peerName || '对方')
+      const mergedForward = parseMergedForward(message.content)
+      const text = mergedForward
+        ? mergedForwardPreview(message.content, '')
+        : (String(message.content || '').trim() || attachmentSummary(message))
+      const preview = singleLine(text).slice(0, 220)
+      return {
+        id: message.id,
+        sender: senderLabel,
+        avatar: message.sender_avatar || '/static/img/default-avatar.png',
+        is_own: !!message.is_own,
+        content: text || '[附件]',
+        preview: preview || '[附件]',
+        time: message.created_at,
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
+      }
+    })
+  return encodeMergedForward({
+    type: 'merged_forward',
+    title: `${currentUserName()}与${peerName}的聊天记录`,
+    source: `共 ${items.length} 条聊天记录`,
+    count: items.length,
+    items,
+  })
+}
+
+function attachmentSummary(message) {
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : []
+  if (!attachments.length) return ''
+  return attachments
+    .map((attachment) => `[附件] ${attachment.name || '未命名文件'}`)
+    .join('\n')
+}
+
+function singleLine(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function getReadableMessageText(message) {
+  return (
+    mergedForwardPreview(message?.content, '') ||
+    String(message?.content || '').trim() ||
+    attachmentSummary(message) ||
+    '[附件]'
+  )
+}
+
+function currentUserName() {
+  return (
+    window.currentUsername ||
+    document.querySelector('meta[name="username"]')?.content ||
+    '我'
+  )
 }
 
 function formatForwardTime(iso) {
@@ -1328,6 +1621,42 @@ function appendEmoji(emoji) {
   newMessage.value += emoji
   showEmojiPicker.value = false
   nextTick(() => inputRef.value?.focus())
+}
+
+function toggleCodeInput() {
+  showCodeInput.value = !showCodeInput.value
+  showEmojiPicker.value = false
+  if (showCodeInput.value) nextTick(() => document.querySelector('.code-input')?.focus())
+}
+
+function buildCodeBlock() {
+  const code = codeDraft.value.trim()
+  return code ? `[code]${code}[/code]` : ''
+}
+
+function insertCodeBlock() {
+  const block = buildCodeBlock()
+  if (!block) return
+  const prefix = newMessage.value.trim() ? '\n\n' : ''
+  newMessage.value += `${prefix}${block}`
+  codeDraft.value = ''
+  showCodeInput.value = false
+  saveCurrentDraft()
+  applyDraftPreviews()
+  nextTick(() => {
+    inputRef.value?.focus()
+    autoGrowComposer()
+  })
+}
+
+async function sendCodeBlock() {
+  const block = buildCodeBlock()
+  if (!block) return
+  const previous = newMessage.value
+  newMessage.value = previous.trim() ? `${previous.trim()}\n\n${block}` : block
+  codeDraft.value = ''
+  showCodeInput.value = false
+  await sendMessage()
 }
 
 function getSupportedVoiceMimeType() {
@@ -1418,7 +1747,9 @@ function openNewMessageDialog() {
 
 function closeNewMessageDialog() {
   showNewMessageDialog.value = false
-  forwardDraft.value = null
+  if (forwardDraft.value?.autoSendChatlog || !selectedUserId.value || !newMessage.value) {
+    forwardDraft.value = null
+  }
 }
 
 function onQuoteMessage(m) {
@@ -1428,7 +1759,10 @@ function onQuoteMessage(m) {
 
 async function copyMessageContent(m) {
   try {
-    await navigator.clipboard.writeText(String(m?.content || ''))
+    const text = parseMergedForward(m?.content)
+      ? mergedForwardPreview(m?.content, '')
+      : String(m?.content || '')
+    await navigator.clipboard.writeText(text)
     ElMessage.success('已复制消息内容')
   } catch (e) {
     ElMessage.error('复制失败，请检查浏览器权限')
@@ -1438,9 +1772,21 @@ async function copyMessageContent(m) {
 function onForwardMessage(m) {
   forwardDraft.value = {
     sourceMessageId: m.id,
-    content: buildForwardMessage(m),
+    content: parseMergedForward(m?.content) ? mergedForwardPreview(m.content, '') : buildForwardMessage(m),
   }
   showNewMessageDialog.value = true
+}
+
+function openMergedForwardDialog({ payload }) {
+  if (!payload) return
+  mergedForwardDialog.value = {
+    visible: true,
+    payload,
+  }
+}
+
+function closeMergedForwardDialog() {
+  mergedForwardDialog.value = { visible: false, payload: null }
 }
 
 function handleComposerEnter(e) {
@@ -1453,17 +1799,37 @@ function onComposerInput() {
   autoGrowComposer()
   saveCurrentDraft()
   applyDraftPreviews()
+  const isEmpty = !newMessage.value.trim()
+  // "有内容 → 空" 跳变：用户清空了输入框，让对方立即停止"正在输入"提示
+  if (isEmpty && composerWasNotEmpty) {
+    sendTypingStop()
+  }
+  composerWasNotEmpty = !isEmpty
   scheduleTypingNotice()
 }
 
 function scheduleTypingNotice() {
   if (!selectedUserId.value || !newMessage.value.trim()) return
-  if (typingTimer) return
-  typingTimer = window.setTimeout(() => {
-    typingTimer = null
+  // 节流：同一会话内 1.4s 最多向后端发一次 typing 事件
+  if (typingThrottleTimer) return
+  typingThrottleTimer = window.setTimeout(() => {
+    typingThrottleTimer = null
   }, 1400)
   chatSocket?.send?.({
     type: 'typing',
+    peer_id: selectedUserId.value,
+  })
+}
+
+function sendTypingStop() {
+  if (!selectedUserId.value) return
+  // 立即清除节流定时器，确保下一次 typing 事件不会被吞
+  if (typingThrottleTimer) {
+    clearTimeout(typingThrottleTimer)
+    typingThrottleTimer = null
+  }
+  chatSocket?.send?.({
+    type: 'typing_stop',
     peer_id: selectedUserId.value,
   })
 }
@@ -1481,22 +1847,27 @@ function resetComposerHeight() {
   el.style.height = ''
 }
 
-function startNewConversation(userId) {
+async function startNewConversation(userId) {
   showNewMessageDialog.value = false
   scope.value = 'all'
+  const pendingForward = forwardDraft.value
+  if (pendingForward?.autoSendChatlog && pendingForward.content) {
+    await sendChatlogForwardToUser(userId, pendingForward.content)
+    return
+  }
   saveCurrentDraft()
   selectedUserId.value = userId
   hideTypingIndicator()
   selectionMode.value = false
   clearSelectedMessages()
   applyDraftForConversation(userId)
-  if (!newMessage.value && forwardDraft.value?.content) {
-    newMessage.value = forwardDraft.value.content
+  if (!newMessage.value && pendingForward?.content) {
+    newMessage.value = pendingForward.content
   }
   pendingAttachments.value = []
   showEmojiPicker.value = false
   replyDraft.value = null
-  forwardDraft.value = null
+  forwardDraft.value = pendingForward?.sourceMessageId ? pendingForward : null
   mobileChatOpen.value = true
   loadMessages()
   loadConversations()
@@ -1513,12 +1884,33 @@ function scrollToBottom() {
   }
 }
 
+function updateScrollBottomState() {
+  const el = messagesListRef.value
+  if (!el) {
+    showScrollToBottom.value = false
+    return
+  }
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  showScrollToBottom.value = distance > 180
+  if (!showScrollToBottom.value) scrollBottomUnreadCount.value = 0
+}
+
+function onMessagesScroll() {
+  updateScrollBottomState()
+}
+
+function jumpToLatest() {
+  scrollBottomUnreadCount.value = 0
+  scrollToBottomSoon()
+}
+
 function scrollToBottomSoon() {
   nextTick(() => {
     scrollToBottom()
     requestAnimationFrame(scrollToBottom)
     window.setTimeout(scrollToBottom, 80)
     window.setTimeout(scrollToBottom, 240)
+    window.setTimeout(updateScrollBottomState, 260)
   })
 }
 
@@ -1623,6 +2015,10 @@ function clearSelectedMessages() {
   selectedMessageIds.value = new Set()
 }
 
+function getSelectedMessages() {
+  return messages.value.filter((message) => selectedMessageIds.value.has(message.id))
+}
+
 function hideTypingIndicator() {
   typingIndicator.value = { visible: false, username: '' }
   clearTimeout(typingHideTimer)
@@ -1692,6 +2088,93 @@ async function deleteSelectedMessages() {
   }
 }
 
+async function forwardSelectedAsChatlog() {
+  const selected = getSelectedMessages()
+  if (!selected.length) return
+  forwardDraft.value = {
+    sourceMessageId: null,
+    content: buildChatlogForward(selected),
+    autoSendChatlog: true,
+  }
+  showNewMessageDialog.value = true
+}
+
+async function sendChatlogForwardToUser(userId, content, turnstileToken = '') {
+  if (!userId || !content) return
+  isSending.value = true
+  try {
+    const payload = {
+      recipient_id: userId,
+      content,
+      attachment_ids: [],
+    }
+    if (turnstileToken) payload.turnstile_token = turnstileToken
+    const d = await apiPost('/api/messages/send/', payload)
+    const sentMessage = normalizeIncomingMessage(d.message)
+    const wasCurrentConversation = normalizeUserId(selectedUserId.value) === normalizeUserId(userId)
+    selectedUserId.value = userId
+    mobileChatOpen.value = true
+    scope.value = 'all'
+    hideTypingIndicator()
+    selectionMode.value = false
+    clearSelectedMessages()
+    if (wasCurrentConversation) {
+      if (!messages.value.some((message) => message.id === sentMessage.id)) {
+        messages.value = [...messages.value, sentMessage]
+      }
+    } else {
+      messages.value = []
+    }
+    forwardDraft.value = null
+    newMessage.value = ''
+    pendingAttachments.value = []
+    showEmojiPicker.value = false
+    replyDraft.value = null
+    clearDraftForConversation(userId)
+    applyDraftPreviews()
+    resetComposerHeight()
+    upsertConversationPreviewFromMessage(sentMessage, userId, { preserveOrder: true })
+    loadMessages({ silent: wasCurrentConversation })
+    loadConversations({ silent: true, preserveOrder: true })
+    await nextTick()
+    scrollToBottomSoon()
+    ElMessage.success('已合并转发')
+  } catch (e) {
+    if (e?.data?.need_turnstile) {
+      await openTurnstileGate(content, userId, e.data.quota_limit, [], { autoSendChatlog: true })
+      return
+    }
+    ElMessage.error(e.message)
+  } finally {
+    isSending.value = false
+  }
+}
+
+function saveSelectedAsNote() {
+  const selected = getSelectedMessages()
+  if (!selected.length) return
+  const peerName = selectedConversation.value?.username || '对方'
+  const payload = {
+    title: `${currentUserName()} 与 ${peerName} 的聊天摘录`,
+    content: buildKnowledgeNoteFromMessages(selected),
+    created_at: new Date().toISOString(),
+  }
+  sessionStorage.setItem('knowledgeMessageNoteDraft', JSON.stringify(payload))
+  window.location.href = '/knowledge/?create=1&from=messages'
+}
+
+function buildKnowledgeNoteFromMessages(selected) {
+  return selected
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map((message) => {
+      const senderLabel = message.is_own ? currentUserName() : (message.sender || selectedConversation.value?.username || '对方')
+      const timeLabel = formatForwardTime(message.created_at)
+      const content = getReadableMessageText(message)
+      return `## ${senderLabel} · ${timeLabel}\n\n${content || '[附件]'}`
+    })
+    .join('\n\n')
+}
+
 async function recallMessage(m) {
   try {
     await ElMessageBox.confirm('撤回后双方都将看不到此消息，确认撤回吗？', '撤回消息', {
@@ -1716,30 +2199,62 @@ async function recallMessage(m) {
 function viewPeerProfile() {
   if (!selectedUserId.value) return
   showChatMenu.value = false
-  const url = `/api/users/${selectedUserId.value}/profile/`
-  fetch(url)
+  const url = `/api/users/${selectedUserId.value}/profile/?_=${Date.now()}`
+  peerProfile.value.loading = true
+  fetch(url, { cache: 'no-store' })
     .then((r) => r.json())
     .then((d) => {
-      if (d.status === 'success') {
-        ElMessageBox.alert(
-          `<div style="text-align:center;">
-            <img src="${d.avatar}" style="width:64px;height:64px;border-radius:50%;margin-bottom:10px;"/>
-            <h3 style="margin:0 0 6px;">${d.username}</h3>
-            <p style="color:#888;margin:0 0 10px;">${d.bio || '暂无简介'}</p>
-            <div style="display:flex;justify-content:space-around;gap:10px;">
-              <span>📓 笔记 ${d.notes_count}</span>
-              <span>👀 浏览 ${d.views_count}</span>
-              <span>❤️ 点赞 ${d.likes_count}</span>
-            </div>
-          </div>`,
-          '用户资料',
-          { dangerouslyUseHTMLString: true, confirmButtonText: '关闭' }
-        )
-      } else {
+      if (d.status !== 'success') {
         ElMessage.error(d.error || '加载失败')
+        return
       }
+      peerProfile.value = {
+        visible: true,
+        loading: false,
+        videoMuted: true,
+        videoPaused: false,
+        videoVolume: 0.6,
+        data: d,
+      }
+      nextTick(() => updatePeerProfileVolume())
     })
     .catch(() => ElMessage.error('网络错误'))
+    .finally(() => {
+      peerProfile.value.loading = false
+    })
+}
+
+function closePeerProfile() {
+  peerProfile.value.visible = false
+  const video = peerProfileVideoRef.value
+  if (video) video.pause()
+}
+
+function togglePeerProfileVideo() {
+  const video = peerProfileVideoRef.value
+  if (!video) return
+  if (video.paused) {
+    video.play().catch(() => {})
+    peerProfile.value.videoPaused = false
+  } else {
+    video.pause()
+    peerProfile.value.videoPaused = true
+  }
+}
+
+function togglePeerProfileMute() {
+  if (peerProfile.value.videoMuted && Number(peerProfile.value.videoVolume || 0) === 0) {
+    peerProfile.value.videoVolume = 0.6
+  }
+  peerProfile.value.videoMuted = !peerProfile.value.videoMuted
+  updatePeerProfileVolume()
+}
+
+function updatePeerProfileVolume() {
+  const video = peerProfileVideoRef.value
+  if (!video) return
+  video.muted = peerProfile.value.videoMuted
+  video.volume = Number(peerProfile.value.videoVolume || 0)
 }
 
 async function toggleMarkRead() {
@@ -1938,6 +2453,14 @@ async function messageCtxAction(action) {
     return
   }
   if (action === 'forward') {
+    if (selectionMode.value || selectedMessageIds.value.size > 0) {
+      if (!selectedMessageIds.value.has(msg.id)) {
+        selectedMessageIds.value = new Set([...selectedMessageIds.value, msg.id])
+      }
+      selectionMode.value = true
+      await forwardSelectedAsChatlog()
+      return
+    }
     onForwardMessage(msg)
     return
   }
@@ -1967,7 +2490,7 @@ function reportMessage(msg) {
     userId: targetUserId,
     username: targetUsername,
     messageId: msg.id,
-    snippet: String(msg.content || msg.attachments?.[0]?.name || '[附件]').slice(0, 120),
+    snippet: getReadableMessageText(msg).slice(0, 120),
   }
 }
 
@@ -2030,26 +2553,50 @@ function closeMobileChat() {
 // ==== 轮询 ====
 let pollTimer = null
 let lastContextMenuOpenedAt = 0
+let messagesPageTouchTimer = null
 function startPolling() {
   pollTimer = setInterval(() => {
     if (scope.value !== 'blocked') loadConversations({ silent: true })
   }, realtimeState.value === 'connected' ? 45000 : 15000)
 }
 
+async function touchMessagesPagePresence() {
+  try {
+    await fetch('/api/messages/page-touch/', {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': csrfToken.value,
+      },
+    })
+  } catch (e) {
+    console.warn('私信页活跃状态上报失败:', e)
+  }
+}
+
+function startMessagesPageTouch() {
+  touchMessagesPagePresence()
+  messagesPageTouchTimer = setInterval(() => {
+    if (!document.hidden) touchMessagesPagePresence()
+  }, 60000)
+}
+
 // ==== 生命周期 ====
 onMounted(() => {
   currentUserId.value = getUserId()
   csrfToken.value = getCsrfToken()
+  loadDraftsFromStorage()
   loadNotificationPreferences()
   loadConversations()
   initRealtimeMessages()
   startPolling()
+  startMessagesPageTouch()
   document.addEventListener('click', onGlobalClick)
 })
 
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
-  clearTimeout(typingTimer)
+  if (messagesPageTouchTimer) clearInterval(messagesPageTouchTimer)
+  clearTimeout(typingThrottleTimer)
   clearTimeout(typingHideTimer)
   if (isRecordingVoice.value) stopVoiceRecording()
   cleanupVoiceRecording()
@@ -2556,6 +3103,192 @@ watch(
   margin: 4px 0;
 }
 
+.profile-card-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.profile-card-modal {
+  position: relative;
+  width: min(440px, 100%);
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.24);
+}
+
+.profile-card-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.48);
+  color: #fff;
+  cursor: pointer;
+}
+
+.profile-cover-media {
+  position: relative;
+  height: 156px;
+  overflow: hidden;
+  background: #e5e7eb;
+}
+
+.profile-cover-media .cover-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.profile-cover-media .cover-gradient {
+  width: 100%;
+  height: 100%;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary-color, #2563eb) 72%, #0f172a 28%), #14b8a6),
+    #2563eb;
+}
+
+.cover-video-controls {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.54);
+  backdrop-filter: blur(8px);
+}
+
+.cover-ctrl-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  cursor: pointer;
+}
+
+.cover-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.cover-volume-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cover-volume-slider {
+  width: 76px;
+  display: inline-flex;
+}
+
+.cover-volume-slider input {
+  width: 100%;
+  accent-color: #fff;
+}
+
+.profile-card-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 22px 22px;
+  text-align: center;
+}
+
+.profile-card-avatar {
+  width: 78px;
+  height: 78px;
+  margin-top: -39px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 4px solid var(--bg-primary);
+  background: var(--bg-tertiary);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.18);
+}
+
+.profile-card-body h3 {
+  margin: 10px 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.profile-card-bio {
+  width: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.profile-card-stats {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.profile-stat {
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.profile-stat strong {
+  display: block;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.profile-stat span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.public-notes-link {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 14px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--primary-color);
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .disappearing-banner {
   padding: 8px 20px;
   background: rgba(245, 158, 11, 0.12);
@@ -2571,18 +3304,125 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 20px;
-  background: color-mix(in srgb, #3b82f6 9%, var(--bg-secondary));
-  border-bottom: 1px solid var(--border-color);
-  font-size: 12.5px;
+  gap: 14px;
+  padding: 10px 20px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary-color, #2563eb) 14%, var(--bg-primary)) 0%, var(--bg-primary) 72%),
+    var(--bg-primary);
+  border-bottom: 1px solid color-mix(in srgb, var(--primary-color, #2563eb) 22%, var(--border-color));
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+  font-size: 13px;
   color: var(--text-secondary);
+}
+
+.selection-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.selection-summary strong {
+  color: var(--primary-color);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.selection-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--primary-color, #2563eb) 28%, transparent);
+}
+
+.selection-icon i {
+  font-size: 12px;
 }
 
 .selection-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.selection-actions .link-btn,
+.selection-actions .toolbar-btn {
+  min-height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s;
+}
+
+.selection-actions .link-btn {
+  padding: 0 10px;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.selection-actions .link-btn:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);
+  color: var(--text-primary);
+}
+
+.selection-actions .toolbar-btn {
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 58%, var(--bg-primary));
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.selection-actions .toolbar-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 36%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 8%, var(--bg-primary));
+  transform: translateY(-1px);
+}
+
+.selection-actions .toolbar-btn.primary {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--primary-color, #2563eb) 24%, transparent);
+}
+
+.selection-actions .toolbar-btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 88%, #0f172a 12%);
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 88%, #0f172a 12%);
+}
+
+.selection-actions .toolbar-btn.danger {
+  border-color: color-mix(in srgb, var(--danger-color, #ef4444) 26%, var(--border-color));
+  color: var(--danger-color, #ef4444);
+}
+
+.selection-actions .toolbar-btn.danger:hover:not(:disabled) {
+  border-color: var(--danger-color, #ef4444);
+  background: color-mix(in srgb, var(--danger-color, #ef4444) 9%, var(--bg-primary));
+}
+
+.selection-actions .toolbar-btn:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .messages-list {
@@ -2883,7 +3723,7 @@ watch(
 
 .composer-shell {
   display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   padding: 8px;
@@ -3086,6 +3926,114 @@ watch(
   flex-shrink: 0;
 }
 
+.send-btn.compact {
+  min-width: 100px;
+}
+
+.code-input-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);
+}
+
+.code-input {
+  width: 100%;
+  min-height: 132px;
+  max-height: 260px;
+  resize: vertical;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, #0f172a 92%, #1e293b 8%);
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.code-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--primary-color) 60%, transparent);
+}
+
+.code-input-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.code-action-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+}
+
+.code-action-btn i {
+  font-size: 12px;
+}
+
+.code-action-btn.ghost {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border-color) 62%, transparent);
+  color: var(--text-secondary);
+}
+
+.code-action-btn.ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-tertiary) 84%, transparent);
+  color: var(--text-primary);
+}
+
+.code-action-btn.secondary {
+  background: color-mix(in srgb, var(--bg-primary) 72%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--border-color) 82%, transparent);
+  color: var(--text-primary);
+}
+
+.code-action-btn.secondary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 36%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 8%, var(--bg-primary));
+  transform: translateY(-1px);
+}
+
+.code-action-btn.primary {
+  min-width: 108px;
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--primary-color, #2563eb) 24%, transparent);
+}
+
+.code-action-btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 88%, #0f172a 12%);
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 88%, #0f172a 12%);
+  transform: translateY(-1px);
+}
+
+.code-action-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
 .send-text {
   font-size: 13px;
   font-weight: 600;
@@ -3113,12 +4061,41 @@ watch(
     display: flex;
   }
 
+  .selection-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 10px 12px;
+  }
+
+  .selection-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .selection-actions .toolbar-btn {
+    flex: 1 1 auto;
+    min-width: 96px;
+  }
+
+  .code-input-actions {
+    justify-content: stretch;
+  }
+
+  .code-action-btn {
+    flex: 1 1 88px;
+    padding: 0 10px;
+  }
+
+  .selection-actions .link-btn {
+    padding-left: 0;
+  }
+
   .message-input-area {
     padding: 10px 12px;
   }
 
   .composer-shell {
-    grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
     gap: 4px;
     padding: 7px;
     border-radius: 16px;
