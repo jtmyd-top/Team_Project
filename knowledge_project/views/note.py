@@ -273,13 +273,7 @@ def send_note_activity_notification(request, user, note_title, action_type):
             return  # 用户未启用笔记活动通知
 
         # 获取操作信息
-        ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
-        if ip_address:
-            ip_address = ip_address.split(',')[0].strip()
-        else:
-            ip_address = request.META.get('HTTP_X_REAL_IP')
-            if not ip_address:
-                ip_address = request.META.get('REMOTE_ADDR', '未知')
+        ip_address = get_client_ip(request)
 
         user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
         # CustomLoginView + _send_email_async_helper 住在 auth 模块
@@ -555,105 +549,71 @@ def note_detail_api(request, note_id):
                 'title': note.title,
                 'is_public': note.is_public,
                 'is_secret': note.is_secret,
-                'is_trashed': note.is_trashed,  # 【新增】返回回收站状态
-                'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-                'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
+                'is_trashed': note.is_trashed,
+                'content': note.content if include_content else '',
                 'author': {'id': note.author.id, 'username': note.author.username},
-                'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
+                'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),
+                'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),
                 'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
-                'toc': note.toc or [],  # 添加目录数据
+                'toc': note.toc or [],
+                'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
+                'folder_id': note.folder.id if note.folder else None,
+                'is_favorited': note.is_favorited,
             }
-            # 【新增】條件性包含 content
-            if include_content:
-                data['content'] = note.content or ""
-            else:
-                data['content_locked'] = True
-                data['lock_reason'] = '此笔记位于回收站中，内容已锁定。'
             return JsonResponse(data)
 
-        page = request.GET.get('page', 1)
-        paginated_content, total_pages = get_paginated_html(note.content, page) if include_content else ("", 1)
+        page_number = request.GET.get('page', 1)
+        paginated_content, total_pages = get_paginated_html(note.content or "", page_number)
+
         data = {
             'id': note.id,
             'title': note.title,
             'is_public': note.is_public,
             'is_secret': note.is_secret,
-            'is_trashed': note.is_trashed,  # 【新增】返回回收站状态
-            'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-            # 【已移除】不再返回 project 信息
-            #'project': {'id': note.project.id, 'title': note.project.title} if note.project else None,
-            'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
+            'is_trashed': note.is_trashed,
+            'content': paginated_content if include_content else '',
             'author': {'id': note.author.id, 'username': note.author.username},
-            'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
-            'last_modified_by': {'username': note.last_modified_by.username} if note.last_modified_by else None,
+            'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),
             'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
+            'toc': note.toc or [],
             'pagination': {
-                'current_page': int(page),
+                'current_page': int(page_number),
                 'total_pages': total_pages,
             }
         }
-        # 【新增】條件性包含 content 和分页信息
-        if include_content:
-            data['content'] = paginated_content
-        else:
-            data['content_locked'] = True
-            data['lock_reason'] = '此笔记位于回收站中，内容已锁定。'
         return JsonResponse(data)
 
     if request.method == 'PUT':
-        # 【新增】安全檢查：回收站保護
-        allowed, error_msg = check_note_edit_permission(note)
-        if not allowed:
-            return JsonResponse({'error': error_msg}, status=403)
-
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': '无效的JSON格式'}, status=400)
-
-        # 【新增】安全檢查：防止保密柜筆記發布為公開
-        if data.get('is_public') and note.is_secret:
-            allowed, error_msg = check_note_secret_operation_permission(note, 'publish')
-            if not allowed:
-                return JsonResponse({'error': error_msg}, status=403)
 
         allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(request, note, data)
         if not allowed:
             return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
 
         note.title = data.get('title', note.title)
-        note.is_public = data.get('is_public', note.is_public)
-        if 'content' in data:
-            note.content = data['content']
+        note.content = data.get('content', note.content)
         note.last_modified_by = request.user
-        if note.is_public and not note.public_id:
-            note.public_id = uuid.uuid4()
         note.save()
         if clear_vault_guard:
             _clear_vault_pending_encryption_guard(request, note.id)
-        if note.content and len(BeautifulSoup(note.content, 'html.parser').get_text()) > 20:
 
-            auto_generate_tags_for_note(Note, note, created=True)
-        cache.delete(get_sidebar_cache_key(request.user.id))
-
-        # 发送笔记修改通知
-        send_note_activity_notification(request, request.user, note.title, 'updated')
-        # --- 在PUT响应中也进行时区转换 ---
         put_local_updated_at = timezone.localtime(note.updated_at)
         put_local_created_at = timezone.localtime(note.created_at)
-
-        paginated_content, total_pages = get_paginated_html(note.content, 1)
+        paginated_content, total_pages = get_paginated_html(note.content or "", 1)
         updated_data = {
             'id': note.id,
             'title': note.title,
-            'content': paginated_content,
             'is_public': note.is_public,
             'is_secret': note.is_secret,
-            'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
-            'updated_at': put_local_updated_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
-            'last_modified_by': {'username': note.last_modified_by.username},
+            'is_trashed': note.is_trashed,
+            'content': paginated_content,
+            'updated_at': put_local_updated_at.strftime('%Y-%m-%d %H:%M'),
             'author': {'id': note.author.id, 'username': note.author.username},
-            'created_at': put_local_created_at.strftime('%Y-%m-%d %H:%M'),  # 使用转换后的时间
+            'created_at': put_local_created_at.strftime('%Y-%m-%d %H:%M'),
             'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
             'pagination': {
                 'current_page': 1,

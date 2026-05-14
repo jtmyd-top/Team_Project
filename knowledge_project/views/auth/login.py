@@ -1,5 +1,6 @@
 """登录视图：CustomLoginView(表单) + login_api(JSON)。"""
 from ._shared import *
+from ...utils.request_utils import get_client_ip
 
 
 class CustomLoginView(View):
@@ -41,7 +42,7 @@ class CustomLoginView(View):
                 # 如果是邮箱验证方式，立即发送验证码
                 if profile.two_fa_method == 'email':
                     # 检查登录2FA邮件的发送次数限制
-                    ip_address = request.META.get('REMOTE_ADDR')
+                    ip_address = get_client_ip(request)
                     user_identifier = f"user_{user.id}"
 
                     # 每小时发送次数限制（登录2FA每小时最多3次）
@@ -153,11 +154,7 @@ class CustomLoginView(View):
                 return  # 用户未启用登录通知
 
             # 获取登录信息
-            ip_address = request.META.get('HTTP_X_FORWARDED_FOR')
-            if ip_address:
-                ip_address = ip_address.split(',')[0].strip()
-            else:
-                ip_address = request.META.get('HTTP_X_REAL_IP') or request.META.get('REMOTE_ADDR', '未知')
+            ip_address = get_client_ip(request)
 
             user_agent = request.META.get('HTTP_USER_AGENT', '未知设备')
             device_fingerprint = self._generate_device_fingerprint(user_agent, ip_address)
@@ -537,7 +534,7 @@ def login_api(request):
                 }, status=403)
 
         # === 检查 IP 是否被封禁 ===
-        ip_address = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+        ip_address = get_client_ip(request)
         if ',' in ip_address:
             ip_address = ip_address.split(',')[0].strip()
         ban_key = f'banned_ip:{ip_address}'
@@ -559,7 +556,7 @@ def login_api(request):
                     login(request, user)
 
                     # 获取当前IP并续期
-                    ip_address = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+                    ip_address = get_client_ip(request)
                     if ',' in ip_address:
                         ip_address = ip_address.split(',')[0].strip()
                     device.renew(ip_address)
@@ -595,7 +592,7 @@ def login_api(request):
             # 如果是邮箱验证方式，立即发送验证码
             if profile.two_fa_method == 'email':
                 # 检查登录2FA邮件的发送次数限制
-                ip_address = request.META.get('REMOTE_ADDR')
+                ip_address = get_client_ip(request)
                 user_identifier = f"user_{user.id}"
 
                 # 每小时发送次数限制（登录2FA每小时最多3次）

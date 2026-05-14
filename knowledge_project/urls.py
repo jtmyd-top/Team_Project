@@ -5,6 +5,8 @@ from . import folder_views
 
 urlpatterns = [
     path('', views.home_view, name='home'),
+    path('healthz', views.healthz, name='healthz'),
+    path('readyz', views.readyz, name='readyz'),
     #path('public-notes/', views.public_notes_list_view, name='public_notes_list'),
     path('signup/', views.SignUpView.as_view(), name='signup'),
     path('knowledge/', views.knowledge_list, name='knowledge_list'),
@@ -85,6 +87,7 @@ urlpatterns = [
     path('api/messages/search/', views.search_messages_api, name='search_messages_api'),
     path('api/messages/conversation/export/', views.export_conversation_api, name='export_conversation_api'),
     path('api/users/<int:user_id>/profile/', views.get_user_public_profile_api, name='get_user_public_profile_api'),
+    path('user/<int:user_id>/', views.user_public_profile_view, name='user_public_profile'),
     path('api/users/search/', views.search_users_api, name='search_users_api'),
     path('api/users/block/', views.block_user_api, name='block_user_api'),
     path('api/users/unblock/', views.unblock_user_api, name='unblock_user_api'),

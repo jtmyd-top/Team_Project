@@ -19,6 +19,7 @@ from django.utils.safestring import mark_safe
 from django.core.validators import MaxLengthValidator
 from io import BytesIO
 from django.core.serializers.json import DjangoJSONEncoder
+from knowledge_project.utils.request_utils import get_client_ip
 
 logger = logging.getLogger(__name__)
 # ---------------- 标签 ----------------
@@ -813,9 +814,7 @@ class TrustedDevice(models.Model):
 
         token = secrets.token_urlsafe(64)
         user_agent = request.META.get('HTTP_USER_AGENT', 'Unknown')[:500]
-        ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1'))
-        if ',' in ip:
-            ip = ip.split(',')[0].strip()
+        ip = get_client_ip(request)
 
         return cls.objects.create(
             user=user,

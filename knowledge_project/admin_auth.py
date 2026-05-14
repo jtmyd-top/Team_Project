@@ -23,6 +23,7 @@ from django.core.cache import cache
 from django.views.decorators.csrf import csrf_protect
 from django.utils.decorators import method_decorator
 from django.conf import settings
+from knowledge_project.utils.request_utils import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -453,10 +454,7 @@ class SecureAdminSite(AdminSite):
 
     def _get_client_ip(self, request):
         """获取客户端 IP"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0].strip()
-        return request.META.get('REMOTE_ADDR', '127.0.0.1')
+        return get_client_ip(request)
 
 
 # 创建安全 Admin 站点实例

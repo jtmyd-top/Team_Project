@@ -1,52 +1,60 @@
 # settings.py
 
-import os
 import importlib.util
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse_lazy
 from dotenv import load_dotenv
 
 
-# --- 1. 修正 BASE_DIR 和环境变量加载 ---
-# BASE_DIR 应该指向项目的根目录，即 manage.py 所在的目录
-# 这将确保所有其他路径（如 static, media）都能正确解析
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# 加载位于项目根目录下的 .env 文件
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 
-# --- 2. 核心设置 ---
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-for-dev') # 建议从环境变量加载
-DEBUG = os.getenv('DEBUG', 'True').lower() in ['true', '1', 't']
-ALLOWED_HOSTS = ["*"] # 在生产环境中应配置为具体的域名
+def env_bool(name, default=False):
+    return os.getenv(name, str(default)).lower() in {'true', '1', 't', 'yes', 'on'}
 
-# HTTPS dev 环境下（runserver_plus + 自签证书），Django 4.x CSRF 校验要求 Origin 在白名单
-# 从环境变量 CSRF_TRUSTED_ORIGINS 读取，逗号分隔；默认覆盖常见 LAN/localhost HTTPS 地址
-# 注意：HTTPS 协议默认端口是 443，非默认端口（如 80/8000）Origin 里必须显式带端口
-_csrf_env = os.getenv('CSRF_TRUSTED_ORIGINS', '')
-CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_env.split(',') if o.strip()] or [
-    'https://localhost',
-    'https://localhost:443',
-    'https://127.0.0.1',
-    'https://127.0.0.1:443',
-    'https://192.168.1.6',
-    'https://192.168.1.6:443',
-]
 
-# Vite 开发模式开关
-# 设置为 True 时，模板会从 Vite 开发服务器 (localhost:5173) 加载资源
-# 设置为 False 时，模板会从 static/dist/ 加载构建后的资源
-VITE_DEV_MODE = os.getenv('VITE_DEV_MODE', 'False').lower() in ['true', '1', 't']
+def env_list(name, default=''):
+    raw_value = os.getenv(name, default)
+    return [item.strip() for item in raw_value.split(',') if item.strip()]
+
+
+DJANGO_ENV = os.getenv('DJANGO_ENV', 'development').strip().lower()
+IS_PRODUCTION = DJANGO_ENV in {'prod', 'production'}
+
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-for-dev')
+DEBUG = env_bool('DEBUG', not IS_PRODUCTION)
+
+_allowed_hosts = env_list('ALLOWED_HOSTS')
+if _allowed_hosts:
+    ALLOWED_HOSTS = _allowed_hosts
+elif DEBUG:
+    ALLOWED_HOSTS = ['*']
+else:
+    raise ImproperlyConfigured('ALLOWED_HOSTS must be set in production.')
+
+if IS_PRODUCTION and SECRET_KEY == 'django-insecure-fallback-key-for-dev':
+    raise ImproperlyConfigured('SECRET_KEY must be set in production.')
+
+CSRF_TRUSTED_ORIGINS = env_list(
+    'CSRF_TRUSTED_ORIGINS',
+    'https://localhost,https://localhost:443,https://127.0.0.1,https://127.0.0.1:443,https://192.168.1.6,https://192.168.1.6:443'
+)
+
+TRUSTED_PROXY_CIDRS = env_list('TRUSTED_PROXY_CIDRS', '127.0.0.1/32,::1/128')
+USE_X_FORWARDED_HOST = env_bool('USE_X_FORWARDED_HOST', IS_PRODUCTION)
+USE_X_FORWARDED_PORT = env_bool('USE_X_FORWARDED_PORT', IS_PRODUCTION)
+if env_bool('TRUST_X_FORWARDED_PROTO', IS_PRODUCTION):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+VITE_DEV_MODE = env_bool('VITE_DEV_MODE', False)
 CHANNELS_AVAILABLE = importlib.util.find_spec('channels') is not None
 CHANNELS_REDIS_AVAILABLE = importlib.util.find_spec('channels_redis') is not None
 DAPHNE_AVAILABLE = importlib.util.find_spec('daphne') is not None
 
-
-# --- 3. INSTALLED_APPS (只保留 django-ckeditor-5) ---
-# 注意：'daphne' 必须放在 INSTALLED_APPS 最前面，它会替换 runserver 命令为 ASGI 版本，
-# 使开发服务器同时支持 HTTP 和 WebSocket。如果不在最前，Django 会用默认的 WSGI runserver，
-# 此时 /ws/messages/ 连不上，typing/实时消息推送不工作。
 INSTALLED_APPS = []
 if DAPHNE_AVAILABLE and CHANNELS_AVAILABLE:
     INSTALLED_APPS.append('daphne')
@@ -59,36 +67,35 @@ INSTALLED_APPS += [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'django_ckeditor_5',  # 只保留这一个
-    'captcha',  # django-simple-captcha
+    'django_ckeditor_5',
+    'captcha',
 ]
 
 if CHANNELS_AVAILABLE:
     INSTALLED_APPS.append('channels')
 
-# django-extensions 提供 runserver_plus（HTTPS dev server），仅在已安装时启用
 try:
     import django_extensions  # noqa: F401
     INSTALLED_APPS.append('django_extensions')
 except ImportError:
     pass
 
-
-# --- 4. 中间件和 URL 配置 ---
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'Team_Project.middleware.IPBanMiddleware',  # IP 封禁中间件（在认证之前拦截）
+    'Team_Project.middleware.IPBanMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'Team_Project.middleware.SessionTimeoutMiddleware',  # 服务端会话超时兜底
+    'Team_Project.middleware.SessionTimeoutMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'Team_Project.middleware.ContentSecurityPolicyMiddleware',  # CSP 响应头中间件
-    'Team_Project.middleware.VaultLockMiddleware',  # 【新增】保密柜锁定中间件
+    'Team_Project.middleware.ContentSecurityPolicyMiddleware',
+    'Team_Project.middleware.VaultLockMiddleware',
 ]
+
 ROOT_URLCONF = 'Team_Project.urls'
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -103,143 +110,133 @@ TEMPLATES = [
         },
     },
 ]
+
 WSGI_APPLICATION = 'Team_Project.wsgi.application'
 ASGI_APPLICATION = 'Team_Project.asgi.application'
 
-
-# --- 5. 数据库 (只保留一份) ---
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'knowledge_project',
+        'NAME': os.getenv('mysql_name', 'knowledge_project'),
         'USER': os.getenv('mysql_user'),
         'PASSWORD': os.getenv('mysql_passwd'),
         'HOST': os.getenv('mysql_ip'),
         'PORT': os.getenv('mysql_port'),
-        'OPTIONS': {'init_command': "SET sql_mode='STRICT_TRANS_TABLES'"},
         'OPTIONS': {
-                    # This line is critical!
-                    'charset': 'utf8mb4',
-                },
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4',
+        },
     }
 }
 
-
-# --- 6. 密码验证和国际化 (只保留一份) ---
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 9}},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+
 LANGUAGE_CODE = 'zh-hans'
 TIME_ZONE = 'Asia/Shanghai'
 USE_I18N = True
 USE_TZ = True
 
-
-# --- 7. 静态文件和媒体文件 (关键修正) ---
 STATIC_URL = '/static/'
-# 【修正】STATICFILES_DIRS 应该指向项目根目录下的 'static' 文件夹
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-# 【新增】运行 collectstatic 后，所有静态文件会被收集到这里
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-MEDIA_URL = '/uploads/'
-MEDIA_ROOT = os.path.join(BASE_DIR,'knowledge_project','uploads')
+DEFAULT_FILE_STORAGE_BACKEND = os.getenv('DEFAULT_FILE_STORAGE_BACKEND', '').strip()
+MEDIA_URL = os.getenv('MEDIA_URL', '/uploads/')
+MEDIA_ROOT = os.getenv('MEDIA_ROOT', os.path.join(BASE_DIR, 'knowledge_project', 'uploads'))
 
+if DEFAULT_FILE_STORAGE_BACKEND:
+    STORAGES = {
+        'default': {
+            'BACKEND': DEFAULT_FILE_STORAGE_BACKEND,
+        },
+        'staticfiles': {
+            'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+        },
+    }
 
-# --- 8. 认证、缓存、邮件 (清理重复项) ---
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'home'
-
-# 密码重置配置 - 设置为12小时过期
-PASSWORD_RESET_TIMEOUT = 43200  # 12小时，以秒为单位
-
+PASSWORD_RESET_TIMEOUT = 43200
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+REDIS_URL = os.getenv('REDIS_URL') or os.getenv('redis1')
+if not REDIS_URL:
+    REDIS_URL = 'redis://127.0.0.1:6379/1' if DEBUG else ''
+
+if not REDIS_URL and IS_PRODUCTION:
+    raise ImproperlyConfigured('REDIS_URL or redis1 must be set in production.')
+
 CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        # 格式: redis://:密码@主机:端口/数据库编号
-        # 如果Redis和Django运行在同一台服务器上，主机就是127.0.0.1
-        "LOCATION": os.getenv('redis1'),
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "CONNECTION_POOL_KWARGS": {
-                "max_connections": 100,
-                # 空闲连接保活：内核层 TCP keepalive + 应用层每 30s 主动 PING
-                "socket_keepalive": True,
-                "health_check_interval": 30,
-                # 快速失败而不是长时间挂起
-                "socket_connect_timeout": 5,
-                "socket_timeout": 5,
-                # 偶发超时自动重试一次
-                "retry_on_timeout": True,
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 100,
+                'socket_keepalive': True,
+                'health_check_interval': 30,
+                'socket_connect_timeout': 5,
+                'socket_timeout': 5,
+                'retry_on_timeout': True,
             },
-            # 增加一个密码选项，更明确
-            "PASSWORD": os.getenv('mysql_passwd'),
-            # 任何 cache 异常都不往上抛，返回 None；配合下面的日志开关避免静默丢数据
-            "IGNORE_EXCEPTIONS": True,
-        }
+            'IGNORE_EXCEPTIONS': env_bool('CACHE_IGNORE_EXCEPTIONS', not IS_PRODUCTION),
+        },
     }
 }
-# 被 IGNORE_EXCEPTIONS 吞掉的异常仍写日志，便于排障
 DJANGO_REDIS_LOG_IGNORED_EXCEPTIONS = True
 DJANGO_REDIS_LOGGER = 'django_redis'
-# --- 【核心新增配置】会话超时设置 ---
 
-# 1. 设置 Session 的 cookie 有效期为3小时（以秒为单位）
-#    3 小时 * 60 分钟/小时 * 60 秒/分钟 = 10800 秒
+SESSION_ENGINE = os.getenv('SESSION_ENGINE', 'django.contrib.sessions.backends.cache')
+SESSION_CACHE_ALIAS = 'default'
 SESSION_COOKIE_AGE = 10800
-
-# 2. 每次请求都保存并刷新 Session 的有效期，保留“有活动就续期”的滚动过期行为。
-#    SessionTimeoutMiddleware 额外维护 last_activity_at，供在线用户统计使用。
 SESSION_IDLE_TIMEOUT = int(os.getenv('SESSION_IDLE_TIMEOUT', SESSION_COOKIE_AGE))
-
-# Absolute authenticated-session lifetime from login time. 0 disables the cap.
 SESSION_ABSOLUTE_TIMEOUT = int(os.getenv('SESSION_ABSOLUTE_TIMEOUT', SESSION_COOKIE_AGE))
 SESSION_SAVE_EVERY_REQUEST = True
-#mail设定
+SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', IS_PRODUCTION)
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
+CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', IS_PRODUCTION)
+CSRF_COOKIE_HTTPONLY = env_bool('CSRF_COOKIE_HTTPONLY', False)
+CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Lax')
+
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', IS_PRODUCTION)
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0' if not IS_PRODUCTION else '31536000'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', IS_PRODUCTION)
+SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
+SECURE_REFERRER_POLICY = os.getenv('SECURE_REFERRER_POLICY', 'same-origin')
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-
-# 智能邮件后端 (可选，当需要使用智能邮件发送器时取消注释)
-# EMAIL_BACKEND = 'knowledge_project.utils.smart_email_sender.SmartEmailBackend'
-
-# 代理邮件后端 (推荐，自动回退到代理)
-# EMAIL_BACKEND = 'knowledge_project.utils.proxy_email_sender.ProxyEmailBackend'
-
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ['true', '1', 't']
+EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', True)
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-# --- 邮件代理配置 ---
-# 当直连失败时，自动使用代理重试
-SMTP_PROXY_HOST = os.getenv('SMTP_PROXY_HOST')          # 代理服务器地址，如 '127.0.0.1'
-SMTP_PROXY_PORT = int(os.getenv('SMTP_PROXY_PORT', '1080'))  # 代理端口，如 1080 (SOCKS5) 或 7890 (HTTP)
-SMTP_PROXY_TYPE = os.getenv('SMTP_PROXY_TYPE', 'socks5')    # 代理类型: 'socks5', 'socks4', 或 'http'
-SMTP_PROXY_USERNAME = os.getenv('SMTP_PROXY_USERNAME')  # 代理用户名（可选）
-SMTP_PROXY_PASSWORD = os.getenv('SMTP_PROXY_PASSWORD')  # 代理密码（可选）
-EMAIL_FALLBACK_TO_PROXY = os.getenv('EMAIL_FALLBACK_TO_PROXY', 'True').lower() in ['true', '1', 't']
-EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '30'))  # 连接超时时间（秒）
+SMTP_PROXY_HOST = os.getenv('SMTP_PROXY_HOST')
+SMTP_PROXY_PORT = int(os.getenv('SMTP_PROXY_PORT', '1080'))
+SMTP_PROXY_TYPE = os.getenv('SMTP_PROXY_TYPE', 'socks5')
+SMTP_PROXY_USERNAME = os.getenv('SMTP_PROXY_USERNAME')
+SMTP_PROXY_PASSWORD = os.getenv('SMTP_PROXY_PASSWORD')
+EMAIL_FALLBACK_TO_PROXY = env_bool('EMAIL_FALLBACK_TO_PROXY', True)
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '30'))
 
-# --- 实时私信 / WebSocket ---
-REALTIME_MESSAGES_ENABLED = CHANNELS_AVAILABLE and (
-    os.getenv('REALTIME_MESSAGES_ENABLED', 'True').lower() in ['true', '1', 't']
-)
+REALTIME_MESSAGES_ENABLED = CHANNELS_AVAILABLE and env_bool('REALTIME_MESSAGES_ENABLED', True)
 REALTIME_MESSAGES_PATH = os.getenv('REALTIME_MESSAGES_PATH', '/ws/messages/')
 WS_CLIENT_INACTIVITY_TIMEOUT = int(os.getenv('WS_CLIENT_INACTIVITY_TIMEOUT', '300'))
+REQUIRE_SHARED_CHANNEL_LAYER = env_bool('REQUIRE_SHARED_CHANNEL_LAYER', IS_PRODUCTION)
 
 if REALTIME_MESSAGES_ENABLED:
-    channel_redis_url = (
-        os.getenv('CHANNEL_REDIS_URL')
-        or os.getenv('redis1')
-        or 'redis://127.0.0.1:6379/2'
-    )
+    channel_redis_url = os.getenv('CHANNEL_REDIS_URL') or REDIS_URL or 'redis://127.0.0.1:6379/2'
     if CHANNELS_REDIS_AVAILABLE:
         CHANNEL_LAYERS = {
             'default': {
@@ -251,6 +248,10 @@ if REALTIME_MESSAGES_ENABLED:
                 },
             },
         }
+    elif REQUIRE_SHARED_CHANNEL_LAYER:
+        raise ImproperlyConfigured(
+            'channels_redis is required when REALTIME_MESSAGES_ENABLED is true in production.'
+        )
     else:
         CHANNEL_LAYERS = {
             'default': {
@@ -258,67 +259,52 @@ if REALTIME_MESSAGES_ENABLED:
             },
         }
 
-# --- Cloudflare Turnstile Configuration ---
 CLOUDFLARE_TURNSTILE_SITE_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SITE_KEY')
 CLOUDFLARE_TURNSTILE_SECRET_KEY = os.getenv('CLOUDFLARE_TURNSTILE_SECRET_KEY')
-# 开发环境可设置 TURNSTILE_ENABLED=false 跳过验证（用于网络无法访问 Cloudflare 的情况）
-TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', 'true').lower() in ['true', '1', 't', 'yes']
+TURNSTILE_ENABLED = env_bool('TURNSTILE_ENABLED', True)
 
-# --- django-simple-captcha Configuration ---
 CAPTCHA_IMAGE_SIZE = (120, 50)
 CAPTCHA_FONT_SIZE = 32
 CAPTCHA_LENGTH = 4
-CAPTCHA_TIMEOUT = 5  # 验证码有效期（分钟）
+CAPTCHA_TIMEOUT = 5
 CAPTCHA_NOISE_FUNCTIONS = ('captcha.helpers.noise_dots',)
 CAPTCHA_CHALLENGE_FUNCT = 'captcha.helpers.random_char_challenge'
-# 验证码方案选择: 'turnstile', 'simple_captcha', 'auto' (自动降级)
 CAPTCHA_BACKEND = os.getenv('CAPTCHA_BACKEND', 'auto')
 
-# --- 指定使用我们自己下载的、包含高级功能的 JS 文件 ---
 CKEDITOR_5_CUSTOM_JS_URL = 'ckeditor5/ckeditor.js'
+CKEDITOR_5_UPLOAD_URL = reverse_lazy('ckeditor_image_upload_view')
+CKEDITOR_5_CSRF_COOKIE_NAME = 'csrftoken'
 
-# --- 上传相关配置 ---
-# 【关键】确保这个 URL 指向我们为 CKEditor 5 专门创建的视图
-CKEDITOR_5_UPLOAD_URL = reverse_lazy("ckeditor_image_upload_view")
-CKEDITOR_5_CSRF_COOKIE_NAME = "csrftoken"
-
-# --- 自定义颜色面板 (保持不变) ---
 customColorPalette = [
-    {'color': 'hsl(4, 90%, 58%)', 'label': 'Red'}, {'color': 'hsl(340, 82%, 52%)', 'label': 'Pink'},
-    {'color': 'hsl(291, 64%, 42%)', 'label': 'Purple'}, {'color': 'hsl(262, 52%, 47%)', 'label': 'Deep Purple'},
-    {'color': 'hsl(231, 48%, 48%)', 'label': 'Indigo'}, {'color': 'hsl(207, 90%, 54%)', 'label': 'Blue'},
-    {'color': 'hsl(120, 73%, 45%)', 'label': 'Green'}, {'color': 'hsl(50, 95%, 55%)', 'label': 'Yellow'},
-    {'color': 'hsl(25, 95%, 53%)', 'label': 'Orange'}, {'color': 'hsl(0, 0%, 20%)', 'label': 'Dark Gray'},
+    {'color': 'hsl(4, 90%, 58%)', 'label': 'Red'},
+    {'color': 'hsl(340, 82%, 52%)', 'label': 'Pink'},
+    {'color': 'hsl(291, 64%, 42%)', 'label': 'Purple'},
+    {'color': 'hsl(262, 52%, 47%)', 'label': 'Deep Purple'},
+    {'color': 'hsl(231, 48%, 48%)', 'label': 'Indigo'},
+    {'color': 'hsl(207, 90%, 54%)', 'label': 'Blue'},
+    {'color': 'hsl(120, 73%, 45%)', 'label': 'Green'},
+    {'color': 'hsl(50, 95%, 55%)', 'label': 'Yellow'},
+    {'color': 'hsl(25, 95%, 53%)', 'label': 'Orange'},
+    {'color': 'hsl(0, 0%, 20%)', 'label': 'Dark Gray'},
     {'color': 'hsl(0, 0%, 60%)', 'label': 'Light Gray'},
 ]
 
-# --- 【核心修改】替换现有的 CKEDITOR_5_CONFIGS ---
 CKEDITOR_5_CONFIGS = {
     'default': {
         'toolbar': ['heading', '|', 'bold', 'italic', 'link'],
     },
     'full': {
         'language': 'zh-cn',
-
-        # 【关键】1. 强制加载 SimpleUploadAdapter 插件
-        # 这个插件是实现自定义上传的核心
         'extraPlugins': ['SimpleUploadAdapter'],
-
-        # 【关键】2. 为 SimpleUploadAdapter 提供配置
-        # 明确告诉编辑器上传时应该将文件 POST 到哪个 URL
         'simpleUpload': {
             'uploadUrl': CKEDITOR_5_UPLOAD_URL,
-            # 'withCredentials': True, # 如果遇到跨域cookie问题可以尝试开启
         },
-
-        # 3. 工具栏和原有其他配置保持不变
         'toolbar': [
             'sourceEditing', '|', 'findAndReplace', 'selectAll', '|',
             'heading', '|', 'bold', 'italic', 'underline', 'strikethrough', 'removeFormat', '|',
             'fontSize', 'fontFamily', 'fontColor', 'fontBackgroundColor', 'highlight', '|',
             'alignment', '|', 'outdent', 'indent', '|',
             'bulletedList', 'numberedList', 'todoList', 'blockQuote', '|',
-            # 确保 'imageUpload' 按钮存在
             'link', 'imageUpload', 'insertTable', 'mediaEmbed', 'horizontalLine', 'specialCharacters', 'pageBreak',
         ],
         'image': {

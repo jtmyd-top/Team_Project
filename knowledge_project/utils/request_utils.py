@@ -1,57 +1,90 @@
+import ipaddress
+import logging
+
+from django.conf import settings
+
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_ip(value):
+    if not value:
+        return None
+    try:
+        return ipaddress.ip_address(str(value).strip())
+    except ValueError:
+        return None
+
+
+def _parse_forwarded_chain(header_value):
+    if not header_value:
+        return []
+
+    chain = []
+    for part in str(header_value).split(','):
+        parsed = _parse_ip(part)
+        if parsed is not None:
+            chain.append(str(parsed))
+    return chain
+
+
+def _trusted_proxy_networks():
+    raw_values = getattr(settings, 'TRUSTED_PROXY_CIDRS', [])
+    networks = []
+
+    for raw_value in raw_values:
+        try:
+            networks.append(ipaddress.ip_network(raw_value, strict=False))
+        except ValueError:
+            logger.warning("Ignoring invalid TRUSTED_PROXY_CIDRS entry: %s", raw_value)
+
+    return networks
+
+
+def _is_trusted_proxy(ip_value, trusted_networks):
+    parsed_ip = _parse_ip(ip_value)
+    if parsed_ip is None:
+        return False
+    return any(parsed_ip in network for network in trusted_networks)
+
+
 def get_client_ip(request):
     """
-    获取客户端真实IP地址
-
-    Args:
-        request: Django请求对象
-
-    Returns:
-        str: 客户端IP地址
+    Return the client IP while only trusting proxy headers from known proxies.
     """
-    # 优先检查代理头部
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        # X-Forwarded-For可能包含多个IP，取第一个（客户端真实IP）
-        ip = x_forwarded_for.split(',')[0].strip()
-        return ip
-
-    # 检查其他代理头部
-    x_real_ip = request.META.get('HTTP_X_REAL_IP')
-    if x_real_ip:
-        return x_real_ip
-
-    # 最后使用REMOTE_ADDR（直连情况）
     remote_addr = request.META.get('REMOTE_ADDR')
-    if remote_addr:
+    if not remote_addr:
+        return '0.0.0.0'
+
+    trusted_networks = _trusted_proxy_networks()
+    if not _is_trusted_proxy(remote_addr, trusted_networks):
         return remote_addr
 
-    # 如果都获取不到，返回默认值
-    return '0.0.0.0'
+    forwarded_chain = _parse_forwarded_chain(request.META.get('HTTP_X_FORWARDED_FOR'))
+    if forwarded_chain:
+        for candidate in reversed(forwarded_chain + [remote_addr]):
+            if not _is_trusted_proxy(candidate, trusted_networks):
+                return candidate
+        return forwarded_chain[0]
+
+    x_real_ip = _parse_ip(request.META.get('HTTP_X_REAL_IP'))
+    if x_real_ip is not None:
+        return str(x_real_ip)
+
+    return remote_addr
 
 
 def check_rate_limit_atomic(key, limit, timeout):
     """
-    原子操作的限流检查
-    使用Redis Lua脚本确保真正的原子性
-
-    Args:
-        key: 缓存键
-        limit: 限制次数
-        timeout: 过期时间（秒）
-
-    Returns:
-        tuple: (is_allowed: bool, current_attempts: int)
+    Atomic rate-limit check with a Redis implementation when available.
     """
     try:
         from knowledge_project.utils.redis_rate_limiter import check_redis_rate_limit
         return check_redis_rate_limit(key, limit, timeout)
     except ImportError:
-        # 如果无法导入Redis限流器，回退到基本方法
         from django.core.cache import cache
-        import logging
-        logger = logging.getLogger(__name__)
 
-        logger.warning("Redis限流器不可用，使用回退方法")
+        logger.warning("Redis rate limiter unavailable, falling back to cache ops")
 
         try:
             current_count = cache.get(key, 0)
@@ -62,6 +95,6 @@ def check_rate_limit_atomic(key, limit, timeout):
             if new_count == 1:
                 cache.expire(key, timeout)
             return new_count <= limit, new_count
-        except Exception as e:
-            logger.error(f"回退限流方法失败: {e}")
+        except Exception as exc:
+            logger.error("Fallback rate limiter failed: %s", exc)
             return True, 0

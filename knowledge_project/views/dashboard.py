@@ -10,8 +10,10 @@ import re as _re
 import time
 
 import psutil
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
+from django.db import connections
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -20,6 +22,80 @@ from django.views.decorators.http import require_http_methods
 from ..models import Asset, Folder, Note
 
 logger = logging.getLogger(__name__)
+
+
+def _cache_health_details():
+    try:
+        cache.set('_health_check', '1', 5)
+        if cache.get('_health_check') != '1':
+            return {'ok': False, 'detail': 'cache read-back failed'}
+
+        try:
+            client = cache.client.get_client()
+            info = client.info()
+            return {
+                'ok': True,
+                'detail': {
+                    'used_memory_human': info.get('used_memory_human', 'N/A'),
+                    'connected_clients': info.get('connected_clients', 0),
+                    'uptime_in_seconds': info.get('uptime_in_seconds', 0),
+                }
+            }
+        except Exception:
+            return {'ok': True, 'detail': 'ping ok'}
+    except Exception as exc:
+        return {'ok': False, 'detail': str(exc)[:200]}
+
+
+def _database_health_details():
+    try:
+        connection = connections['default']
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+        return {'ok': True, 'detail': 'ok'}
+    except Exception as exc:
+        return {'ok': False, 'detail': str(exc)[:200]}
+
+
+def healthz(request):
+    return JsonResponse({
+        'status': 'ok',
+        'service': 'team_project',
+        'time': timezone.now().isoformat(),
+    })
+
+
+@require_http_methods(["GET"])
+def readyz(request):
+    cache_status = _cache_health_details()
+    db_status = _database_health_details()
+
+    if settings.REALTIME_MESSAGES_ENABLED:
+        channel_layer_backend = (
+            getattr(settings, 'CHANNEL_LAYERS', {})
+            .get('default', {})
+            .get('BACKEND')
+        )
+        websocket_ready = bool(channel_layer_backend)
+        websocket_detail = channel_layer_backend or 'disabled'
+    else:
+        websocket_ready = True
+        websocket_detail = 'realtime disabled'
+
+    payload = {
+        'status': 'ok' if cache_status['ok'] and db_status['ok'] and websocket_ready else 'error',
+        'checks': {
+            'database': db_status,
+            'cache': cache_status,
+            'websocket': {
+                'ok': websocket_ready,
+                'detail': websocket_detail,
+            },
+        },
+        'time': timezone.now().isoformat(),
+    }
+    return JsonResponse(payload, status=200 if payload['status'] == 'ok' else 503)
 
 
 @login_required
@@ -376,35 +452,21 @@ def dashboard_stats_api(request):
     if section in ('service_health', 'all'):
         services = {}
         # Redis
-        try:
-            from django.core.cache import cache as django_cache
-            django_cache.set('_health_check', '1', 5)
-            val = django_cache.get('_health_check')
-            if val == '1':
-                try:
-                    client = django_cache.client.get_client()
-                    info = client.info()
-                    services['redis'] = {
-                        'status': 'ok',
-                        'used_memory_human': info.get('used_memory_human', 'N/A'),
-                        'connected_clients': info.get('connected_clients', 0),
-                        'uptime_in_seconds': info.get('uptime_in_seconds', 0),
-                    }
-                except Exception:
-                    services['redis'] = {'status': 'ok', 'detail': 'ping ok'}
+        cache_health = _cache_health_details()
+        if cache_health['ok']:
+            if isinstance(cache_health['detail'], dict):
+                services['redis'] = {'status': 'ok', **cache_health['detail']}
             else:
-                services['redis'] = {'status': 'error', 'detail': 'read-back failed'}
-        except Exception as e:
-            services['redis'] = {'status': 'error', 'detail': str(e)[:100]}
+                services['redis'] = {'status': 'ok', 'detail': cache_health['detail']}
+        else:
+            services['redis'] = {'status': 'error', 'detail': cache_health['detail']}
 
         # Database
-        try:
-            from django.db import connection
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
+        database_health = _database_health_details()
+        if database_health['ok']:
             services['database'] = {'status': 'ok'}
-        except Exception as e:
-            services['database'] = {'status': 'error', 'detail': str(e)[:100]}
+        else:
+            services['database'] = {'status': 'error', 'detail': database_health['detail']}
 
         data['service_health'] = services
 
