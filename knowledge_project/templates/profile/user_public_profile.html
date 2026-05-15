@@ -1,0 +1,701 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ profile_user.username }} 的主页 - 公开笔记{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<style>
+  :root {
+    --upp-primary: #6366f1;
+    --upp-secondary: #8b5cf6;
+    --upp-accent: #ec4899;
+    --upp-bg: #f8fafc;
+    --upp-border: #e2e8f0;
+    --upp-slate-dark: #1e293b;
+    --upp-slate: #475569;
+    --upp-slate-light: #94a3b8;
+  }
+
+  main {
+    padding-top: 0 !important;
+    background: var(--upp-bg);
+    min-height: 100vh;
+  }
+
+  .upp-wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+
+  /* 外层卡片(banner + 内容)*/
+  .upp-profile-card {
+    background: #fff;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  }
+
+  /* 头部 banner */
+  .upp-banner {
+    position: relative;
+    background: linear-gradient(135deg, var(--upp-primary), var(--upp-accent));
+    height: 220px;
+    overflow: hidden;
+  }
+  .upp-banner-img,
+  .upp-banner-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .upp-banner-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0) 0%, rgba(15, 23, 42, 0.35) 100%);
+  }
+
+  /* 个人信息内容区 */
+  .upp-info-content {
+    padding: 0 28px 24px;
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    position: relative;
+  }
+  .upp-avatar-wrap {
+    margin-top: -64px;
+    flex-shrink: 0;
+  }
+  .upp-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 6px solid #fff;
+    object-fit: cover;
+    background: #f1f5f9;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+  }
+  .upp-info-main {
+    flex: 1;
+    min-width: 240px;
+  }
+  .upp-name {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--upp-slate-dark);
+    margin: 0 0 6px;
+  }
+  .upp-bio {
+    color: var(--upp-slate);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin: 0 0 14px;
+    word-break: break-word;
+  }
+  .upp-bio.placeholder {
+    color: var(--upp-slate-light);
+    font-style: italic;
+  }
+  .upp-stats {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+  }
+  .upp-stat-item {
+    text-align: left;
+  }
+  .upp-stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--upp-slate-dark);
+    line-height: 1.1;
+  }
+  .upp-stat-label {
+    font-size: 0.78rem;
+    color: var(--upp-slate-light);
+    margin-top: 2px;
+  }
+
+  /* 操作按钮 */
+  .upp-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+    min-width: 140px;
+  }
+  .upp-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--upp-border);
+    background: #fff;
+    color: var(--upp-slate);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .upp-btn:hover:not(:disabled) {
+    border-color: var(--upp-primary);
+    color: var(--upp-primary);
+    background: rgba(99, 102, 241, 0.06);
+    transform: translateY(-1px);
+  }
+  .upp-btn.primary {
+    background: var(--upp-primary);
+    color: #fff;
+    border-color: var(--upp-primary);
+  }
+  .upp-btn.primary:hover:not(:disabled) {
+    background: var(--upp-secondary);
+    border-color: var(--upp-secondary);
+    color: #fff;
+  }
+  .upp-btn.success {
+    background: #67c23a;
+    color: #fff;
+    border-color: #67c23a;
+  }
+  .upp-btn.success:hover:not(:disabled) {
+    background: #f56c6c;
+    border-color: #f56c6c;
+  }
+  .upp-btn.danger-outline {
+    color: #f56c6c;
+    border-color: #fbc4c4;
+  }
+  .upp-btn.danger-outline:hover:not(:disabled) {
+    background: #fef0f0;
+    color: #f56c6c;
+    border-color: #f56c6c;
+  }
+  .upp-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* 提示条 */
+  .upp-banner-tip {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background: #fef0f0;
+    border-left: 3px solid #f56c6c;
+    border-radius: 0 8px 8px 0;
+    color: #f56c6c;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* 笔记区 */
+  .upp-section {
+    margin-top: 28px;
+  }
+  .upp-section-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--upp-slate-dark);
+    margin: 0 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .upp-section-count {
+    font-size: 0.78rem;
+    padding: 2px 10px;
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--upp-primary);
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .upp-notes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .upp-note-card {
+    background: #fff;
+    border: 1px solid var(--upp-border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .upp-note-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--upp-primary);
+    box-shadow: 0 10px 24px rgba(99, 102, 241, 0.12);
+  }
+  .upp-note-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--upp-slate-dark);
+    line-height: 1.45;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .upp-note-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .upp-note-tag {
+    font-size: 0.72rem;
+    color: var(--upp-primary);
+    background: rgba(99, 102, 241, 0.08);
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+  .upp-note-meta {
+    display: flex;
+    gap: 14px;
+    color: var(--upp-slate-light);
+    font-size: 0.78rem;
+    margin-top: auto;
+  }
+  .upp-note-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* 空状态 */
+  .upp-empty {
+    background: #fff;
+    border-radius: 14px;
+    padding: 44px 20px;
+    text-align: center;
+    color: var(--upp-slate-light);
+    border: 1px dashed var(--upp-border);
+  }
+  .upp-empty i {
+    font-size: 2.4rem;
+    color: var(--upp-border);
+    margin-bottom: 12px;
+    display: block;
+  }
+
+  /* 私信弹窗 */
+  .upp-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 10000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  .upp-modal-overlay.visible {
+    display: flex;
+  }
+  .upp-modal {
+    background: #fff;
+    border-radius: 14px;
+    width: min(92vw, 480px);
+    padding: 22px;
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
+  }
+  .upp-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .upp-modal-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--upp-slate-dark);
+  }
+  .upp-modal-close {
+    background: none;
+    border: none;
+    color: var(--upp-slate-light);
+    cursor: pointer;
+    font-size: 1.1rem;
+  }
+  .upp-modal-textarea {
+    width: 100%;
+    min-height: 110px;
+    border: 1px solid var(--upp-border);
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 0.92rem;
+    resize: vertical;
+    outline: none;
+    color: var(--upp-slate-dark);
+    box-sizing: border-box;
+  }
+  .upp-modal-textarea:focus {
+    border-color: var(--upp-primary);
+  }
+  .upp-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  /* Toast */
+  .upp-toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--upp-slate-dark);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+    z-index: 10010;
+  }
+  .upp-toast.visible {
+    opacity: 0.95;
+  }
+  .upp-toast.success { background: #67c23a; }
+  .upp-toast.error { background: #f56c6c; }
+  .upp-toast.warning { background: #e6a23c; }
+
+  @media (max-width: 720px) {
+    .upp-info-content {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .upp-avatar-wrap { margin-top: -80px; }
+    .upp-stats { justify-content: center; }
+    .upp-actions { width: 100%; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+    .upp-actions .upp-btn { flex: 1 1 30%; min-width: 100px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upp-wrap">
+  <!-- 个人资料卡(banner + 内容)-->
+  <div class="upp-profile-card">
+    <!-- Banner -->
+    <div class="upp-banner">
+      {% if banner_url and banner_is_video %}
+        <video class="upp-banner-video" src="{{ banner_url }}" autoplay muted loop playsinline></video>
+      {% elif banner_url %}
+        <img class="upp-banner-img" src="{{ banner_url }}" alt="banner">
+      {% endif %}
+      <div class="upp-banner-overlay"></div>
+    </div>
+
+    <!-- 信息内容 -->
+    <div class="upp-info-content">
+    <div class="upp-avatar-wrap">
+      <img class="upp-avatar" src="{{ avatar_url }}" alt="{{ profile_user.username }}">
+    </div>
+
+    <div class="upp-info-main">
+      <h1 class="upp-name">{{ profile_user.username }}</h1>
+      {% if bio %}
+        <p class="upp-bio">{{ bio }}</p>
+      {% else %}
+        <p class="upp-bio placeholder">这个人很懒,什么都没写...</p>
+      {% endif %}
+
+      <div class="upp-stats">
+        <div class="upp-stat-item">
+          <div class="upp-stat-value">{{ notes_count }}</div>
+          <div class="upp-stat-label">公开笔记</div>
+        </div>
+        <div class="upp-stat-item">
+          <div class="upp-stat-value">{{ views_count }}</div>
+          <div class="upp-stat-label">总阅读</div>
+        </div>
+        <div class="upp-stat-item">
+          <div class="upp-stat-value">{{ likes_count }}</div>
+          <div class="upp-stat-label">获赞</div>
+        </div>
+        <div class="upp-stat-item">
+          <div class="upp-stat-value">{{ followers_count }}</div>
+          <div class="upp-stat-label">粉丝</div>
+        </div>
+        <div class="upp-stat-item">
+          <div class="upp-stat-value">{{ following_count }}</div>
+          <div class="upp-stat-label">关注</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="upp-actions">
+      {% if is_self %}
+        <a class="upp-btn primary" href="{% url 'settings' %}">
+          <i class="fas fa-user-edit"></i> 编辑资料
+        </a>
+        <a class="upp-btn" href="{% url 'knowledge_list' %}">
+          <i class="fas fa-book"></i> 我的笔记
+        </a>
+      {% elif is_authenticated %}
+        <button id="upp-message-btn" type="button" class="upp-btn primary" {% if blocked_me %}disabled{% endif %}>
+          <i class="fas fa-envelope"></i> 私信
+        </button>
+        <button id="upp-follow-btn" type="button"
+                class="upp-btn {% if is_following %}success{% endif %}"
+                data-following="{% if is_following %}1{% else %}0{% endif %}"
+                {% if blocked_me %}disabled{% endif %}>
+          <i class="fas {% if is_following %}fa-user-check{% else %}fa-user-plus{% endif %}"></i>
+          <span>{% if is_following %}已关注{% else %}关注{% endif %}</span>
+        </button>
+        <button id="upp-block-btn" type="button"
+                class="upp-btn {% if is_blocked %}{% else %}danger-outline{% endif %}"
+                data-blocked="{% if is_blocked %}1{% else %}0{% endif %}">
+          <i class="fas {% if is_blocked %}fa-check-circle{% else %}fa-ban{% endif %}"></i>
+          <span>{% if is_blocked %}已屏蔽{% else %}屏蔽{% endif %}</span>
+        </button>
+      {% else %}
+        <a class="upp-btn primary" href="{% url 'login' %}?next=/user/{{ profile_user.id }}/">
+          <i class="fas fa-sign-in-alt"></i> 登录后互动
+        </a>
+      {% endif %}
+    </div>
+
+    {% if blocked_me %}
+      <div class="upp-banner-tip" style="flex-basis: 100%;">
+        <i class="fas fa-info-circle"></i> 该用户已将你屏蔽,你无法发起私信或关注。
+      </div>
+    {% endif %}
+    </div><!-- /upp-info-content -->
+  </div><!-- /upp-profile-card -->
+
+  <!-- 公开笔记 -->
+  <section class="upp-section">
+    <h2 class="upp-section-title">
+      <i class="fas fa-book-open"></i>
+      公开笔记
+      <span class="upp-section-count">{{ notes_count }}</span>
+    </h2>
+
+    {% if notes %}
+      <div class="upp-notes-grid">
+        {% for note in notes %}
+          <a class="upp-note-card" href="/notes/public/{{ note.public_id }}/">
+            <h3 class="upp-note-title">{{ note.title }}</h3>
+            {% if note.tags %}
+              <div class="upp-note-tags">
+                {% for tag in note.tags %}
+                  <span class="upp-note-tag">#{{ tag }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <div class="upp-note-meta">
+              <span><i class="far fa-eye"></i> {{ note.views }}</span>
+              <span><i class="far fa-comment"></i> {{ note.comments_count }}</span>
+              <span><i class="far fa-calendar"></i> {{ note.updated_at|date:"Y-m-d" }}</span>
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="upp-empty">
+        <i class="far fa-file-alt"></i>
+        <p>这位用户还没有公开的笔记</p>
+      </div>
+    {% endif %}
+  </section>
+</div>
+
+<!-- 私信弹窗 -->
+{% if is_authenticated and not is_self %}
+<div id="upp-message-modal" class="upp-modal-overlay">
+  <div class="upp-modal">
+    <div class="upp-modal-header">
+      <div class="upp-modal-title">私信 @{{ profile_user.username }}</div>
+      <button type="button" class="upp-modal-close" onclick="uppCloseModal()">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <textarea id="upp-message-text" class="upp-modal-textarea"
+              placeholder="输入私信内容(Ctrl+Enter 发送)..." maxlength="5000"></textarea>
+    <div class="upp-modal-footer">
+      <button type="button" class="upp-btn" onclick="uppCloseModal()">取消</button>
+      <button type="button" class="upp-btn primary" id="upp-send-btn">
+        <i class="fas fa-paper-plane"></i> 发送
+      </button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div id="upp-toast" class="upp-toast"></div>
+
+<script>
+  (function () {
+    var TARGET_ID = {{ profile_user.id }};
+    var IS_AUTH = {{ is_authenticated|yesno:"true,false" }};
+    var IS_SELF = {{ is_self|yesno:"true,false" }};
+
+    function getCookie(name) {
+      var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+    function csrf() { return getCookie('csrftoken'); }
+
+    function showToast(msg, type) {
+      var t = document.getElementById('upp-toast');
+      t.textContent = msg;
+      t.className = 'upp-toast visible ' + (type || '');
+      clearTimeout(t._timer);
+      t._timer = setTimeout(function () {
+        t.className = 'upp-toast';
+      }, 2400);
+    }
+    window.uppShowToast = showToast;
+
+    window.uppCloseModal = function () {
+      var m = document.getElementById('upp-message-modal');
+      if (m) m.classList.remove('visible');
+    };
+
+    if (!IS_AUTH || IS_SELF) return;
+
+    // 私信
+    var msgBtn = document.getElementById('upp-message-btn');
+    var modal = document.getElementById('upp-message-modal');
+    var msgText = document.getElementById('upp-message-text');
+    var sendBtn = document.getElementById('upp-send-btn');
+
+    if (msgBtn) {
+      msgBtn.addEventListener('click', function () {
+        modal.classList.add('visible');
+        setTimeout(function () { msgText && msgText.focus(); }, 50);
+      });
+    }
+    if (modal) {
+      modal.addEventListener('click', function (e) {
+        if (e.target === modal) window.uppCloseModal();
+      });
+    }
+    if (msgText) {
+      msgText.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendMessage();
+      });
+    }
+
+    function sendMessage() {
+      var content = (msgText.value || '').trim();
+      if (!content) return;
+      sendBtn.disabled = true;
+      fetch('/api/messages/send/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+        body: JSON.stringify({ recipient_id: TARGET_ID, content: content })
+      }).then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+      }).then(function (res) {
+        if (res.ok) {
+          showToast('私信已发送', 'success');
+          msgText.value = '';
+          window.uppCloseModal();
+        } else if (res.status === 403) {
+          showToast(res.data.error || '对方未开启私信', 'warning');
+        } else {
+          showToast(res.data.error || '发送失败', 'error');
+        }
+      }).catch(function () {
+        showToast('网络错误,请稍后再试', 'error');
+      }).finally(function () {
+        sendBtn.disabled = false;
+      });
+    }
+    if (sendBtn) sendBtn.addEventListener('click', sendMessage);
+
+    // 关注
+    var followBtn = document.getElementById('upp-follow-btn');
+    if (followBtn) {
+      followBtn.addEventListener('click', function () {
+        var following = followBtn.dataset.following === '1';
+        followBtn.disabled = true;
+        fetch(following ? '/api/users/unfollow/' : '/api/users/follow/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+          body: JSON.stringify({ user_id: TARGET_ID })
+        }).then(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        }).then(function (res) {
+          if (res.ok && res.data.status === 'success') {
+            var nowFollowing = !!res.data.is_following;
+            followBtn.dataset.following = nowFollowing ? '1' : '0';
+            followBtn.classList.toggle('success', nowFollowing);
+            followBtn.querySelector('i').className = 'fas ' + (nowFollowing ? 'fa-user-check' : 'fa-user-plus');
+            followBtn.querySelector('span').textContent = nowFollowing ? '已关注' : '关注';
+            showToast(nowFollowing ? '关注成功' : '已取消关注', 'success');
+            // 更新粉丝数
+            var statValueEls = document.querySelectorAll('.upp-stat-value');
+            // 粉丝是第4个 stat-item
+            if (typeof res.data.followers_count === 'number' && statValueEls.length >= 4) {
+              statValueEls[3].textContent = res.data.followers_count;
+            }
+          } else {
+            showToast(res.data.error || '操作失败', 'error');
+          }
+        }).catch(function () {
+          showToast('网络错误,请稍后再试', 'error');
+        }).finally(function () {
+          followBtn.disabled = false;
+        });
+      });
+    }
+
+    // 屏蔽
+    var blockBtn = document.getElementById('upp-block-btn');
+    if (blockBtn) {
+      blockBtn.addEventListener('click', function () {
+        var blocked = blockBtn.dataset.blocked === '1';
+        var msg = blocked ? '取消屏蔽该用户?' : '屏蔽该用户后,你们将无法互相发送消息。确认屏蔽?';
+        if (!confirm(msg)) return;
+        blockBtn.disabled = true;
+        fetch(blocked ? '/api/users/unblock/' : '/api/users/block/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+          body: JSON.stringify({ user_id: TARGET_ID })
+        }).then(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        }).then(function (res) {
+          if (res.ok) {
+            var nowBlocked = !blocked;
+            blockBtn.dataset.blocked = nowBlocked ? '1' : '0';
+            blockBtn.classList.toggle('danger-outline', !nowBlocked);
+            blockBtn.querySelector('i').className = 'fas ' + (nowBlocked ? 'fa-check-circle' : 'fa-ban');
+            blockBtn.querySelector('span').textContent = nowBlocked ? '已屏蔽' : '屏蔽';
+            showToast(nowBlocked ? '已屏蔽该用户' : '已取消屏蔽', 'success');
+          } else {
+            showToast(res.data.error || '操作失败', 'error');
+          }
+        }).catch(function () {
+          showToast('网络错误,请稍后再试', 'error');
+        }).finally(function () {
+          blockBtn.disabled = false;
+        });
+      });
+    }
+  })();
+</script>
+{% endblock %}

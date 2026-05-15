@@ -552,3 +552,79 @@ def theme_test_view(request):
     """
     # 不需要登录，方便测试
     return render(request, 'theme_test.html')
+
+
+# ==================== 用户公开主页 ====================
+@require_http_methods(["GET"])
+def user_public_profile_view(request, user_id):
+    """用户公开主页：展示用户的公开笔记、统计与简介"""
+    from django.db.models import Sum, Count
+    from django.shortcuts import get_object_or_404
+    from ..models import UserFollow, UserBlocklist
+    from .message import _get_avatar_url
+
+    target = get_object_or_404(User, id=user_id)
+    profile = target.profile
+
+    public_notes_qs = Note.objects.filter(
+        author=target, is_public=True
+    ).select_related('author').prefetch_related('tags').annotate(
+        comments_count=Count('comments')
+    ).order_by('-updated_at')
+
+    notes_count = public_notes_qs.count()
+    views_count = public_notes_qs.aggregate(total=Sum('views'))['total'] or 0
+    likes_count = ProfileLike.objects.filter(profile=profile).count()
+    followers_count = UserFollow.objects.filter(following=target).count()
+    following_count = UserFollow.objects.filter(follower=target).count()
+
+    is_self = request.user.is_authenticated and request.user.id == target.id
+    is_following = False
+    is_blocked = False
+    blocked_me = False
+    if request.user.is_authenticated and not is_self:
+        is_following = UserFollow.objects.filter(
+            follower=request.user, following=target
+        ).exists()
+        is_blocked = UserBlocklist.objects.filter(
+            user=request.user, blocked_user=target
+        ).exists()
+        blocked_me = UserBlocklist.objects.filter(
+            user=target, blocked_user=request.user
+        ).exists()
+
+    banner_url = profile.banner_image.url if profile.banner_image else ''
+    banner_is_video = bool(banner_url.lower().split('?', 1)[0].endswith(('.mp4', '.webm', '.ogg')))
+
+    notes_data = []
+    for note in public_notes_qs[:50]:
+        notes_data.append({
+            'id': note.id,
+            'public_id': str(note.public_id) if note.public_id else None,
+            'title': note.title,
+            'views': note.views or 0,
+            'comments_count': note.comments_count,
+            'created_at': note.created_at,
+            'updated_at': note.updated_at,
+            'tags': [t.name for t in note.tags.all()][:8],
+        })
+
+    context = {
+        'profile_user': target,
+        'avatar_url': _get_avatar_url(target),
+        'banner_url': banner_url,
+        'banner_is_video': banner_is_video,
+        'bio': profile.bio or '',
+        'notes': notes_data,
+        'notes_count': notes_count,
+        'views_count': views_count,
+        'likes_count': likes_count,
+        'followers_count': followers_count,
+        'following_count': following_count,
+        'is_self': is_self,
+        'is_authenticated': request.user.is_authenticated,
+        'is_following': is_following,
+        'is_blocked': is_blocked,
+        'blocked_me': blocked_me,
+    }
+    return render(request, 'profile/user_public_profile.html', context)

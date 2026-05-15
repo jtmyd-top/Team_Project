@@ -8,5 +8,9 @@
     "build": "npm run build --prefix frontend",
     "preview": "npm run preview --prefix frontend",
     "install:frontend": "cd frontend && npm install"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.128",
+    "claude-code": "^1.0.0"
   }
 }

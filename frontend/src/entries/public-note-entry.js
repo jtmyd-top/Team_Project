@@ -3,6 +3,46 @@ document.addEventListener('DOMContentLoaded', async function () {
   const { convertUbbMarkupInHtml, renderCommentUbb, hydrateUbbDom } = await import('@/utils/ubb')
   const { enhanceCodeBlocks } = await import('@/composables/useCodeEnhancer')
 
+  // 注入作者资料卡相关样式(确保与 JS 同步加载,避免 CSS 缓存不同步)
+  if (!document.getElementById('pn-author-card-inline-styles')) {
+    const _styleEl = document.createElement('style');
+    _styleEl.id = 'pn-author-card-inline-styles';
+    _styleEl.textContent = `
+      .pn-author-clickable { cursor: pointer; transition: transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease; }
+      .pn-author-avatar.pn-author-clickable:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 6px 18px rgba(99, 102, 241, 0.18); }
+      .pn-author-name.pn-author-clickable:hover { color: #6366f1; }
+
+      .pn-author-modal-overlay { position: fixed; inset: 0; z-index: 10001; background: rgba(15, 23, 42, 0.55); display: flex; align-items: center; justify-content: center; animation: pn-fade-in 0.2s ease; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+      .pn-author-modal { position: relative; background: #fff; border-radius: 18px; width: min(90vw, 380px); max-height: 90vh; overflow: hidden; box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25), 0 4px 12px rgba(15, 23, 42, 0.08); animation: pn-author-modal-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
+      @keyframes pn-author-modal-in { from { transform: translateY(16px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+      .pn-author-modal-banner { height: 80px; background: linear-gradient(135deg, #6366f1, #ec4899); }
+      .pn-author-modal-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.85); color: #475569; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.18s ease; z-index: 2; font-size: 14px; }
+      .pn-author-modal-close:hover { background: #fff; color: #ec4899; transform: rotate(90deg); }
+      .pn-author-modal-body { padding: 0 24px 24px; text-align: center; }
+      .pn-author-modal-avatar-wrap { margin-top: -42px; margin-bottom: 12px; display: flex; justify-content: center; }
+      .pn-author-modal-avatar { width: 84px; height: 84px; border-radius: 50%; border: 4px solid #fff; object-fit: cover; background: #f1f5f9; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12); }
+      .pn-author-modal-avatar-text { display: flex; align-items: center; justify-content: center; font-size: 1.85rem; font-weight: 700; color: #fff; background: linear-gradient(135deg, #6366f1, #ec4899); }
+      .pn-author-modal-name { font-size: 1.15rem; font-weight: 700; color: #1e293b; margin: 0 0 6px; }
+      .pn-author-modal-bio { font-size: 0.85rem; color: #475569; line-height: 1.55; margin: 0 0 18px; padding: 0 6px; word-break: break-word; }
+      .pn-author-modal-bio.placeholder { color: #94a3b8; font-style: italic; }
+      .pn-author-modal-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; background: #f8fafc; border-radius: 12px; margin-bottom: 18px; }
+      .pn-author-modal-stat { text-align: center; }
+      .pn-author-modal-stat-value { font-size: 1.05rem; font-weight: 700; color: #1e293b; line-height: 1.2; }
+      .pn-author-modal-stat-label { font-size: 0.7rem; color: #94a3b8; margin-top: 2px; }
+      .pn-author-modal-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .pn-author-modal-btn { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; font-size: 0.82rem; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; color: #475569; cursor: pointer; transition: all 0.18s ease; }
+      .pn-author-modal-btn:hover:not(:disabled) { border-color: #6366f1; color: #6366f1; background: rgba(99, 102, 241, 0.06); transform: translateY(-1px); }
+      .pn-author-modal-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+      .pn-author-modal-btn.primary { background: #6366f1; color: #fff; border-color: #6366f1; }
+      .pn-author-modal-btn.primary:hover:not(:disabled) { background: #8b5cf6; border-color: #8b5cf6; color: #fff; }
+      .pn-author-modal-btn.is-following { background: #67c23a; color: #fff; border-color: #67c23a; }
+      .pn-author-modal-btn.is-following:hover:not(:disabled) { background: #f56c6c; border-color: #f56c6c; color: #fff; }
+      .pn-author-modal-hint { margin-top: 12px; padding: 8px 12px; background: #f0f9ff; border-left: 3px solid #6366f1; border-radius: 0 6px 6px 0; font-size: 0.78rem; color: #475569; display: flex; align-items: center; gap: 6px; }
+      @keyframes pn-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    `;
+    document.head.appendChild(_styleEl);
+  }
+
 
   // 解析服务端传递的数据
   window.GLOBAL_DATA = { noteData: null, navigationData: null, isAuthenticated: false };
@@ -33,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         <!-- 顶部导航栏 -->
         <nav class="pn-navbar">
           <div class="pn-navbar-inner">
-            <a href="/knowledge/" class="pn-back-btn">
+            <a href="/" class="pn-back-btn">
               <i class="fas fa-arrow-left"></i> 返回首页
             </a>
             <span class="pn-navbar-title">{{ note.title }}</span>
@@ -64,11 +104,11 @@ document.addEventListener('DOMContentLoaded', async function () {
 
             <!-- 作者信息卡 -->
             <div class="pn-card pn-author-card">
-              <div class="pn-author-avatar">
+              <div class="pn-author-avatar pn-author-clickable" @click="openAuthorCard" title="查看作者资料">
                 <img v-if="note.author.avatar_url" :src="note.author.avatar_url" :alt="note.author.username">
                 <span v-else class="pn-author-avatar-text">{{ note.author.username.charAt(0).toUpperCase() }}</span>
               </div>
-              <div class="pn-author-name">{{ note.author.username }}</div>
+              <div class="pn-author-name pn-author-clickable" @click="openAuthorCard">{{ note.author.username }}</div>
               <div class="pn-author-meta">已发布 {{ note.author.note_count }} 篇公开笔记</div>
               <hr class="pn-author-divider">
               <div class="pn-stats-grid">
@@ -338,7 +378,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           <i class="fas fa-exclamation-triangle"></i>
           <h2>{{ errorMessage || '无法加载笔记' }}</h2>
           <p>请检查链接是否正确，或稍后重试</p>
-          <a href="/knowledge/"><i class="fas fa-home"></i> 返回首页</a>
+          <a href="/"><i class="fas fa-home"></i> 返回首页</a>
         </div>
       </div>
 
@@ -436,6 +476,61 @@ document.addEventListener('DOMContentLoaded', async function () {
           </div>
         </div>
       </div>
+
+      <!-- 作者资料卡弹窗 -->
+      <div v-if="authorCard.visible" class="pn-author-modal-overlay" @click.self="closeAuthorCard">
+        <div class="pn-author-modal">
+          <button class="pn-author-modal-close" @click="closeAuthorCard" title="关闭">
+            <i class="fas fa-times"></i>
+          </button>
+
+          <div class="pn-author-modal-banner"></div>
+
+          <div class="pn-author-modal-body">
+            <div class="pn-author-modal-avatar-wrap">
+              <img v-if="authorCard.avatar" :src="authorCard.avatar" class="pn-author-modal-avatar" :alt="authorCard.username">
+              <div v-else class="pn-author-modal-avatar pn-author-modal-avatar-text">{{ authorCard.username ? authorCard.username.charAt(0).toUpperCase() : 'U' }}</div>
+            </div>
+
+            <h3 class="pn-author-modal-name">{{ authorCard.username }}</h3>
+
+            <p v-if="authorCard.bio" class="pn-author-modal-bio">{{ authorCard.bio }}</p>
+            <p v-else class="pn-author-modal-bio placeholder">这个人很懒，什么都没写...</p>
+
+            <div class="pn-author-modal-stats">
+              <div class="pn-author-modal-stat">
+                <div class="pn-author-modal-stat-value">{{ authorCard.notes_count }}</div>
+                <div class="pn-author-modal-stat-label">笔记</div>
+              </div>
+              <div class="pn-author-modal-stat">
+                <div class="pn-author-modal-stat-value">{{ authorCard.views_count }}</div>
+                <div class="pn-author-modal-stat-label">阅读</div>
+              </div>
+              <div class="pn-author-modal-stat">
+                <div class="pn-author-modal-stat-value">{{ authorCard.likes_count }}</div>
+                <div class="pn-author-modal-stat-label">获赞</div>
+              </div>
+            </div>
+
+            <div class="pn-author-modal-actions">
+              <button v-if="isAuthenticated && !isOwnNote" class="pn-author-modal-btn primary" @click="messageFromAuthorCard">
+                <i class="fas fa-envelope"></i> 私信
+              </button>
+              <button v-if="isAuthenticated && !isOwnNote" class="pn-author-modal-btn" :class="{ 'is-following': isFollowing }" :disabled="followLoading" @click="toggleFollow">
+                <i :class="isFollowing ? 'fas fa-user-check' : 'fas fa-user-plus'"></i>
+                {{ isFollowing ? '已关注' : '关注' }}
+              </button>
+              <button class="pn-author-modal-btn" @click="goToAuthorProfile">
+                <i class="fas fa-user-circle"></i> 主页
+              </button>
+            </div>
+
+            <div v-if="isOwnNote" class="pn-author-modal-hint">
+              <i class="fas fa-info-circle"></i> 这是你自己的笔记
+            </div>
+          </div>
+        </div>
+      </div>
     `,
 
     // ─── 数据 ──────────────────────────────────────────────────────────────
@@ -481,6 +576,17 @@ document.addEventListener('DOMContentLoaded', async function () {
         // 用户迷你名片
         userCard: { visible: false, userId: null, username: '', avatar: '', commentId: null },
         userCardClickPos: { x: 0, y: 0 },
+        // 作者资料卡
+        authorCard: {
+          visible: false,
+          username: '',
+          avatar: '',
+          bio: '',
+          notes_count: 0,
+          views_count: 0,
+          likes_count: 0,
+          loading: false
+        },
       };
     },
 
@@ -937,6 +1043,54 @@ document.addEventListener('DOMContentLoaded', async function () {
           this.startReply(comment);
         }
         this.closeUserCard();
+      },
+
+      // ── 作者资料卡 ──────────────────────────────────────────────────────
+
+      async openAuthorCard() {
+        if (!this.note || !this.note.author) return;
+        // 先用已有数据立即显示弹窗
+        this.authorCard = {
+          visible: true,
+          username: this.note.author.username || '',
+          avatar: this.note.author.avatar_url || '',
+          bio: '',
+          notes_count: this.note.author.note_count || 0,
+          views_count: 0,
+          likes_count: 0,
+          loading: true
+        };
+        // 拉取详细资料
+        try {
+          const res = await fetch(`/api/users/${this.note.author.id}/profile/`);
+          if (res.ok) {
+            const data = await res.json();
+            this.authorCard.bio = data.bio || '';
+            if (typeof data.notes_count === 'number') this.authorCard.notes_count = data.notes_count;
+            if (typeof data.views_count === 'number') this.authorCard.views_count = data.views_count;
+            if (typeof data.likes_count === 'number') this.authorCard.likes_count = data.likes_count;
+            if (data.avatar && !this.authorCard.avatar) this.authorCard.avatar = data.avatar;
+          }
+        } catch (e) {
+          console.error('加载作者资料失败:', e);
+        } finally {
+          this.authorCard.loading = false;
+        }
+      },
+
+      closeAuthorCard() {
+        this.authorCard.visible = false;
+      },
+
+      messageFromAuthorCard() {
+        this.closeAuthorCard();
+        this.openMessageModal();
+      },
+
+      goToAuthorProfile() {
+        if (this.note && this.note.author && this.note.author.id) {
+          window.location.href = `/user/${this.note.author.id}/`;
+        }
       },
 
       // ── 工具函数 ─────────────────────────────────────────────────────────
