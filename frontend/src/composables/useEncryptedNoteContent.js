@@ -1,8 +1,10 @@
 import { ref, watch, onMounted } from 'vue'
 import { useVaultStore } from '@/stores/vault'
+import { useClientCrypto } from '@/composables/useClientCrypto'
 
 export function useEncryptedNoteContent(props) {
   const vaultStore = useVaultStore()
+  const { looksLikeEncrypted } = useClientCrypto()
 
   const decryptedContent = ref('')
   const isDecrypting = ref(false)
@@ -38,6 +40,11 @@ export function useEncryptedNoteContent(props) {
   let latestRequestId = 0
   async function decryptContent() {
     if (!props.encryptedContent) return
+    if (!looksLikeEncrypted(props.encryptedContent)) {
+      decryptedContent.value = props.encryptedContent
+      showVerifyPrompt.value = false
+      return
+    }
     if (!vaultStore.isUnlocked) {
       showVerifyPrompt.value = true
       return

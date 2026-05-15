@@ -1,0 +1,17 @@
+[Unit]
+Description=Team Project Django ASGI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/Team_Project
+EnvironmentFile=/opt/Team_Project/.env
+ExecStart=/opt/Team_Project/.venv/bin/daphne -b 0.0.0.0 -p 8000 Team_Project.asgi:application
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

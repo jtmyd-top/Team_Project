@@ -24,6 +24,7 @@ __pycache__/
 # Frontend
 frontend/node_modules/
 node_modules/
+.npm-cache/
 staticfiles/
 # Build output (keep in static/dist for Django)
 # static/dist/ is tracked since it's needed for deployment

@@ -126,7 +126,7 @@ export const useVaultStore = defineStore('vault', () => {
   async function checkAndInitVault() {
     // 仅检查状态，不再自动 POST /api/vault/init/。
     // vault_init 必须由用户显式动作（"创建保密柜"按钮）触发，避免页面加载就发非幂等的初始化请求。
-    if (vaultInitializing.value) return
+    if (vaultInitializing.value) return vaultInitialized.value
     vaultInitializing.value = true
     vaultInitError.value = null
     try {
@@ -134,15 +134,22 @@ export const useVaultStore = defineStore('vault', () => {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       })
+      if (!statusResponse.ok) {
+        vaultInitialized.value = false
+        return false
+      }
       const statusData = await statusResponse.json()
       if (!statusData.two_fa_enabled) {
         // 没开 2FA 视为不需要 vault；不去触发 init
         vaultInitialized.value = false
-        return
+        return false
       }
       vaultInitialized.value = !!statusData.vault_initialized
+      return vaultInitialized.value
     } catch (e) {
       vaultInitError.value = e.message
+      vaultInitialized.value = false
+      return false
     } finally {
       vaultInitializing.value = false
     }
@@ -185,6 +192,20 @@ export const useVaultStore = defineStore('vault', () => {
 
     fetchKeyPromise = (async () => {
       try {
+        const statusResponse = await fetch('/api/vault/status/', {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        if (!statusResponse.ok) return false
+
+        const statusData = await statusResponse.json()
+        vaultInitialized.value = !!statusData.vault_initialized
+
+        if (!statusData.two_fa_enabled || !statusData.vault_initialized || !statusData.is_verified) {
+          return false
+        }
+
         const { clientPrivateKey, clientPubB64 } = await vaultKey.beginHandshake()
         const response = await fetch('/api/vault/key/', {
           method: 'POST',

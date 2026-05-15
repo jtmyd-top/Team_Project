@@ -38,6 +38,9 @@ export function useClientCrypto() {
     if (typeof encryptedBase64 !== 'string' || encryptedBase64.trim() === '') {
       throw new Error('解密失败: 密文为空')
     }
+    if (!looksLikeEncrypted(encryptedBase64)) {
+      return encryptedBase64
+    }
     try {
       return await vaultStore.decrypt(encryptedBase64)
     } catch (e) {

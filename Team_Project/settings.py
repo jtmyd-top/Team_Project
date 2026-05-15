@@ -82,6 +82,7 @@ except ImportError:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'Team_Project.middleware.IPBanMiddleware',
@@ -149,15 +150,17 @@ DEFAULT_FILE_STORAGE_BACKEND = os.getenv('DEFAULT_FILE_STORAGE_BACKEND', '').str
 MEDIA_URL = os.getenv('MEDIA_URL', '/uploads/')
 MEDIA_ROOT = os.getenv('MEDIA_ROOT', os.path.join(BASE_DIR, 'knowledge_project', 'uploads'))
 
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+    },
+}
+
 if DEFAULT_FILE_STORAGE_BACKEND:
-    STORAGES = {
-        'default': {
-            'BACKEND': DEFAULT_FILE_STORAGE_BACKEND,
-        },
-        'staticfiles': {
-            'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
-        },
-    }
+    STORAGES['default']['BACKEND'] = DEFAULT_FILE_STORAGE_BACKEND
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'
