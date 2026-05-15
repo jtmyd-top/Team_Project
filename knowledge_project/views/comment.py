@@ -162,9 +162,25 @@ def note_comments_api(request, note_id):
     """获取指定公开笔记的评论列表（树形结构：顶级评论 + 回复）"""
     try:
         note = get_object_or_404(Note, id=note_id, is_public=True)
+        try:
+            page = max(1, int(request.GET.get('page', 1) or 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = max(1, min(int(request.GET.get('page_size', 20) or 20), 100))
+        except (TypeError, ValueError):
+            page_size = 20
+        total = NoteComment.objects.filter(note=note).count()
+
         top_comments = NoteComment.objects.filter(
             note=note, parent=None
-        ).select_related('author', 'author__profile').prefetch_related('replies__author', 'replies__author__profile')
+        ).select_related('author', 'author__profile').prefetch_related(
+            'replies__author', 'replies__author__profile'
+        ).order_by('created_at')
+        top_total = top_comments.count()
+        start = (page - 1) * page_size
+        end = start + page_size
+        top_comments = top_comments[start:end]
 
         def get_avatar(user):
             try:
@@ -198,7 +214,16 @@ def note_comments_api(request, note_id):
             }
 
         data = [serialize_comment(c) for c in top_comments]
-        return JsonResponse({'comments': data, 'total': NoteComment.objects.filter(note=note).count()})
+        return JsonResponse({
+            'comments': data,
+            'total': total,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'top_level_total': top_total,
+                'top_level_total_pages': max(1, (top_total + page_size - 1) // page_size),
+            }
+        })
     except Exception as e:
         logger.error("获取评论列表失败: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)

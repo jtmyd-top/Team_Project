@@ -3,6 +3,26 @@ from ._shared import *
 from ...utils.request_utils import get_client_ip
 
 
+LOGIN_2FA_EMAIL_CODE_SESSION_KEY = 'login_2fa_email_code'
+LOGIN_2FA_EMAIL_CODE_CACHE_TTL = 300
+
+
+def _login_2fa_email_cache_key(session_key):
+    return f'login_2fa_email_code:{session_key}'
+
+
+def store_login_2fa_email_code(request, email_code):
+    if not request.session.session_key:
+        request.session.create()
+    cache.set(
+        _login_2fa_email_cache_key(request.session.session_key),
+        hashlib.sha256(email_code.encode()).hexdigest(),
+        timeout=LOGIN_2FA_EMAIL_CODE_CACHE_TTL,
+    )
+    request.session[LOGIN_2FA_EMAIL_CODE_SESSION_KEY] = True
+    request.session['2fa_email_timestamp'] = time.time()
+
+
 class CustomLoginView(View):
     """
     支持两因素认证的自定义登录视图。
@@ -66,8 +86,7 @@ class CustomLoginView(View):
                         }, status=429)
 
                     email_code = ''.join(random.choices(string.digits, k=6))
-                    request.session['2fa_email_code'] = email_code
-                    request.session['2fa_email_timestamp'] = time.time()
+                    store_login_2fa_email_code(request, email_code)
 
                     try:
                         send_mail(
@@ -614,8 +633,7 @@ def login_api(request):
                     }, status=429)
 
                 email_code = ''.join(random.choices(string.digits, k=6))
-                request.session['2fa_email_code'] = email_code
-                request.session['2fa_email_timestamp'] = time.time()
+                store_login_2fa_email_code(request, email_code)
 
                 try:
                     send_mail(

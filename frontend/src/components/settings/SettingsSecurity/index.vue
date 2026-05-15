@@ -320,7 +320,8 @@
     <el-dialog
       v-model="show2faDisableDialog"
       title="禁用两因素认证"
-      width="400px">
+      width="420px"
+      @close="resetDisable2faForm">
 
       <el-alert type="warning" :closable="false" style="margin-bottom: 16px;">
         禁用两因素认证将降低您账户的安全性
@@ -335,6 +336,33 @@
             show-password>
           </el-input>
         </el-form-item>
+        <el-form-item :label="twoFaDisable.useBackup ? '备用验证码' : '2FA 验证码'">
+          <div class="code-input-container">
+            <el-input
+              v-model="twoFaDisable.code"
+              :placeholder="twoFaDisable.useBackup ? '请输入 8 位备用码' : '请输入 6 位验证码'"
+              :maxlength="twoFaDisable.useBackup ? 8 : 6"
+              clearable>
+            </el-input>
+            <el-button
+              v-if="userStore.two_fa_method === 'email' && !twoFaDisable.useBackup"
+              :disabled="passwordCountdown.counting"
+              :loading="twoFaDisable.codeSending"
+              @click="sendDisable2faCode">
+              <span>{{ passwordCountdown.counting ? `${passwordCountdown.seconds}秒` : '发送验证码' }}</span>
+            </el-button>
+          </div>
+        </el-form-item>
+        <div class="two-fa-actions">
+          <el-button
+            type="text"
+            size="small"
+            @click="toggleDisableBackupCode"
+            class="backup-code-toggle">
+            <i :class="twoFaDisable.useBackup ? 'fas fa-mobile-alt' : 'fas fa-key'"></i>
+            {{ twoFaDisable.useBackup ? '使用验证器/邮箱验证码' : '使用备用验证码' }}
+          </el-button>
+        </div>
       </el-form>
 
       <template #footer>
@@ -432,8 +460,11 @@ const {
   cancel2faSetup,
   copyBackupCodes,
   disable2fa,
+  sendDisable2faCode,
+  toggleDisableBackupCode,
   regenerateBackupCodes,
   copyNewBackupCodes,
   closeBackupCodesDialog,
+  resetDisable2faForm,
 } = useSettingsSecurity();
 </script>

@@ -5,9 +5,11 @@
 import json
 import logging
 import os
+import re
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
@@ -16,6 +18,7 @@ from ..models import MessagePreference, Note, Profile, ProfileLike
 from .upload import _delayed_delete_file
 
 logger = logging.getLogger(__name__)
+USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
 
 
 @login_required
@@ -85,8 +88,8 @@ def upload_avatar(request):
 
             # 验证文件大小（图片最大 5MB，视频最大 15MB）
             is_video = banner_file.content_type in allowed_video_types
-            max_size = 1500 * 1024 * 1024 if is_video else 5 * 1024 * 1024
-            max_size_mb = 1500 if is_video else 5
+            max_size = 15 * 1024 * 1024 if is_video else 5 * 1024 * 1024
+            max_size_mb = 15 if is_video else 5
 
             if banner_file.size > max_size:
                 return JsonResponse({
@@ -199,8 +202,14 @@ def update_profile(request):
     # 更新昵称
     nickname = data.get("nickname")
     if nickname is not None:
-        if len(nickname) < 6:
-            return JsonResponse({"status": "error", "message": "昵称至少6位"}, status=400)
+        nickname = nickname.strip()
+        if not USERNAME_REGEX.fullmatch(nickname):
+            return JsonResponse({
+                "status": "error",
+                "message": "用户名至少6位，以小写字母开头，只能包含字母、数字和下划线"
+            }, status=400)
+        if User.objects.filter(username__iexact=nickname).exclude(pk=user.pk).exists():
+            return JsonResponse({"status": "error", "message": "用户名已被占用"}, status=400)
         user.username = nickname
         updated_fields.append("username")
         response_data["nickname"] = nickname
@@ -217,10 +226,12 @@ def update_profile(request):
 
     if updated_fields:
         if "username" in updated_fields:
-            user.save(update_fields=["username"])
+            try:
+                user.save(update_fields=["username"])
+            except IntegrityError:
+                return JsonResponse({"status": "error", "message": "用户名已被占用"}, status=400)
         if "bio" in updated_fields:
             profile.save(update_fields=["bio"])
-        print(response_data)
         return JsonResponse(response_data)
 
     return JsonResponse({"status": "error", "message": "没有任何更新字段"}, status=400)

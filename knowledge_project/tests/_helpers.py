@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+import time
 from typing import Any, Optional
 from unittest.mock import patch
 
@@ -16,7 +17,8 @@ def patched_avatar_fetch():
 
     同时拦掉 PIL 字体生成（kumo.ttf 路径在某些环境读不到也无所谓）。
     """
-    with patch('knowledge_project.models.fetch_avatar', lambda *a, **kw: None):
+    with patch('knowledge_project.models.fetch_avatar', lambda *a, **kw: None), \
+         patch('knowledge_project.models.fetch_avatar_async', lambda *a, **kw: None):
         yield
 
 
@@ -47,7 +49,14 @@ def login(client: Client, user: User, password: str = 'pass-word-123!') -> None:
 
     需要测真实登录流程时，请直接 POST /api/login/ 而不是用这个。
     """
-    client.force_login(user)
+    logged_in = client.login(username=user.username, password=password)
+    if not logged_in:  # pragma: no cover
+        raise AssertionError(f'failed to login test user {user.username}')
+    session = client.session
+    now = int(time.time())
+    session['auth_started_at'] = now
+    session['last_activity_at'] = now
+    session.save()
 
 
 def post_json(client: Client, url: str, payload: Any | None = None, **extra) -> Any:

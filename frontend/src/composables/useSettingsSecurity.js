@@ -51,6 +51,10 @@ export function useSettingsSecurity() {
   // 2FA禁用
   const twoFaDisable = reactive({
     password: '',
+    code: '',
+    useBackup: false,
+    method: '',
+    codeSending: false,
   });
 
   // 备用码管理
@@ -252,13 +256,20 @@ export function useSettingsSecurity() {
    */
   const disable2fa = async () => {
     if (!twoFaDisable.password) return ElMessage.warning("请输入密码");
+    if (!twoFaDisable.code) return ElMessage.warning("请输入 2FA 验证码或备用码");
 
     try {
-      const data = await apiService.disable2FA(twoFaDisable.password);
+      const data = await apiService.disable2FA(
+        twoFaDisable.password,
+        (twoFaDisable.code || '').trim(),
+        twoFaDisable.useBackup
+      );
       if (data.status === "success") {
         userStore.update2FAStatus(false);
         show2faDisableDialog.value = false;
         twoFaDisable.password = '';
+        twoFaDisable.code = '';
+        twoFaDisable.useBackup = false;
         ElMessage.success("两因素认证已禁用");
       } else {
         ElMessage.error(data.message || "禁用失败");
@@ -266,6 +277,31 @@ export function useSettingsSecurity() {
     } catch (error) {
       ElMessage.error(error.message || "网络错误");
     }
+  };
+
+  const sendDisable2faCode = async () => {
+    if (twoFaDisable.useBackup || userStore.two_fa_method !== 'email') return;
+    if (passwordCountdown.counting) {
+      return ElMessage.warning(`请等待 ${passwordCountdown.seconds} 秒后重试`);
+    }
+
+    twoFaDisable.codeSending = true;
+    try {
+      const data = await apiService.sendOperation2FA();
+      if (data.status === "success" && data.requires_2fa) {
+        ElMessage.success("验证码已发送至您的邮箱");
+        passwordCountdown.start(90);
+      }
+    } catch (error) {
+      ElMessage.error(error.message || "发送验证码失败");
+    } finally {
+      twoFaDisable.codeSending = false;
+    }
+  };
+
+  const toggleDisableBackupCode = () => {
+    twoFaDisable.useBackup = !twoFaDisable.useBackup;
+    twoFaDisable.code = '';
   };
 
   /**
@@ -302,6 +338,14 @@ export function useSettingsSecurity() {
     showBackupCodesDialog.value = false;
     backupCodes.password = '';
     backupCodes.newCodes = null;
+  };
+
+  const resetDisable2faForm = () => {
+    twoFaDisable.password = '';
+    twoFaDisable.code = '';
+    twoFaDisable.useBackup = false;
+    twoFaDisable.method = userStore.two_fa_method || '';
+    twoFaDisable.codeSending = false;
   };
 
   /**
@@ -374,8 +418,11 @@ export function useSettingsSecurity() {
     cancel2faSetup,
     copyBackupCodes,
     disable2fa,
+    sendDisable2faCode,
+    toggleDisableBackupCode,
     regenerateBackupCodes,
     copyNewBackupCodes,
     closeBackupCodesDialog,
+    resetDisable2faForm,
   };
 }

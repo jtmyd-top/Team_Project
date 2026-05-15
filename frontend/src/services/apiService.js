@@ -254,8 +254,8 @@ const apiService = {
   /**
    * 禁用2FA
    */
-  disable2FA(password) {
-    return postRequest('/api/security/disable-2fa/', { password });
+  disable2FA(password, code, useBackup = false) {
+    return postRequest('/api/security/disable-2fa/', { password, code, use_backup: useBackup });
   },
   
   /**

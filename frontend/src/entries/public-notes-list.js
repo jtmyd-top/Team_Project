@@ -81,7 +81,8 @@ createApp({
             try {
                 const response = await fetch('/api/public-notes/');
                 if (!response.ok) throw new Error('数据加载失败');
-                allNotes.value = await response.json();
+                const data = await response.json();
+                allNotes.value = Array.isArray(data) ? data : (data.notes || []);
                 calculateNotesPerPage(); // 数据加载后，计算分页
             } catch (error) {
                 console.error(error);

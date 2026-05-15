@@ -331,6 +331,11 @@ document.addEventListener('DOMContentLoaded', async function () {
                       </div>
                     </div>
                   </div>
+                  <div v-if="hasMoreComments" style="text-align:center;padding:12px 0 4px;">
+                    <button class="pn-submit-btn" @click="loadMoreComments" :disabled="isLoadingComments">
+                      {{ isLoadingComments ? '加载中...' : '加载更多评论' }}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -558,6 +563,10 @@ document.addEventListener('DOMContentLoaded', async function () {
         isSubmittingComment: false,
         isLoadingComments: false,
         totalComments: 0,
+        commentsPage: 1,
+        commentsPageSize: 20,
+        commentsTotalPages: 1,
+        hasMoreComments: false,
         // 私信
         showMessageModal: false,
         messageContent: '',
@@ -676,14 +685,21 @@ document.addEventListener('DOMContentLoaded', async function () {
 
       // ── 评论相关 ────────────────────────────────────────────────────────
 
-      async fetchComments() {
+      async fetchComments(reset = true) {
         if (!this.note) return;
+        if (reset) {
+          this.commentsPage = 1;
+        }
         this.isLoadingComments = true;
         try {
-          const res = await fetch(`/api/notes/${this.note.id}/comments/`);
+          const res = await fetch(`/api/notes/${this.note.id}/comments/?page=${this.commentsPage}&page_size=${this.commentsPageSize}`);
           const data = await res.json();
-          this.comments = (data.comments || []).map(comment => this.decorateComment(comment));
+          const incomingComments = (data.comments || []).map(comment => this.decorateComment(comment));
+          this.comments = reset ? incomingComments : [...this.comments, ...incomingComments];
           this.totalComments = data.total || 0;
+          const pagination = data.pagination || {};
+          this.commentsTotalPages = pagination.top_level_total_pages || 1;
+          this.hasMoreComments = this.commentsPage < this.commentsTotalPages;
         } catch (e) {
           console.error('加载评论失败:', e);
         } finally {
@@ -693,6 +709,12 @@ document.addEventListener('DOMContentLoaded', async function () {
             this.scrollToLinkedComment();
           });
         }
+      },
+
+      async loadMoreComments() {
+        if (this.isLoadingComments || !this.hasMoreComments) return;
+        this.commentsPage += 1;
+        await this.fetchComments(false);
       },
 
       async submitComment() {
@@ -709,6 +731,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             newComment.replies = [];
             this.comments.push(newComment);
             this.totalComments++;
+            this.hasMoreComments = this.commentsPage < this.commentsTotalPages;
             this.commentContent = '';
             this.$nextTick(() => this.hydrateRuntimeWidgets());
             this.showToast('评论发表成功！', 'success');

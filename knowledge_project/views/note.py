@@ -12,10 +12,11 @@ from bs4 import BeautifulSoup
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.mail import send_mail
-from django.db.models import Q
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from ..decorators import check_vault_access
@@ -326,9 +327,9 @@ def send_note_activity_notification(request, user, note_title, action_type):
 def public_note_view(request, public_id):
     try:
         note = Note.objects.get(public_id=public_id, is_public=True)
-        # 增加查看次数
-        note.views += 1
-        note.save(update_fields=['views'])
+        # 原子递增，避免并发访问时丢失计数
+        Note.objects.filter(pk=note.pk).update(views=F('views') + 1)
+        note.refresh_from_db(fields=['views'])
 
         # 获取所有公开文章的导航数据
         all_public_notes = Note.objects.filter(
@@ -532,7 +533,11 @@ def knowledge_list(request):
 @require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
 def note_detail_api(request, note_id):
     note = get_object_or_404(Note, pk=note_id)
-    if not note.has_permission(request.user):
+    if request.method == 'GET':
+        has_permission = note.has_read_permission(request.user)
+    else:
+        has_permission = note.has_write_permission(request.user)
+    if not has_permission:
         return JsonResponse({'error': '您没有权限访问此笔记'}, status=403)
     # --- 统一进行时区转换 ---
     # 使用 timezone.localtime 将数据库中的UTC时间转换为settings.py中定义的本地时间
@@ -952,6 +957,9 @@ def delete_note_api(request, note_id):
         return JsonResponse({'error': '删除笔记时发生内部错误'}, status=500)
 
 
+@login_required
+@csrf_protect
+@require_http_methods(["POST"])
 def toggle_secret_api(request, note_id):
     """
     切换笔记的保密状态（is_secret 标记）。
@@ -1001,9 +1009,17 @@ def toggle_secret_api(request, note_id):
 # 【新增】公开笔记列表视图
 def public_notes_api(request):
     """
-    一次性返回所有公开笔记的核心数据，用于前端动态渲染。
+    返回公开笔记列表；默认保持兼容，也支持分页参数。
     """
+    page = _coerce_non_negative_int(request.GET.get('page')) or 1
+    page_size = _coerce_non_negative_int(request.GET.get('page_size')) or 50
+    page_size = max(1, min(page_size, 100))
+
     notes_qs = Note.objects.filter(is_public=True).order_by('-updated_at').select_related('author', 'author__profile').prefetch_related('tags')
+    total = notes_qs.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    notes_page = notes_qs[start:end]
 
     # 预加载当前用户的点赞记录
     user_liked_profile_ids = set()
@@ -1013,7 +1029,7 @@ def public_notes_api(request):
         )
 
     notes_data = []
-    for note in notes_qs:
+    for note in notes_page:
         # 使用BeautifulSoup安全地提取纯文本摘要
         soup = BeautifulSoup(note.content or "", 'html.parser')
         excerpt = soup.get_text()[:150] + '...'  # 截取前150个字符作为摘要
@@ -1056,7 +1072,16 @@ def public_notes_api(request):
             'is_favorited': note.is_favorited,
         })
 
-    return JsonResponse(notes_data, safe=False)
+    response_data = {
+        'notes': notes_data,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': max(1, (total + page_size - 1) // page_size),
+        }
+    }
+    return JsonResponse(response_data)
 
 
 @login_required
