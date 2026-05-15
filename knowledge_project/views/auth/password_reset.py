@@ -3,6 +3,9 @@
 import json
 import threading
 
+from django.conf import settings
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from ._shared import *
 from .login import CustomLoginView
 from .rate_limit import get_client_fingerprint, get_client_ip, check_rate_limit
@@ -55,6 +58,24 @@ def send_password_change_notification(request, user):
         logger.error("Failed to send password change notification for user %s: %s", user.id, exc)
 
 
+def invalidate_other_user_sessions(user, keep_session_key=None):
+    if settings.SESSION_ENGINE == 'django.contrib.sessions.backends.signed_cookies':
+        return
+
+    from django.contrib.sessions.models import Session
+
+    for session in Session.objects.filter(expire_date__gte=timezone.now()).iterator():
+        try:
+            data = session.get_decoded()
+        except Exception:
+            continue
+        if str(data.get('_auth_user_id')) != str(user.id):
+            continue
+        if keep_session_key and session.session_key == keep_session_key:
+            continue
+        session.delete()
+
+
 @login_required
 @require_http_methods(["POST"])
 def change_password(request):
@@ -105,8 +126,8 @@ def change_password(request):
     user = request.user
     user.set_password(new_password)
     user.save()
+    invalidate_other_user_sessions(user, keep_session_key=request.session.session_key)
 
-    from django.contrib.auth import update_session_auth_hash
     update_session_auth_hash(request, user)
     send_password_change_notification(request, user)
 
@@ -226,6 +247,9 @@ def reset_password_view(request, user_id, token):
 
         user.set_password(password)
         user.save()
+        invalidate_other_user_sessions(user)
+        if request.user.is_authenticated and request.user.pk == user.pk:
+            update_session_auth_hash(request, user)
         return render(request, 'registration/reset_password.html', {
             'validlink': False,
             'success_message': '密码已重置，请重新登录',

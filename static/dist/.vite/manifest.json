@@ -3,8 +3,8 @@
     "file": "chunks/_plugin-vue_export-helper-DlAUqK2U.js",
     "name": "_plugin-vue_export-helper"
   },
-  "_apiService-DkAlA41s.js": {
-    "file": "chunks/apiService-DkAlA41s.js",
+  "_apiService-W0a6pd2y.js": {
+    "file": "chunks/apiService-W0a6pd2y.js",
     "name": "apiService"
   },
   "_echarts-vendor-CCzsHhNE.js": {
@@ -165,7 +165,7 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
-      "_apiService-DkAlA41s.js",
+      "_apiService-W0a6pd2y.js",
       "_index-Ccs9ac-W.js",
       "_vendor-wzGsUuS6.js",
       "_index-BUtN-9n3.js"
@@ -240,7 +240,7 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-BycGvb3a.js",
-      "_apiService-DkAlA41s.js",
+      "_apiService-W0a6pd2y.js",
       "_user-CYVfXQjS.js",
       "_index-Ccs9ac-W.js",
       "_element-plus-3zH3XlIy.js",
@@ -260,7 +260,7 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
-      "_apiService-DkAlA41s.js",
+      "_apiService-W0a6pd2y.js",
       "_index-Ccs9ac-W.js",
       "_usePasswordStrength-CtF29Ab7.js",
       "_vendor-wzGsUuS6.js",

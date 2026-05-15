@@ -766,8 +766,16 @@ export function useKnowledgeList() {
       const { noteId } = event.detail
       if (currentNoteId.value === noteId) {
         try {
-          await fetchNoteDetail(noteId)
-          ElMessage.success('笔记已从保密柜移出')
+          // 先卸载当前预览/编辑组件，避免同一 noteId 下保留旧的加密态内部状态
+          clearCurrentPreview()
+          await nextTick()
+
+          if (sidebarStore.activeModule === 'vault') {
+            ElMessage.success('笔记已从保密柜移出，预览已关闭')
+          } else {
+            await handleNoteSelect(noteId)
+            ElMessage.success('笔记已从保密柜移出，预览已刷新')
+          }
         } catch (e) {
           ElMessage.error('重新加载笔记失败')
         }

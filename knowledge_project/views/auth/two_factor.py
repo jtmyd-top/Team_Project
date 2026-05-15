@@ -1,6 +1,11 @@
 """两因素认证 (2FA) 相关端点：启用/禁用/验证/备用码。"""
 from ._shared import *
-from .login import CustomLoginView
+from .login import (
+    CustomLoginView,
+    LOGIN_2FA_EMAIL_CODE_SESSION_KEY,
+    _login_2fa_email_cache_key,
+    store_login_2fa_email_code,
+)
 
 
 # ==================== 账户安全功能 API ====================
@@ -232,7 +237,7 @@ def verify_2fa_setup(request):
 def disable_2fa(request):
     """
     禁用两因素认证
-    需要验证当前密码
+    需要验证当前密码和当前 2FA 凭证
     """
     try:
         data = json.loads(request.body)
@@ -240,11 +245,23 @@ def disable_2fa(request):
         return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
 
     password = data.get("password", "")
+    code = data.get("code", "").strip()
+    use_backup = data.get("use_backup", False)
     profile = request.user.profile
+
+    if not profile.two_fa_enabled:
+        return JsonResponse({"status": "error", "message": "未启用两因素认证"}, status=400)
 
     # 验证密码
     if not request.user.check_password(password):
         return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
+
+    if not code:
+        return JsonResponse({"status": "error", "message": "请输入当前 2FA 验证码或备用码"}, status=400)
+
+    success, message = verify_2fa_for_request(request, code, use_backup)
+    if not success:
+        return JsonResponse({"status": "error", "message": message}, status=400)
 
     # 禁用2FA并清除相关数据
     profile.two_fa_enabled = False
@@ -372,23 +389,30 @@ def verify_2fa_login(request):
 
     elif profile.two_fa_method == 'email':
         # 邮箱验证码
-        session_code = request.session.get('2fa_email_code')
         session_timestamp = request.session.get('2fa_email_timestamp')
 
-        if not session_code or not session_timestamp:
+        if not request.session.get(LOGIN_2FA_EMAIL_CODE_SESSION_KEY) or not session_timestamp:
             return JsonResponse({'error': '验证码已过期'}, status=400)
 
         # 检查有效期（5分钟）
         if time.time() - float(session_timestamp) > 300:
             return JsonResponse({'error': '验证码已过期'}, status=400)
 
-        if session_code != code:
+        cached_code_hash = None
+        if request.session.session_key:
+            cached_code_hash = cache.get(_login_2fa_email_cache_key(request.session.session_key))
+        if not cached_code_hash:
+            return JsonResponse({'error': '验证码已过期'}, status=400)
+
+        if hashlib.sha256(code.encode()).hexdigest() != cached_code_hash:
             cache.set(attempt_key, attempts + 1, timeout=300)
             return JsonResponse({'error': '验证码错误'}, status=400)
 
         # 清除已使用的邮箱验证码
-        if '2fa_email_code' in request.session:
-            del request.session['2fa_email_code']
+        if request.session.session_key:
+            cache.delete(_login_2fa_email_cache_key(request.session.session_key))
+        if LOGIN_2FA_EMAIL_CODE_SESSION_KEY in request.session:
+            del request.session[LOGIN_2FA_EMAIL_CODE_SESSION_KEY]
         if '2fa_email_timestamp' in request.session:
             del request.session['2fa_email_timestamp']
 
@@ -483,8 +507,7 @@ def resend_2fa_email(request):
 
     # 生成并发送新的验证码
     email_code = ''.join(random.choices(string.digits, k=6))
-    request.session['2fa_email_code'] = email_code
-    request.session['2fa_email_timestamp'] = time.time()
+    store_login_2fa_email_code(request, email_code)
 
     try:
         send_mail(

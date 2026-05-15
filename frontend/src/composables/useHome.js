@@ -219,7 +219,8 @@ export function useHome() {
       if (!response.ok) {
         throw new Error('获取文章列表失败')
       }
-      const data = await response.json()
+      const raw = await response.json()
+      const data = Array.isArray(raw) ? raw : (raw.notes || [])
 
       const badgeColors = ['purple', 'blue', 'green']
 

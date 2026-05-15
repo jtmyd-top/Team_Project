@@ -255,12 +255,10 @@ class VaultLockMiddleware:
         if any(request.path.startswith(prefix) for prefix in self.SAFE_PREFIXES):
             return self.get_response(request)
 
-        try:
-            profile = request.user.profile
-        except Exception:
-            return self.get_response(request)
+        from knowledge_project.decorators import check_vault_locked
 
-        if not getattr(profile, 'vault_locked', False):
+        is_locked, _, _ = check_vault_locked(request.user.id, request)
+        if not is_locked:
             return self.get_response(request)
 
         normalized_path = request.path.rstrip('/') or '/'

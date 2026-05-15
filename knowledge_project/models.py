@@ -164,10 +164,16 @@ class Note(models.Model):
     is_secret = models.BooleanField(default=False, verbose_name="保密笔记", help_text="标记为保密的笔记需要2FA验证才能访问")
     trashed_at = models.DateTimeField(null=True, blank=True, verbose_name="删除时间")
 
-    def has_permission(self, user):
+    def has_read_permission(self, user):
         if self.is_public:
             return True
         return self.author == user
+
+    def has_write_permission(self, user):
+        return self.author == user
+
+    def has_permission(self, user):
+        return self.has_read_permission(user)
 
     def save(self, *args, **kwargs):
         if self.content:
@@ -881,6 +887,16 @@ def fetch_avatar(user):
         user.profile.avatar_source = source
         user.profile.save(update_fields=["avatar", "avatar_source"])
 
+
+def fetch_avatar_async(user):
+    def _runner():
+        try:
+            fetch_avatar(user)
+        except Exception:
+            logger.exception("Failed to fetch avatar asynchronously for user %s", user.id)
+
+    threading.Thread(target=_runner, daemon=True).start()
+
 from io import BytesIO
 
 def generate_initial_avatar(text, size=128):
@@ -909,7 +925,7 @@ def generate_initial_avatar(text, size=128):
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
         profile = Profile.objects.create(user=instance)
-        fetch_avatar(instance)  # 自动拉取头像
+        fetch_avatar_async(instance)
 
         # 生成 8 位搜索短码（若未生成）
         try:

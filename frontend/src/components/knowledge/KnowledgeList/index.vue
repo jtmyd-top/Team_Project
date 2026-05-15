@@ -97,9 +97,9 @@
                 <i class="fas fa-save"></i> {{ isSaving ? '保存中...' : '保存' }}
               </button>
 
-              <!-- 公开分享按钮 - 回收站中隐藏 -->
+              <!-- 公开分享按钮 - 回收站和保密笔记中隐藏 -->
               <button
-                v-if="!currentNoteData.is_trashed"
+                v-if="!currentNoteData.is_trashed && !currentNoteData.is_secret && sidebarStore.activeModule !== 'vault'"
                 class="toolbar-btn"
                 :class="{ active: currentNoteData.is_public }"
                 @click="handleTogglePublic"
@@ -109,7 +109,7 @@
               </button>
 
               <button
-                v-if="currentNoteData.is_public && !currentNoteData.is_trashed"
+                v-if="currentNoteData.is_public && !currentNoteData.is_trashed && !currentNoteData.is_secret && sidebarStore.activeModule !== 'vault'"
                 class="toolbar-btn"
                 @click="handleCopyPublicLink"
                 title="复制公开链接"
