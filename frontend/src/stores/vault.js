@@ -9,6 +9,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, onScopeDispose } from 'vue'
+import { getCsrfToken } from '@utils/csrf'
 import * as vaultKey from '@/stores/vaultKey'
 
 export const useVaultStore = defineStore('vault', () => {
@@ -114,14 +115,6 @@ export const useVaultStore = defineStore('vault', () => {
 
   function show2FADialogModal() { show2FADialog.value = true }
   function hide2FADialogModal() { show2FADialog.value = false }
-
-  function getCsrfToken() {
-    const cookieValue = document.cookie
-      .split('; ')
-      .find(row => row.startsWith('csrftoken='))
-      ?.split('=')[1]
-    return cookieValue || ''
-  }
 
   async function checkAndInitVault() {
     // 仅检查状态，不再自动 POST /api/vault/init/。

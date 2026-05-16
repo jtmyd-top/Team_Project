@@ -9,6 +9,7 @@
 
 import { computed, ref, onMounted } from 'vue'
 import { useVaultStore } from '@/stores/vault'
+import { getCsrfToken } from '@utils/csrf'
 
 export function useVaultEncryption() {
   const vaultStore = useVaultStore()
@@ -92,22 +93,6 @@ export function useVaultEncryption() {
     return !isKeyValid.value
   }
 
-  function getCsrfToken() {
-    const name = 'csrftoken'
-    let cookieValue = null
-    if (document.cookie && document.cookie !== '') {
-      const cookies = document.cookie.split(';')
-      for (let i = 0; i < cookies.length; i++) {
-        const cookie = cookies[i].trim()
-        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-          cookieValue = decodeURIComponent(cookie.substring(name.length + 1))
-          break
-        }
-      }
-    }
-    return cookieValue
-  }
-
   function clearKey() {
     vaultStore.clearDEK()
     verificationError.value = null
@@ -153,6 +138,5 @@ export function useVaultEncryption() {
     needsReVerification,
     clearKey,
     initializeVault,
-    getCsrfToken
   }
 }

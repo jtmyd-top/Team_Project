@@ -611,6 +611,9 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatWebSocket } from '@services/chatWebSocket'
+import { getCsrfToken } from '@utils/csrf'
+import { formatRelativeListDate } from '@utils/datetime'
+import { escapeHtml, sanitizeHtml } from '@utils/sanitize'
 import NewMessageDialog from '@components/messages/NewMessageDialog/index.vue'
 import ConversationItem from '@components/messages/ConversationItem/index.vue'
 import MessageBubble from '@components/messages/MessageBubble/index.vue'
@@ -796,15 +799,6 @@ const groupedMessages = computed(() => {
   }
   return groups
 })
-
-// ==== 工具 ====
-function getCsrfToken() {
-  return (
-    document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
-    document.querySelector('[name=csrf]')?.value ||
-    ''
-  )
-}
 
 function getUserId() {
   return (
@@ -1083,6 +1077,9 @@ function initRealtimeMessages() {
       realtimeState.value = status
     },
     onEvent: handleRealtimeEvent,
+    onMaxReconnectReached: () => {
+      ElMessage.warning('实时消息连接失败，已切换为轮询刷新')
+    },
   })
   chatSocket.connect()
 }
@@ -1924,13 +1921,7 @@ function scrollToBottomSoon() {
 }
 
 function formatShortTime(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const now = new Date()
-  if (d.toDateString() === now.toDateString()) {
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  }
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  return formatRelativeListDate(iso)
 }
 
 function formatTtl(sec) {
@@ -1943,13 +1934,10 @@ function formatTtl(sec) {
 
 function highlightText(text, q) {
   if (!text) return ''
-  const safe = (text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  const safe = escapeHtml(text)
   if (!q) return safe
   const safeQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return safe.replace(new RegExp(`(${safeQ})`, 'gi'), '<mark>$1</mark>')
+  return sanitizeHtml(safe.replace(new RegExp(`(${safeQ})`, 'gi'), '<mark>$1</mark>'))
 }
 
 // ==== Tab / 搜索 ====
@@ -2580,9 +2568,12 @@ let pollTimer = null
 let lastContextMenuOpenedAt = 0
 let messagesPageTouchTimer = null
 function startPolling() {
+  if (pollTimer) clearInterval(pollTimer)
   pollTimer = setInterval(() => {
+    if (document.hidden) return
+    if (realtimeState.value === 'connected') return
     if (scope.value !== 'blocked') loadConversations({ silent: true })
-  }, realtimeState.value === 'connected' ? 45000 : 15000)
+  }, 15000)
 }
 
 async function touchMessagesPagePresence() {
@@ -2605,6 +2596,17 @@ function startMessagesPageTouch() {
   }, 60000)
 }
 
+function handleVisibilityChange() {
+  if (document.hidden) return
+  if (scope.value !== 'blocked') {
+    loadConversations({ silent: true })
+  }
+  if (selectedUserId.value) {
+    loadMessages({ silent: true })
+  }
+  touchMessagesPagePresence()
+}
+
 // ==== 生命周期 ====
 onMounted(() => {
   currentUserId.value = getUserId()
@@ -2616,6 +2618,7 @@ onMounted(() => {
   startPolling()
   startMessagesPageTouch()
   document.addEventListener('click', onGlobalClick)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
@@ -2627,6 +2630,7 @@ onBeforeUnmount(() => {
   cleanupVoiceRecording()
   chatSocket?.close()
   document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
 watch(selectedUserId, (v) => {

@@ -3,10 +3,7 @@
  * 封装所有笔记相关的 API 调用
  */
 
-// 获取 CSRF token
-const getCsrfToken = () => {
-  return document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
-}
+import { getCsrfToken } from '@utils/csrf'
 
 // 基础 fetch 包装器
 const fetchWrapper = async (url, options = {}) => {

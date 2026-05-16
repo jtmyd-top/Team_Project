@@ -16,7 +16,7 @@
     </div>
 
     <!-- 已解密内容 -->
-    <div v-else-if="decryptedContent" v-html="decryptedContent" class="note-content"></div>
+    <div v-else-if="decryptedContent" v-html="sanitizedDecryptedContent" class="note-content"></div>
 
     <!-- 错误信息 -->
     <el-alert
@@ -30,7 +30,9 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useEncryptedNoteContent } from '@/composables/useEncryptedNoteContent'
+import { sanitizeHtml } from '@utils/sanitize'
 import '@/assets/styles/components/encrypted-note-content.css'
 
 const props = defineProps({
@@ -56,6 +58,8 @@ const {
   decryptContent,
   clearDecryptError
 } = useEncryptedNoteContent(props)
+
+const sanitizedDecryptedContent = computed(() => sanitizeHtml(decryptedContent.value || ''))
 
 defineExpose({
   decryptContent

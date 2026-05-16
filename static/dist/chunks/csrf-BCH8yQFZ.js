@@ -1,0 +1,1 @@
+function c(){var e,o,n,r;return((e=window.SETTINGS_INITIAL)==null?void 0:e.csrfToken)||((o=document.querySelector("[name=csrfmiddlewaretoken]"))==null?void 0:o.value)||((n=document.querySelector("[name=csrf]"))==null?void 0:n.value)||((r=document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/))==null?void 0:r[1])||""}export{c as getCsrfToken};

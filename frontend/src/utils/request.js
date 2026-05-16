@@ -1,7 +1,9 @@
+import { getCsrfToken } from '@utils/csrf'
+
 // 统一的请求封装工具
 const defaultHeaders = () => ({
   "Content-Type": "application/json",
-  "X-CSRFToken": (window.SETTINGS_INITIAL?.csrfToken || "")
+  "X-CSRFToken": getCsrfToken()
 });
 
 export async function request(url, opts = {}) {

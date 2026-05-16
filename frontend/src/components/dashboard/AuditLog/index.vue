@@ -54,6 +54,7 @@
 
 <script setup>
 import { useDashboardStore } from '@stores/dashboard.js'
+import { formatMonthDayShortTime } from '@utils/datetime'
 
 const store = useDashboardStore()
 
@@ -72,10 +73,6 @@ function actionIcon(flag) {
 }
 
 function formatTime(iso) {
-  const d = new Date(iso)
-  return d.toLocaleString('zh-CN', {
-    month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-  })
+  return formatMonthDayShortTime(iso)
 }
 </script>

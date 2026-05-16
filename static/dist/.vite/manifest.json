@@ -3,9 +3,16 @@
     "file": "chunks/_plugin-vue_export-helper-DlAUqK2U.js",
     "name": "_plugin-vue_export-helper"
   },
-  "_apiService-W0a6pd2y.js": {
-    "file": "chunks/apiService-W0a6pd2y.js",
-    "name": "apiService"
+  "_apiService-BL0EnttL.js": {
+    "file": "chunks/apiService-BL0EnttL.js",
+    "name": "apiService",
+    "imports": [
+      "src/utils/csrf.js"
+    ]
+  },
+  "_datetime-DAc_1THF.js": {
+    "file": "chunks/datetime-DAc_1THF.js",
+    "name": "datetime"
   },
   "_echarts-vendor-CCzsHhNE.js": {
     "file": "chunks/echarts-vendor-CCzsHhNE.js",
@@ -33,9 +40,9 @@
     "file": "assets/index.css",
     "src": "_index-!~{007}~.js"
   },
-  "_index-!~{009}~.js": {
+  "_index-!~{00a}~.js": {
     "file": "assets/index2.css",
-    "src": "_index-!~{009}~.js"
+    "src": "_index-!~{00a}~.js"
   },
   "_index-BUtN-9n3.js": {
     "file": "chunks/index-BUtN-9n3.js",
@@ -90,6 +97,12 @@
     "src": "src/composables/useCodeEnhancer.js",
     "isDynamicEntry": true
   },
+  "src/composables/usePublicNoteComments.js": {
+    "file": "chunks/usePublicNoteComments-BLkK8YjE.js",
+    "name": "usePublicNoteComments",
+    "src": "src/composables/usePublicNoteComments.js",
+    "isDynamicEntry": true
+  },
   "src/entries/dashboard.js": {
     "file": "dashboard.js",
     "name": "dashboard",
@@ -98,9 +111,11 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
+      "src/utils/csrf.js",
       "_echarts-vendor-CCzsHhNE.js",
       "_vendor-wzGsUuS6.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js"
+      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_datetime-DAc_1THF.js"
     ],
     "css": [
       "assets/dashboard.css"
@@ -130,6 +145,8 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
+      "src/utils/csrf.js",
+      "_datetime-DAc_1THF.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "_vendor-wzGsUuS6.js"
     ],
@@ -146,11 +163,13 @@
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
       "_preload-helper-CYKyUB34.js",
+      "src/utils/csrf.js",
       "src/utils/ubb.js",
       "_vendor-wzGsUuS6.js",
       "src/composables/useCodeEnhancer.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "_index-Ccs9ac-W.js",
+      "_datetime-DAc_1THF.js",
       "_index-BUtN-9n3.js"
     ],
     "css": [
@@ -165,9 +184,10 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
-      "_apiService-W0a6pd2y.js",
+      "_apiService-BL0EnttL.js",
       "_index-Ccs9ac-W.js",
       "_vendor-wzGsUuS6.js",
+      "src/utils/csrf.js",
       "_index-BUtN-9n3.js"
     ],
     "css": [
@@ -181,13 +201,15 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-BycGvb3a.js",
+      "src/utils/csrf.js",
+      "_datetime-DAc_1THF.js",
+      "_vendor-wzGsUuS6.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "src/composables/useCodeEnhancer.js",
       "src/utils/ubb.js",
       "_element-plus-3zH3XlIy.js",
       "_index-BUtN-9n3.js",
-      "_user-CYVfXQjS.js",
-      "_vendor-wzGsUuS6.js"
+      "_user-CYVfXQjS.js"
     ],
     "css": [
       "assets/messages.css"
@@ -203,7 +225,9 @@
     ],
     "dynamicImports": [
       "src/utils/ubb.js",
-      "src/composables/useCodeEnhancer.js"
+      "src/composables/useCodeEnhancer.js",
+      "src/composables/usePublicNoteComments.js",
+      "src/utils/csrf.js"
     ]
   },
   "src/entries/public-note-page.js": {
@@ -240,11 +264,12 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-BycGvb3a.js",
-      "_apiService-W0a6pd2y.js",
+      "_apiService-BL0EnttL.js",
       "_user-CYVfXQjS.js",
       "_index-Ccs9ac-W.js",
       "_element-plus-3zH3XlIy.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
+      "src/utils/csrf.js",
       "_index-BUtN-9n3.js",
       "_vendor-wzGsUuS6.js"
     ],
@@ -260,10 +285,11 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
-      "_apiService-W0a6pd2y.js",
+      "_apiService-BL0EnttL.js",
       "_index-Ccs9ac-W.js",
       "_usePasswordStrength-CtF29Ab7.js",
       "_vendor-wzGsUuS6.js",
+      "src/utils/csrf.js",
       "_index-BUtN-9n3.js"
     ],
     "css": [
@@ -275,6 +301,12 @@
     "name": "theme-manager",
     "src": "src/entries/theme-manager.js",
     "isEntry": true
+  },
+  "src/utils/csrf.js": {
+    "file": "chunks/csrf-BCH8yQFZ.js",
+    "name": "csrf",
+    "src": "src/utils/csrf.js",
+    "isDynamicEntry": true
   },
   "src/utils/ubb.js": {
     "file": "chunks/ubb-DLUgd71s.js",

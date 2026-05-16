@@ -80,6 +80,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { formatMonthDayHm } from '@utils/datetime'
 
 const props = defineProps({
   payload: { type: Object, default: null },
@@ -92,23 +93,7 @@ const payloadTitle = computed(() => props.payload?.title || '聊天记录')
 const messageCount = computed(() => Number(props.payload?.count || props.payload?.items?.length || 0))
 
 function formatTime(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-
-  const now = new Date()
-  const hour = String(d.getHours()).padStart(2, '0')
-  const minute = String(d.getMinutes()).padStart(2, '0')
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-
-  if (sameDay) return `${hour}:${minute}`
-
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${month}-${day} ${hour}:${minute}`
+  return formatMonthDayHm(iso) || iso || ''
 }
 
 function isOwnItem(item) {

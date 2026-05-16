@@ -36,6 +36,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatDateOnly } from '@utils/datetime'
 
 const props = defineProps({
   csrfToken: { type: String, default: '' },
@@ -94,10 +95,7 @@ async function unblock(u) {
 }
 
 function formatDate(iso) {
-  if (!iso) return ''
-  if (typeof iso === 'string' && iso.length <= 10) return iso
-  const d = new Date(iso)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return typeof iso === 'string' && iso.length <= 10 ? iso : formatDateOnly(iso, 'zh-CN')
 }
 
 defineExpose({ reload: load })

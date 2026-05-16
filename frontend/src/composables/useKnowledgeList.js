@@ -8,6 +8,7 @@ import { useSidebarStore } from '@/stores/sidebar'
 import { useVaultStore } from '@/stores/vault'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
+import { formatMonthDayShortTime } from '@utils/datetime'
 import { convertUbbMarkupInHtml } from '@/utils/ubb'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -607,14 +608,7 @@ export function useKnowledgeList() {
 
   // ==================== 工具函数 ====================
   function formatDate(dateString) {
-    if (!dateString) return ''
-    const date = new Date(dateString)
-    return date.toLocaleString('zh-CN', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    return formatMonthDayShortTime(dateString)
   }
 
   // ==================== 页面离开前防呆 ====================

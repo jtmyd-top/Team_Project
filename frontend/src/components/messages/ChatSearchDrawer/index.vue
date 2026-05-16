@@ -62,6 +62,8 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
+import { formatMonthDayHm } from '@utils/datetime'
+import { escapeHtml, sanitizeHtml } from '@utils/sanitize'
 
 const props = defineProps({
   peerId: { type: Number, required: true },
@@ -114,20 +116,11 @@ function highlightText(text) {
   const q = keyword.value.trim()
   if (!q) return safe
   const pattern = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-  return safe.replace(pattern, '<mark>$1</mark>')
-}
-
-function escapeHtml(s) {
-  return (s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  return sanitizeHtml(safe.replace(pattern, '<mark>$1</mark>'))
 }
 
 function formatTime(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return formatMonthDayHm(iso)
 }
 
 onMounted(async () => {

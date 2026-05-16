@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getCsrfToken } from '@utils/csrf'
 
 export function usePublicNoteView(notificationRef) {
   // 状态
@@ -33,22 +34,6 @@ export function usePublicNoteView(notificationRef) {
     }
   }
 
-  // 获取 Cookie
-  const getCookie = (name) => {
-    let cookieValue = null
-    if (document.cookie && document.cookie !== '') {
-      const cookies = document.cookie.split(';')
-      for (let i = 0; i < cookies.length; i++) {
-        const cookie = cookies[i].trim()
-        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-          cookieValue = decodeURIComponent(cookie.substring(name.length + 1))
-          break
-        }
-      }
-    }
-    return cookieValue
-  }
-
   // 显示通知
   const showNotification = (success, message) => {
     if (notificationRef.value) {
@@ -76,7 +61,7 @@ export function usePublicNoteView(notificationRef) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': getCookie('csrftoken')
+          'X-CSRFToken': getCsrfToken()
         },
         body: JSON.stringify({
           note_id: note.value.id

@@ -2,6 +2,8 @@
 document.addEventListener('DOMContentLoaded', async function () {
   const { convertUbbMarkupInHtml, renderCommentUbb, hydrateUbbDom } = await import('@/utils/ubb')
   const { enhanceCodeBlocks } = await import('@/composables/useCodeEnhancer')
+  const { createPublicNoteComments } = await import('@/composables/usePublicNoteComments')
+  const { getCsrfToken } = await import('@/utils/csrf')
 
   // 注入作者资料卡相关样式(确保与 JS 同步加载,避免 CSS 缓存不同步)
   if (!document.getElementById('pn-author-card-inline-styles')) {
@@ -626,6 +628,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     // ─── 方法 ─────────────────────────────────────────────────────────────
     methods: {
+      _publicNoteComments: null,
 
       initializeData() {
         const g = window.GLOBAL_DATA;
@@ -686,160 +689,42 @@ document.addEventListener('DOMContentLoaded', async function () {
       // ── 评论相关 ────────────────────────────────────────────────────────
 
       async fetchComments(reset = true) {
-        if (!this.note) return;
-        if (reset) {
-          this.commentsPage = 1;
-        }
-        this.isLoadingComments = true;
-        try {
-          const res = await fetch(`/api/notes/${this.note.id}/comments/?page=${this.commentsPage}&page_size=${this.commentsPageSize}`);
-          const data = await res.json();
-          const incomingComments = (data.comments || []).map(comment => this.decorateComment(comment));
-          this.comments = reset ? incomingComments : [...this.comments, ...incomingComments];
-          this.totalComments = data.total || 0;
-          const pagination = data.pagination || {};
-          this.commentsTotalPages = pagination.top_level_total_pages || 1;
-          this.hasMoreComments = this.commentsPage < this.commentsTotalPages;
-        } catch (e) {
-          console.error('加载评论失败:', e);
-        } finally {
-          this.isLoadingComments = false;
-          this.$nextTick(() => {
-            this.hydrateRuntimeWidgets();
-            this.scrollToLinkedComment();
-          });
-        }
+        return this._publicNoteComments.fetchComments(this, reset);
       },
 
       async loadMoreComments() {
-        if (this.isLoadingComments || !this.hasMoreComments) return;
-        this.commentsPage += 1;
-        await this.fetchComments(false);
+        return this._publicNoteComments.loadMoreComments(this);
       },
 
       async submitComment() {
-        if (!this.commentContent.trim() || this.isSubmittingComment) return;
-        this.isSubmittingComment = true;
-        try {
-          const res = await fetch(`/api/notes/${this.note.id}/comments/create/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.getCookie('csrftoken') },
-            body: JSON.stringify({ content: this.commentContent.trim() })
-          });
-          if (res.status === 201) {
-            const newComment = this.decorateComment(await res.json());
-            newComment.replies = [];
-            this.comments.push(newComment);
-            this.totalComments++;
-            this.hasMoreComments = this.commentsPage < this.commentsTotalPages;
-            this.commentContent = '';
-            this.$nextTick(() => this.hydrateRuntimeWidgets());
-            this.showToast('评论发表成功！', 'success');
-          } else {
-            const err = await res.json();
-            this.showToast(err.error || '发表失败', 'error');
-          }
-        } catch (e) {
-          this.showToast('网络错误，请稍后重试', 'error');
-        } finally {
-          this.isSubmittingComment = false;
-        }
+        return this._publicNoteComments.submitComment(this);
       },
 
       async submitReply(parentId) {
-        if (!this.replyContent.trim() || this.isSubmittingComment) return;
-        this.isSubmittingComment = true;
-        try {
-          const res = await fetch(`/api/notes/${this.note.id}/comments/create/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.getCookie('csrftoken') },
-            body: JSON.stringify({ content: this.replyContent.trim(), parent_id: parentId })
-          });
-          if (res.status === 201) {
-            const reply = this.decorateComment(await res.json());
-            const parent = this.comments.find(c => c.id === parentId);
-            if (parent) { parent.replies.push(reply); }
-            this.totalComments++;
-            this.replyContent = '';
-            this.replyingToId = null;
-            this.$nextTick(() => this.hydrateRuntimeWidgets());
-            this.showToast('回复成功！', 'success');
-          } else {
-            const err = await res.json();
-            this.showToast(err.error || '回复失败', 'error');
-          }
-        } catch (e) {
-          this.showToast('网络错误，请稍后重试', 'error');
-        } finally {
-          this.isSubmittingComment = false;
-        }
+        return this._publicNoteComments.submitReply(this, parentId);
       },
 
       openDeleteConfirm(target, parentComment = null) {
-        this.deleteConfirm = {
-          visible: true,
-          deleting: false,
-          commentId: target.id,
-          kind: parentComment ? 'reply' : 'comment',
-          replyCount: parentComment ? 0 : ((target.replies || []).length),
-          preview: this.getCommentPreview(target.content || '')
-        };
+        return this._publicNoteComments.openDeleteConfirm(this, target, parentComment);
       },
 
       closeDeleteConfirm() {
-        if (this.deleteConfirm.deleting) return;
-        this.deleteConfirm.visible = false;
+        return this._publicNoteComments.closeDeleteConfirm(this);
       },
 
       async confirmDeleteComment() {
-        const commentId = this.deleteConfirm.commentId;
-        if (!commentId) return;
-        this.deleteConfirm.deleting = true;
-        try {
-          const res = await fetch(`/api/comments/${commentId}/delete/`, {
-            method: 'DELETE',
-            headers: { 'X-CSRFToken': this.getCookie('csrftoken') }
-          });
-          if (res.ok) {
-            // 从顶级或回复中删除
-            const idx = this.comments.findIndex(c => c.id === commentId);
-            if (idx !== -1) {
-              const removed = this.comments.splice(idx, 1)[0];
-              this.totalComments -= 1 + (removed.replies ? removed.replies.length : 0);
-            } else {
-              this.comments.forEach(c => {
-                const ri = (c.replies || []).findIndex(r => r.id === commentId);
-                if (ri !== -1) { c.replies.splice(ri, 1); this.totalComments--; }
-              });
-            }
-            this.showToast('评论已删除', 'success');
-          }
-        } catch (e) {
-          this.showToast('删除失败', 'error');
-        } finally {
-          this.deleteConfirm = {
-            visible: false,
-            deleting: false,
-            commentId: null,
-            kind: 'comment',
-            replyCount: 0,
-            preview: ''
-          };
-        }
+        return this._publicNoteComments.confirmDeleteComment(this);
       },
 
-      startReply(comment) { this.replyingToId = comment.id; this.replyContent = ''; },
-      cancelReply() { this.replyingToId = null; this.replyContent = ''; },
+      startReply(comment) {
+        return this._publicNoteComments.startReply(this, comment);
+      },
+      cancelReply() {
+        return this._publicNoteComments.cancelReply(this);
+      },
 
       decorateComment(comment) {
-        return {
-          ...comment,
-          rendered_content: renderCommentUbb(comment.content || ''),
-          replies: (comment.replies || []).map(reply => ({
-            ...reply,
-            rendered_content: renderCommentUbb(reply.content || '')
-          }))
-        };
+        return this._publicNoteComments.decorateComment(comment);
       },
 
       hydrateRuntimeWidgets() {
@@ -904,7 +789,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         try {
           const res = await fetch('/api/toggle-note-like/', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.getCookie('csrftoken') },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
             body: JSON.stringify({ note_id: this.note.id })
           });
           const data = await res.json();
@@ -946,7 +831,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           const endpoint = this.isFollowing ? '/api/users/unfollow/' : '/api/users/follow/';
           const res = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.getCookie('csrftoken') },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
             body: JSON.stringify({ user_id: this.note.author.id })
           });
           const data = await res.json();
@@ -1009,7 +894,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           }
           const res = await fetch('/api/messages/send/', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.getCookie('csrftoken') },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
             body: JSON.stringify({
               recipient_id: this.messageTarget.userId,
               content: content
@@ -1292,6 +1177,21 @@ document.addEventListener('DOMContentLoaded', async function () {
         }, { passive: true });
       },
 
+    }
+  });
+
+  app.mixin({
+    beforeCreate() {
+      if (!this.$options.methods) return;
+      if (this.$options.methods.fetchComments) {
+        this._publicNoteComments = createPublicNoteComments({
+          getCsrfToken,
+          renderCommentUbb,
+          hydrateRuntimeWidgets: () => this.hydrateRuntimeWidgets(),
+          scrollToLinkedComment: () => this.scrollToLinkedComment(),
+          showToast: (message, type) => this.showToast(message, type),
+        });
+      }
     }
   });
 

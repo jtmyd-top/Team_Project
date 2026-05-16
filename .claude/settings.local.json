@@ -58,7 +58,11 @@
       "Bash(netsh advfirewall *)",
       "Bash(cmd //c \"scripts\\\\runserver_https.bat\")",
       "Bash(\".venv/Scripts/python.exe\" manage.py check)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(where python *)",
+      "Bash(git -C \"D:/Team Project/Team_Project\" ls-files)",
+      "Bash(git *)"
     ],
     "deny": [],
     "ask": []

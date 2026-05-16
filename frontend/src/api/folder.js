@@ -1,12 +1,9 @@
+import { getCsrfToken } from '@utils/csrf'
+
 /**
  * 文件夹 API 服务层
  * 封装所有文件夹相关的 API 调用
  */
-
-// 获取 CSRF token
-const getCsrfToken = () => {
-  return document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
-}
 
 // 基础 fetch 包装器
 const fetchWrapper = async (url, options = {}) => {

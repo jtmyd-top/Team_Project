@@ -1,22 +1,7 @@
 // services/apiService.js - 统一的API请求服务
 // 改为直接使用fetch，避免ES6模块问题
 
-/**
- * 获取 CSRF Token
- * 优先从 window.SETTINGS_INITIAL 获取，其次从 DOM 中获取
- */
-function getCsrfToken() {
-  // 优先从全局变量获取
-  if (window.SETTINGS_INITIAL?.csrfToken) {
-    return window.SETTINGS_INITIAL.csrfToken
-  }
-  // 其次从 DOM 中获取（登录页面等场景）
-  const tokenElement = document.querySelector('[name=csrfmiddlewaretoken]')
-  if (tokenElement) {
-    return tokenElement.value
-  }
-  return ''
-}
+import { getCsrfToken } from '@utils/csrf'
 
 /**
  * 统一的 POST 请求封装

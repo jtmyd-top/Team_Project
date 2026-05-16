@@ -1,6 +1,7 @@
 // frontend/src/stores/dashboard.js
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { getCsrfToken } from '@utils/csrf'
 
 export const useDashboardStore = defineStore('dashboard', () => {
   // State
@@ -42,13 +43,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   )
 
   // Actions
-  function getCsrfToken() {
-    const el = document.querySelector('[name=csrfmiddlewaretoken]')
-    if (el) return el.value
-    const match = document.cookie.match(/csrftoken=([^;]+)/)
-    return match ? match[1] : ''
-  }
-
   async function fetchSection(section) {
     try {
       const resp = await fetch(

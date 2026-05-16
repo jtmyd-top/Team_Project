@@ -104,8 +104,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref } from 'vue'
 import { enhanceCodeBlocks } from '@/composables/useCodeEnhancer'
+import { formatHm } from '@utils/datetime'
 import { hasUbbMarkup, hydrateUbbDom, renderCommentUbb } from '@/utils/ubb'
 import { parseMergedForward } from '@/utils/mergedForward'
+import { escapeHtml, sanitizeHtml } from '@utils/sanitize'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -146,7 +148,7 @@ const renderedContent = computed(() => {
     const safeQ = escapeHtml(props.highlight).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     html = html.replace(new RegExp(`(${safeQ})`, 'gi'), '<mark>$1</mark>')
   }
-  return html
+  return sanitizeHtml(html)
 })
 
 function hydrateMessageContent() {
@@ -179,24 +181,13 @@ function markdownToHtml(rawText) {
   return html
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
 function escapeAttr(s) {
   return String(s || '')
     .replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
 function formatTime(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return formatHm(iso)
 }
 
 function formatFileSize(size) {

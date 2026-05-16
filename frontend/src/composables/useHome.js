@@ -1,5 +1,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getCsrfToken } from '@utils/csrf'
+import { formatDateOnly } from '@utils/datetime'
 
 // 从模板注入的全局数据中读取登录状态
 const homeData = window.__HOME_DATA__ || {}
@@ -207,7 +209,7 @@ export function useHome() {
       const days = Math.floor(diffInSeconds / 86400)
       return `${days}天前`
     } else {
-      return date.toLocaleDateString('zh-CN')
+      return formatDateOnly(date)
     }
   }
 
@@ -495,13 +497,11 @@ export function useHome() {
     }
 
     try {
-      const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-        || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
       const response = await fetch('/api/toggle-note-like/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken
+          'X-CSRFToken': getCsrfToken()
         },
         body: JSON.stringify({ note_id: article.id })
       })
@@ -525,13 +525,11 @@ export function useHome() {
     }
 
     try {
-      const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-        || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
       const response = await fetch(`/api/notes/${article.id}/favorite/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken
+          'X-CSRFToken': getCsrfToken()
         }
       })
       const data = await response.json()

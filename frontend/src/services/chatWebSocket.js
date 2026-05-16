@@ -1,8 +1,9 @@
 export class ChatWebSocket {
-  constructor({ path = '/ws/messages/', onStatusChange, onEvent } = {}) {
+  constructor({ path = '/ws/messages/', onStatusChange, onEvent, onMaxReconnectReached } = {}) {
     this.path = path
     this.onStatusChange = onStatusChange
     this.onEvent = onEvent
+    this.onMaxReconnectReached = onMaxReconnectReached
     this.ws = null
     this.heartbeatTimer = null
     this.reconnectTimer = null
@@ -50,7 +51,10 @@ export class ChatWebSocket {
   }
 
   scheduleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) return
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.onMaxReconnectReached?.()
+      return
+    }
     this.reconnectAttempts += 1
     const delay = Math.min(1000 * 2 ** (this.reconnectAttempts - 1), 15000)
     clearTimeout(this.reconnectTimer)

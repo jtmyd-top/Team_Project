@@ -44,6 +44,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { formatRelativeListDate } from '@utils/datetime'
 
 const props = defineProps({
   conv: { type: Object, required: true },
@@ -71,22 +72,7 @@ const previewText = computed(() => {
 })
 
 function formatTime(iso) {
-  if (!iso) return ''
-  const date = new Date(iso)
-  const now = new Date()
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  if (sameDay) {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-  }
-  const diffDays = Math.floor((now - date) / 86400000)
-  if (diffDays === 1) return '昨天'
-  if (diffDays < 7) {
-    return ['日', '一', '二', '三', '四', '五', '六'][date.getDay()] && `周${['日', '一', '二', '三', '四', '五', '六'][date.getDay()]}`
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`
+  return formatRelativeListDate(iso)
 }
 </script>
 

@@ -4,6 +4,7 @@
  */
 
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { formatDateOnly } from '@utils/datetime'
 
 export function useKnowledgeSidebar(props, emit) {
   // ==================== Refs ====================
@@ -32,8 +33,7 @@ export function useKnowledgeSidebar(props, emit) {
 
   // 格式化日期
   function formatDate(dateStr) {
-    if (!dateStr) return ''
-    return new Date(dateStr).toLocaleDateString()
+    return formatDateOnly(dateStr)
   }
 
   // 设置 Intersection Observer 用于无限滚动
