@@ -25,6 +25,9 @@ RUN_GROUP="${RUN_GROUP:-root}"
 INSTALL_SYSTEM_DEPS="${INSTALL_SYSTEM_DEPS:-0}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_MIGRATE="${SKIP_MIGRATE:-0}"
+MIN_PYTHON_MAJOR="${MIN_PYTHON_MAJOR:-3}"
+MIN_PYTHON_MINOR="${MIN_PYTHON_MINOR:-9}"
+MIN_NODE_MAJOR="${MIN_NODE_MAJOR:-18}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"
@@ -33,6 +36,17 @@ log() {
 require_root() {
   if [ "$(id -u)" -ne 0 ]; then
     printf 'This script must run as root because it installs a systemd service.\n' >&2
+    exit 1
+  fi
+}
+
+require_systemd() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf 'systemctl not found. This installer requires a systemd-based Linux server.\n' >&2
+    exit 1
+  fi
+  if [ ! -d /run/systemd/system ]; then
+    printf 'systemd does not appear to be PID 1. Cannot install/start a systemctl service here.\n' >&2
     exit 1
   fi
 }
@@ -51,8 +65,46 @@ install_system_deps() {
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     git curl ca-certificates build-essential pkg-config \
-    "$PYTHON_BIN" python3-venv python3-dev \
-    nodejs npm
+    "$PYTHON_BIN" python3-venv python3-dev
+
+  if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf 0)" -lt "$MIN_NODE_MAJOR" ]; then
+    log "Installing Node.js 20 from NodeSource"
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+  fi
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf 'Missing command: %s\n' "$1" >&2
+    printf 'Install system dependencies first, or rerun with INSTALL_SYSTEM_DEPS=1 on apt-based systems.\n' >&2
+    exit 1
+  fi
+}
+
+check_runtime_versions() {
+  require_command git
+  require_command "$PYTHON_BIN"
+  require_command node
+  require_command npm
+  require_command curl
+
+  "$PYTHON_BIN" - "$MIN_PYTHON_MAJOR" "$MIN_PYTHON_MINOR" <<'PY'
+import sys
+required = (int(sys.argv[1]), int(sys.argv[2]))
+current = sys.version_info[:2]
+if current < required:
+    raise SystemExit(
+        f"Python {required[0]}.{required[1]}+ is required, current is {current[0]}.{current[1]}"
+    )
+PY
+
+  node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
+  if [ "$node_major" -lt "$MIN_NODE_MAJOR" ]; then
+    printf 'Node.js %s+ is required for Vite build, current is %s.\n' "$MIN_NODE_MAJOR" "$(node -v)" >&2
+    printf 'Install Node.js %s+ and rerun this script.\n' "$MIN_NODE_MAJOR" >&2
+    exit 1
+  fi
 }
 
 prepare_source() {
@@ -65,10 +117,17 @@ prepare_source() {
       git pull --ff-only origin "$BRANCH"
     fi
   else
-    log "Cloning $REPO_URL into $APP_DIR"
-    mkdir -p "$(dirname "$APP_DIR")"
-    git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+    log "Preparing repository at $APP_DIR"
+    mkdir -p "$APP_DIR"
     cd "$APP_DIR"
+    git init
+    if git remote get-url origin >/dev/null 2>&1; then
+      git remote set-url origin "$REPO_URL"
+    else
+      git remote add origin "$REPO_URL"
+    fi
+    git fetch origin "$BRANCH"
+    git checkout -B "$BRANCH" "origin/$BRANCH"
   fi
 }
 
@@ -80,6 +139,54 @@ check_env_file() {
   fi
   chmod 600 "$APP_DIR/.env"
   chown "$RUN_USER:$RUN_GROUP" "$APP_DIR/.env"
+}
+
+prepare_permissions() {
+  log "Preparing filesystem permissions"
+  mkdir -p "$APP_DIR/staticfiles" "$APP_DIR/knowledge_project/uploads"
+  chown -R "$RUN_USER:$RUN_GROUP" \
+    "$APP_DIR/.env" \
+    "$APP_DIR/.npm-cache" \
+    "$APP_DIR/staticfiles" \
+    "$APP_DIR/knowledge_project/uploads" 2>/dev/null || true
+}
+
+validate_env_file() {
+  log "Validating required .env keys"
+  cd "$APP_DIR"
+  .venv/bin/python - <<'PY'
+import os
+import sys
+from dotenv import dotenv_values
+
+env = dotenv_values(".env")
+
+def has(key):
+    value = env.get(key, os.environ.get(key))
+    return bool(str(value or "").strip())
+
+required = [
+    "SECRET_KEY",
+    "mysql_name",
+    "mysql_user",
+    "mysql_passwd",
+    "mysql_ip",
+    "mysql_port",
+]
+missing = [key for key in required if not has(key)]
+
+alternatives = [
+    ("REDIS_URL", "redis1", "redis"),
+    ("VAULT_KEK", "VAULT_KEY_FILE"),
+]
+for group in alternatives:
+    if not any(has(key) for key in group):
+        missing.append(" or ".join(group))
+
+if missing:
+    print("Missing required .env keys:", ", ".join(missing), file=sys.stderr)
+    raise SystemExit(1)
+PY
 }
 
 setup_python() {
@@ -157,10 +264,14 @@ verify_service() {
 
 main() {
   require_root
+  require_systemd
   install_system_deps
+  check_runtime_versions
   prepare_source
   check_env_file
+  prepare_permissions
   setup_python
+  validate_env_file
   setup_frontend
   run_django_tasks
   install_service
