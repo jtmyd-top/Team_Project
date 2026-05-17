@@ -28,6 +28,16 @@ export function useLogin(captchaWidgetRef) {
     }
   }
 
+  const captchaReady = computed(() => {
+    const widget = captchaWidgetRef.value
+    if (!widget) return false
+    if (typeof widget.isLoading === 'function' && widget.isLoading()) return false
+    if (typeof widget.isVerified === 'function') {
+      return widget.isVerified()
+    }
+    return false
+  })
+
   // 登录表单数据
   const loginForm = reactive({
     username: '',
@@ -96,7 +106,18 @@ export function useLogin(captchaWidgetRef) {
       return
     }
 
-    if (captchaWidgetRef.value && !captchaWidgetRef.value.validate()) {
+    if (!captchaWidgetRef.value) {
+      ElMessage.warning('\u4eba\u673a\u9a8c\u8bc1\u6b63\u5728\u52a0\u8f7d\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5')
+      return
+    }
+
+    if (typeof captchaWidgetRef.value.isLoading === 'function' && captchaWidgetRef.value.isLoading()) {
+      ElMessage.warning('\u4eba\u673a\u9a8c\u8bc1\u6b63\u5728\u52a0\u8f7d\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5')
+      return
+    }
+
+    if (!captchaWidgetRef.value.validate()) {
+      ElMessage.warning('\u8bf7\u5b8c\u6210\u4eba\u673a\u9a8c\u8bc1')
       return
     }
 
@@ -346,6 +367,7 @@ export function useLogin(captchaWidgetRef) {
     trustDevice,
     countdown,
     resendLoading,
+    captchaReady,
     onCaptchaChange,
     handleLogin,
     verifyTwoFA,

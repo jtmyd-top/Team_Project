@@ -96,6 +96,7 @@ defineExpose({
   getCaptchaParams: () => captchaParams.value,
   // 是否已验证
   isVerified: () => isVerified.value,
+  isLoading: () => isLoading.value,
   // 验证
   validate,
   // 重置（保留失败状态）

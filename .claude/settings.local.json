@@ -62,7 +62,9 @@
       "PowerShell(Get-NetTCPConnection *)",
       "Bash(where python *)",
       "Bash(git -C \"D:/Team Project/Team_Project\" ls-files)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(.venv/Scripts/python.exe -m pip list)",
+      "Bash(.venv/Scripts/python.exe -m pip install \"daphne==4.1.2\" \"channels==4.0.0\" \"channels-redis==4.1.0\")"
     ],
     "deny": [],
     "ask": []

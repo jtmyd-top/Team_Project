@@ -5,6 +5,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { folderApi } from '@/api/folder'
+import { useVaultStore } from './vault.js'
 
 // ==================== URL 状态管理工具 ====================
 
@@ -615,7 +616,6 @@ export const useSidebarStore = defineStore('sidebar', () => {
       currentNotes.value = []
 
       // 【关键修复】清除 vaultStore 中的 DEK，确保锁定后无法解密
-      const { useVaultStore } = await import('./vault.js')
       const vaultStore = useVaultStore()
       vaultStore.clearDEK()
       console.log('[Sidebar] Vault locked, DEK cleared')

@@ -54,8 +54,8 @@
       "assets/index2.css"
     ]
   },
-  "_index-Ccs9ac-W.js": {
-    "file": "chunks/index-Ccs9ac-W.js",
+  "_index-CPwvKYUX.js": {
+    "file": "chunks/index-CPwvKYUX.js",
     "name": "index",
     "imports": [
       "_index-BUtN-9n3.js",
@@ -64,10 +64,6 @@
     "css": [
       "assets/index.css"
     ]
-  },
-  "_preload-helper-CYKyUB34.js": {
-    "file": "chunks/preload-helper-CYKyUB34.js",
-    "name": "preload-helper"
   },
   "_usePasswordStrength-CtF29Ab7.js": {
     "file": "chunks/usePasswordStrength-CtF29Ab7.js",
@@ -129,7 +125,7 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
-      "_index-Ccs9ac-W.js",
+      "_index-CPwvKYUX.js",
       "_vendor-wzGsUuS6.js",
       "_index-BUtN-9n3.js"
     ],
@@ -162,13 +158,12 @@
     "imports": [
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
-      "_preload-helper-CYKyUB34.js",
       "src/utils/csrf.js",
       "src/utils/ubb.js",
       "_vendor-wzGsUuS6.js",
       "src/composables/useCodeEnhancer.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
-      "_index-Ccs9ac-W.js",
+      "_index-CPwvKYUX.js",
       "_datetime-DAc_1THF.js",
       "_index-BUtN-9n3.js"
     ],
@@ -185,7 +180,7 @@
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
       "_apiService-BL0EnttL.js",
-      "_index-Ccs9ac-W.js",
+      "_index-CPwvKYUX.js",
       "_vendor-wzGsUuS6.js",
       "src/utils/csrf.js",
       "_index-BUtN-9n3.js"
@@ -220,9 +215,6 @@
     "name": "public-note-entry",
     "src": "src/entries/public-note-entry.js",
     "isEntry": true,
-    "imports": [
-      "_preload-helper-CYKyUB34.js"
-    ],
     "dynamicImports": [
       "src/utils/ubb.js",
       "src/composables/useCodeEnhancer.js",
@@ -266,7 +258,7 @@
       "_vue-vendor-BycGvb3a.js",
       "_apiService-BL0EnttL.js",
       "_user-CYVfXQjS.js",
-      "_index-Ccs9ac-W.js",
+      "_index-CPwvKYUX.js",
       "_element-plus-3zH3XlIy.js",
       "__plugin-vue_export-helper-DlAUqK2U.js",
       "src/utils/csrf.js",
@@ -286,7 +278,7 @@
       "_vue-vendor-BycGvb3a.js",
       "_element-plus-3zH3XlIy.js",
       "_apiService-BL0EnttL.js",
-      "_index-Ccs9ac-W.js",
+      "_index-CPwvKYUX.js",
       "_usePasswordStrength-CtF29Ab7.js",
       "_vendor-wzGsUuS6.js",
       "src/utils/csrf.js",
