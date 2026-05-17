@@ -104,6 +104,7 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import MessageModal from '@components/messages/MessageModal/index.vue'
+import { getCsrfToken } from '@utils/csrf'
 
 const props = defineProps({
   userId: Number,
@@ -263,12 +264,6 @@ const toggleFollow = async () => {
   } finally {
     followLoading.value = false
   }
-}
-
-// 获取CSRF令牌
-const getCsrfToken = () => {
-  return document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
-         document.querySelector('[name=csrf]')?.value || ''
 }
 
 // 初始化

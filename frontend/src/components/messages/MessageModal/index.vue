@@ -55,6 +55,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import { getCsrfToken } from '@utils/csrf'
 
 const props = defineProps({
   recipient: {
@@ -127,12 +128,6 @@ const sendMessage = async () => {
   } finally {
     isSending.value = false
   }
-}
-
-// 获取CSRF令牌
-const getCsrfToken = () => {
-  return document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
-         document.querySelector('[name=csrf]')?.value || ''
 }
 </script>
 

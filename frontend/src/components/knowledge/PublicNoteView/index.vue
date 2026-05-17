@@ -244,6 +244,7 @@ import NoteShadowViewer from '@components/knowledge/NoteShadowViewer/index.vue'
 import BaseNotification from '@components/common/BaseNotification/index.vue'
 import UserCardModal from '@components/common/UserCardModal/index.vue'
 import { usePublicNoteView } from '@composables/usePublicNoteView'
+import { getCsrfToken } from '@utils/csrf'
 import '@/assets/styles/components/public-note-view.css'
 
 const notificationRef = ref(null)
@@ -301,9 +302,6 @@ const handleMessageSent = () => {
 }
 
 // 关注状态 / 切换
-const getCsrfToken = () =>
-  document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
-
 const loadFollowStatus = async () => {
   if (!note.value?.author?.id) return
   try {
