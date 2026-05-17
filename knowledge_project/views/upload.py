@@ -18,7 +18,7 @@ from django.http import (
 )
 from django.views.decorators.http import require_http_methods
 
-from ..models import Asset, Note
+from ..models import Asset, NoteAsset
 
 logger = logging.getLogger(__name__)
 
@@ -135,13 +135,11 @@ def protected_media_view(request, file_path):
     is_uploader = is_authenticated and asset.uploader == request.user
 
     # 仅当资源真实被公开笔记引用时，才允许匿名访问
-    protected_url = asset.get_protected_url()
     is_referenced_by_public_note = bool(
-        protected_url and
-        Note.objects.filter(
-            is_public=True,
-            is_trashed=False,
-            content__contains=protected_url
+        NoteAsset.objects.filter(
+            asset=asset,
+            note__is_public=True,
+            note__is_trashed=False,
         ).exists()
     )
 

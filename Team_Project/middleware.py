@@ -114,6 +114,7 @@ class SessionTimeoutMiddleware:
         self.get_response = get_response
         self.idle_timeout = int(getattr(settings, 'SESSION_IDLE_TIMEOUT', settings.SESSION_COOKIE_AGE))
         self.absolute_timeout = int(getattr(settings, 'SESSION_ABSOLUTE_TIMEOUT', settings.SESSION_COOKIE_AGE))
+        self.touch_interval = int(getattr(settings, 'SESSION_TOUCH_INTERVAL_SECONDS', 300))
 
     def __call__(self, request):
         if self._should_check(request):
@@ -162,6 +163,13 @@ class SessionTimeoutMiddleware:
 
     def _touch(self, request):
         now = int(time.time())
+        last_activity_at = self._session_int(request, self.LAST_ACTIVITY_KEY)
+        if (
+            last_activity_at is not None
+            and self.touch_interval > 0
+            and now - last_activity_at < self.touch_interval
+        ):
+            return
         request.session[self.LAST_ACTIVITY_KEY] = now
         request.session.set_expiry(settings.SESSION_COOKIE_AGE)
 

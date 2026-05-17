@@ -13,6 +13,7 @@ from django.dispatch import receiver
 import nh3
 import os
 import hashlib, io, re, requests, colorsys
+from urllib.parse import unquote, urlparse
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
@@ -206,6 +207,7 @@ class Note(models.Model):
             self.content = updated_html
 
         super().save(*args, **kwargs)
+        sync_note_asset_links(self)
 
     def __str__(self):
         return (self.title[:50] + "…") if len(self.title) > 50 else self.title
@@ -220,6 +222,7 @@ class Note(models.Model):
             models.Index(fields=['is_trashed']),
             models.Index(fields=['is_favorited']),
             models.Index(fields=['is_secret']),
+            models.Index(fields=['author', 'is_trashed', 'is_secret'], name='note_author_trash_secret_idx'),
         ]
 
     def move_to_trash(self):
@@ -275,6 +278,67 @@ class Asset(models.Model):
         verbose_name_plural = "个人资产"
         ordering = ['-uploaded_at']
         unique_together = ('uploader', 'image_hash')
+
+
+def extract_protected_upload_paths(html_content):
+    paths = set()
+    if not html_content:
+        return paths
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+    candidates = []
+    candidates.extend(tag.get('src') for tag in soup.find_all(src=True))
+    candidates.extend(tag.get('href') for tag in soup.find_all(href=True))
+    candidates.extend(
+        match.group(0)
+        for match in re.finditer(r'/protected_uploads/[^\s"\'<>]+', str(html_content))
+    )
+
+    for raw_value in candidates:
+        if not raw_value:
+            continue
+        parsed = urlparse(str(raw_value))
+        path = unquote(parsed.path or str(raw_value))
+        prefix = '/protected_uploads/'
+        if not path.startswith(prefix):
+            continue
+        file_path = path[len(prefix):].lstrip('/\\')
+        normalized = os.path.normpath(file_path).replace('\\', '/')
+        if normalized and not normalized.startswith('../') and normalized != '..':
+            paths.add(normalized)
+    return paths
+
+
+class NoteAsset(models.Model):
+    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='asset_links')
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='note_links')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Note asset link"
+        verbose_name_plural = "Note asset links"
+        unique_together = ('note', 'asset')
+        indexes = [
+            models.Index(fields=['asset', 'note'], name='noteasset_asset_note_idx'),
+        ]
+
+
+def sync_note_asset_links(note):
+    if not note.pk:
+        return
+    paths = extract_protected_upload_paths(note.content or '')
+    assets = list(Asset.objects.filter(file__in=paths))
+    asset_ids = {asset.id for asset in assets}
+
+    NoteAsset.objects.filter(note=note).exclude(asset_id__in=asset_ids).delete()
+    existing_ids = set(
+        NoteAsset.objects.filter(note=note, asset_id__in=asset_ids)
+        .values_list('asset_id', flat=True)
+    )
+    NoteAsset.objects.bulk_create(
+        [NoteAsset(note=note, asset=asset) for asset in assets if asset.id not in existing_ids],
+        ignore_conflicts=True,
+    )
 
 
 # ---------------- 用户资料 + 头像 ----------------

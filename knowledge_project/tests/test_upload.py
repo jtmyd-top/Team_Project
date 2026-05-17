@@ -18,7 +18,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import Asset, Note
+from knowledge_project.models import Asset, Note, NoteAsset
 
 from ._helpers import login, make_user, parse
 
@@ -156,13 +156,25 @@ class ProtectedMediaViewTests(_UploadTestBase):
         file_path = self._upload_as(author)
         # 用公开笔记引用 protected_url
         protected_url = f'/protected_uploads/{file_path}'
-        Note.objects.create(
+        note = Note.objects.create(
             author=author, title='公开笔记', is_public=True, is_trashed=False,
             content=f'<img src="{protected_url}">',
         )
         # 不登录访问
         response = self.client.get(reverse('protected_media_view', args=[file_path]))
         self.assertEqual(response.status_code, 200)
+
+
+    def test_plain_text_url_does_not_grant_access_without_asset_link(self):
+        author = make_user('pm04b')
+        file_path = self._upload_as(author)
+        Note.objects.create(
+            author=author, title='public note', is_public=True, is_trashed=False,
+            content=f'text only /protected_uploads/{file_path}',
+        )
+        NoteAsset.objects.all().delete()
+        response = self.client.get(reverse('protected_media_view', args=[file_path]))
+        self.assertEqual(response.status_code, 403)
 
     def test_trashed_public_note_does_not_grant_access(self):
         author = make_user('pm05')

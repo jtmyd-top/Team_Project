@@ -6,13 +6,14 @@ from django.contrib.auth import HASH_SESSION_KEY
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from Team_Project.middleware import VaultLockMiddleware
+from Team_Project.middleware import SessionTimeoutMiddleware, VaultLockMiddleware
 from knowledge_project.models import Note, NoteComment
 from knowledge_project.views.auth.login import (
     LOGIN_2FA_EMAIL_CODE_SESSION_KEY,
@@ -171,6 +172,38 @@ class VaultLockMiddlewareFixTests(TestCase):
         self.assertEqual(response.status_code, 423)
         self.assertEqual(parse(response)['code'], 'vault_locked')
         mocked_check.assert_called_once_with(user.id, request)
+
+
+class SessionTimeoutMiddlewareTests(TestCase):
+    @override_settings(SESSION_TOUCH_INTERVAL_SECONDS=300, SESSION_COOKIE_AGE=10800)
+    @patch('Team_Project.middleware.time.time')
+    def test_touch_is_throttled_inside_window(self, mocked_time):
+        middleware = SessionTimeoutMiddleware(lambda request: None)
+        request = RequestFactory().get('/api/notes/')
+        request.session = SessionStore()
+        request.session['last_activity_at'] = 1000
+        request.session.modified = False
+        mocked_time.return_value = 1100
+
+        middleware._touch(request)
+
+        self.assertEqual(request.session['last_activity_at'], 1000)
+        self.assertFalse(request.session.modified)
+
+    @override_settings(SESSION_TOUCH_INTERVAL_SECONDS=300, SESSION_COOKIE_AGE=10800)
+    @patch('Team_Project.middleware.time.time')
+    def test_touch_updates_after_window(self, mocked_time):
+        middleware = SessionTimeoutMiddleware(lambda request: None)
+        request = RequestFactory().get('/api/notes/')
+        request.session = SessionStore()
+        request.session['last_activity_at'] = 1000
+        request.session.modified = False
+        mocked_time.return_value = 1401
+
+        middleware._touch(request)
+
+        self.assertEqual(request.session['last_activity_at'], 1401)
+        self.assertTrue(request.session.modified)
 
 
 class CreateUserProfileFixTests(TestCase):

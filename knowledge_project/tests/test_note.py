@@ -27,7 +27,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import Folder, Note, NoteHistory
+from knowledge_project.models import Asset, Folder, Note, NoteAsset, NoteHistory
 
 from ._helpers import login, make_user, parse, post_json
 
@@ -158,6 +158,44 @@ class UpdateAndDeleteNoteApiTests(_NoteTestBase):
         self.assertEqual(response.status_code, 404)
         note.refresh_from_db()
         self.assertFalse(note.is_trashed)
+
+
+class NoteAssetSyncTests(_NoteTestBase):
+    def test_note_save_tracks_protected_upload_images(self):
+        user = make_user('assetlink01')
+        asset = Asset.objects.create(
+            uploader=user,
+            asset_type='image',
+            name='tracked.png',
+            file='user_1/tracked.png',
+        )
+
+        note = Note.objects.create(
+            author=user,
+            title='with image',
+            content='<p><img src="/protected_uploads/user_1/tracked.png"></p>',
+        )
+
+        self.assertTrue(NoteAsset.objects.filter(note=note, asset=asset).exists())
+
+    def test_note_save_removes_stale_asset_links(self):
+        user = make_user('assetlink02')
+        asset = Asset.objects.create(
+            uploader=user,
+            asset_type='image',
+            name='stale.png',
+            file='user_1/stale.png',
+        )
+        note = Note.objects.create(
+            author=user,
+            title='with image',
+            content='<img src="/protected_uploads/user_1/stale.png">',
+        )
+
+        note.content = '<p>removed</p>'
+        note.save()
+
+        self.assertFalse(NoteAsset.objects.filter(note=note, asset=asset).exists())
 
 
 # =========================================================================
