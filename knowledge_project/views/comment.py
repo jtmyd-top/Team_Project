@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 import requests
@@ -224,6 +224,8 @@ def note_comments_api(request, note_id):
                 'top_level_total_pages': max(1, (top_total + page_size - 1) // page_size),
             }
         })
+    except Http404:
+        raise
     except Exception as e:
         logger.error("获取评论列表失败: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
@@ -276,6 +278,8 @@ def note_comment_create_api(request, note_id):
         }, status=201)
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         logger.error("创建评论失败: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
@@ -291,6 +295,8 @@ def note_comment_delete_api(request, comment_id):
             return JsonResponse({'error': '无权删除此评论'}, status=403)
         comment.delete()
         return JsonResponse({'status': 'deleted'})
+    except Http404:
+        raise
     except Exception as e:
         logger.error("删除评论失败: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
@@ -308,6 +314,8 @@ def resolve_qqmusic_share_api(request):
             return JsonResponse({'error': error}, status=400)
 
         return JsonResponse({'ok': True, **resolved})
+    except Http404:
+        raise
     except Exception as exc:
         logger.error('resolve_qqmusic_share_api failed: %s', exc, exc_info=True)
         return JsonResponse({'error': 'QQ 音乐解析失败'}, status=500)

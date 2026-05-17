@@ -5,7 +5,7 @@ import logging
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
@@ -47,6 +47,8 @@ def follow_user_api(request):
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         logger.error("关注用户错误: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
@@ -76,6 +78,8 @@ def unfollow_user_api(request):
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         logger.error("取消关注错误: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
@@ -106,6 +110,8 @@ def follow_status_api(request, user_id):
             'following_count': following_count,
             'is_self': request.user.is_authenticated and request.user == target,
         })
+    except Http404:
+        raise
     except Exception as e:
         logger.error("查询关注状态错误: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)

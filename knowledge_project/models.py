@@ -4,7 +4,7 @@ import threading
 
 from bs4 import BeautifulSoup
 import jieba.analyse
-from django.db import models
+from django.db import models, transaction
 import uuid
 from django.contrib.auth.models import User
 from django_ckeditor_5.fields import CKEditor5Field
@@ -889,12 +889,15 @@ def fetch_avatar(user):
         user.profile.save(update_fields=["avatar", "avatar_source"])
 
 
-def fetch_avatar_async(user):
+def fetch_avatar_async(user_id):
     def _runner():
         try:
+            user = User.objects.select_related("profile").get(id=user_id)
             fetch_avatar(user)
+        except User.DoesNotExist:
+            logger.warning("Skipping async avatar fetch for missing user %s", user_id)
         except Exception:
-            logger.exception("Failed to fetch avatar asynchronously for user %s", user.id)
+            logger.exception("Failed to fetch avatar asynchronously for user %s", user_id)
 
     threading.Thread(target=_runner, daemon=True).start()
 
@@ -926,7 +929,7 @@ def generate_initial_avatar(text, size=128):
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
         profile = Profile.objects.create(user=instance)
-        fetch_avatar_async(instance)
+        transaction.on_commit(lambda: fetch_avatar_async(instance.id))
 
         # 生成 8 位搜索短码（若未生成）
         try:

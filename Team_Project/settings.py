@@ -246,7 +246,7 @@ if REALTIME_MESSAGES_ENABLED:
                 'BACKEND': 'channels_redis.core.RedisChannelLayer',
                 'CONFIG': {
                     'hosts': [channel_redis_url],
-                    'expiry': 10,
+                    'expiry': 60,
                     'group_expiry': 86400,
                 },
             },

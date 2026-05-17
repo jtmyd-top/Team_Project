@@ -5,7 +5,7 @@ import mimetypes
 import os
 
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
@@ -77,6 +77,8 @@ def upload_message_attachment_api(request):
             'status': 'success',
             'attachment': _attachment_payload(attachment),
         }, status=201)
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"上传私信附件失败: {e}", exc_info=True)
         return JsonResponse({'error': '上传失败，请稍后重试'}, status=500)

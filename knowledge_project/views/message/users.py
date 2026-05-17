@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import models
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -44,6 +44,8 @@ def get_user_public_profile_api(request, user_id):
             'likes_count': likes_count,
             'public_notes_url': f'/?author={user.id}&author_name={quote(user.username)}',
         })
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('获取用户信息错误', e)
 
@@ -121,6 +123,8 @@ def search_users_api(request):
                 'matched_by': via,
             }],
         })
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('搜索用户错误', e)
 
@@ -163,5 +167,7 @@ def get_unread_messages_count_api(request):
             deleted_for_recipient=False,
         ).count()
         return JsonResponse({'status': 'success', 'unread_count': total})
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('获取未读数错误', e)

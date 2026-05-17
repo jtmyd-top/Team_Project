@@ -4,7 +4,7 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
@@ -37,6 +37,8 @@ def get_message_preference_api(request):
                 'browser_new_message': pref.browser_new_message,
             }
         })
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('获取私信设置错误', e)
 
@@ -67,6 +69,8 @@ def update_message_preference_api(request):
         return JsonResponse({'status': 'success', 'message': '设置已更新'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('更新私信设置错误', e)
 
@@ -94,6 +98,8 @@ def block_user_api(request):
         return JsonResponse({'status': 'success', 'message': '已屏蔽用户'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('屏蔽用户错误', e)
 
@@ -112,6 +118,8 @@ def unblock_user_api(request):
             user=request.user, blocked_user_id=blocked_user_id
         ).delete()
         return JsonResponse({'status': 'success', 'message': '已取消屏蔽'})
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('取消屏蔽错误', e)
 
@@ -134,6 +142,8 @@ def get_blocked_users_api(request):
                 'reason': item.reason,
             })
         return JsonResponse({'status': 'success', 'blocked_users': blocked_list})
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('获取屏蔽列表错误', e)
 

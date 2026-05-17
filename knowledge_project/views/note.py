@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db.models import F, Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect
@@ -317,6 +317,8 @@ def send_note_activity_notification(request, user, note_title, action_type):
 
         logger.info(f"Note {action_type} notification queued for user {user.id}, note: {note_title}")
 
+    except Http404:
+        raise
     except Exception as e:
         # 通知发送失败不应影响正常操作
         logger.error(f"Failed to send note {action_type} notification for user {user.id}: {e}")
@@ -421,6 +423,8 @@ def public_note_view(request, public_id):
     except Note.DoesNotExist:
         # 如果笔记不存在或非公开，返回一个提示页面
         return render(request, 'knowledge/public_note_view.html', {'error_message': '抱歉，这篇笔记不存在或未公开分享。'})
+    except Http404:
+        raise
     except Exception as e:
         # 记录未预料到的错误
         print(f"Error in public_note_view for public_id {public_id}: {e}")
@@ -482,6 +486,8 @@ def toggle_note_like(request):
 
     except Note.DoesNotExist:
         return JsonResponse({'status': 'error', 'message': '笔记不存在'}, status=404)
+    except Http404:
+        raise
     except Exception as e:
         print(f"Error in toggle_note_like: {e}")
         return JsonResponse({'status': 'error', 'message': '服务器内部错误'}, status=500)
@@ -851,6 +857,8 @@ def create_note_api(request):
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '无效的请求数据'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"为用户 {user.id} 创建新笔记时出错: {e}", exc_info=True)
         return JsonResponse({'error': '创建笔记时发生内部错误'}, status=500)
@@ -912,6 +920,8 @@ def update_note_api(request, note_id):
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '无效的请求数据'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"为用户 {user.id} 更新笔记 {note_id} 时出错: {e}", exc_info=True)
         return JsonResponse({'error': '更新笔记时发生内部错误'}, status=500)
@@ -952,6 +962,8 @@ def delete_note_api(request, note_id):
             'status': 'success',
             'message': '笔记已移至回收站'
         })
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"为用户 {user.id} 删除笔记 {note_id} 时出错: {e}", exc_info=True)
         return JsonResponse({'error': '删除笔记时发生内部错误'}, status=500)
@@ -1001,6 +1013,8 @@ def toggle_secret_api(request, note_id):
             'is_public': note.is_public,
             'message': '保密状态已更新'
         })
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"为用户 {user.id} 切换笔记 {note_id} 的保密状态时出错: {e}", exc_info=True)
         return JsonResponse({'error': '更新保密状态时发生内部错误'}, status=500)

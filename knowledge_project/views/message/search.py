@@ -3,7 +3,7 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db.models import Q
-from django.http import HttpResponse, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -54,6 +54,8 @@ def search_messages_api(request):
                 'is_own': m.sender_id == request.user.id,
             })
         return JsonResponse({'status': 'success', 'results': results})
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('消息搜索错误', e)
 
@@ -90,5 +92,7 @@ def export_conversation_api(request):
         fname = f"chat_with_{peer.username}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.txt"
         response['Content-Disposition'] = f'attachment; filename="{fname}"'
         return response
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('导出聊天记录错误', e)

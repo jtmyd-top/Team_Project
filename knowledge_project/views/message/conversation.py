@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -136,6 +136,8 @@ def send_message_api(request):
     except IntegrityError as e:
         logger.warning("发送私信数据库冲突: %s", e, exc_info=True)
         return JsonResponse({'error': '请求冲突，请稍后重试'}, status=409)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('发送私信错误', e)
 
@@ -222,6 +224,8 @@ def forward_message_api(request):
     except IntegrityError as e:
         logger.warning("转发私信数据库冲突: %s", e, exc_info=True)
         return JsonResponse({'error': '请求冲突，请稍后重试'}, status=409)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('转发私信错误', e)
 
@@ -279,6 +283,8 @@ def get_messages_api(request):
             },
             'settings': _conversation_settings_payload(viewer_settings),
         })
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('获取私信列表错误', e)
 
@@ -435,6 +441,8 @@ def get_message_conversations_api(request):
         )
 
         return JsonResponse({'status': 'success', 'conversations': conversations})
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('获取对话列表错误', e)
 
@@ -486,6 +494,8 @@ def delete_message_api(request, message_id):
         msg.save(update_fields=['deleted_for_sender', 'deleted_for_recipient'])
         scheduled = _refresh_message_purge_schedule(msg)
         return JsonResponse({'status': 'success', 'scope': 'self', 'scheduled_for_purge': scheduled})
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('删除消息错误', e)
 
@@ -541,6 +551,8 @@ def bulk_delete_messages_api(request):
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('批量删除私信错误', e)
 
@@ -562,6 +574,8 @@ def clear_conversation_api(request):
         return JsonResponse({'status': 'success'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('清空对话错误', e)
 
@@ -593,6 +607,8 @@ def mark_conversation_read_api(request):
         return JsonResponse({'status': 'success'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('标记已读错误', e)
 
@@ -611,6 +627,8 @@ def mark_conversation_unread_api(request):
         return JsonResponse({'status': 'success'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('标记未读错误', e)
 
@@ -662,6 +680,8 @@ def set_disappearing_api(request):
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('阅后即焚设置错误', e)
 

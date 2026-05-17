@@ -4,7 +4,7 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.http import HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
@@ -140,5 +140,7 @@ def report_user_api(request):
         return JsonResponse({'status': 'success', 'message': '举报已提交，我们会尽快处理'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
     except Exception as e:
         return _server_error_response('举报错误', e)

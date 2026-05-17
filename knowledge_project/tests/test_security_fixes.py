@@ -176,13 +176,14 @@ class VaultLockMiddlewareFixTests(TestCase):
 class CreateUserProfileFixTests(TestCase):
     @patch('knowledge_project.models.fetch_avatar_async')
     def test_user_creation_uses_async_avatar_fetch(self, mocked_fetch_avatar_async):
-        User.objects.create_user(
-            username='async_avatar_user',
-            email='async@example.com',
-            password='pass-word-123!',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            user = User.objects.create_user(
+                username='async_avatar_user',
+                email='async@example.com',
+                password='pass-word-123!',
+            )
 
-        mocked_fetch_avatar_async.assert_called_once()
+        mocked_fetch_avatar_async.assert_called_once_with(user.id)
 
 
 class MediumPriorityFixTests(TestCase):
