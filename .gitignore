@@ -14,7 +14,7 @@ uploads/
 xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5
-settings_test.py
+Team_Project/settings_test.py
 # Python 字节码与缓存
 __pycache__/
 *.py[cod]
