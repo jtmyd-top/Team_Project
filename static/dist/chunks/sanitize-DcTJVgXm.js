@@ -1,0 +1,1 @@
+import{l as r}from"./vendor-DFmSBUPn.js";const n={USE_PROFILES:{html:!0}};function i(e,t=n){return r.sanitize(String(e||""),t)}function l(e){return String(e||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}export{n as DEFAULT_HTML_SANITIZE_CONFIG,l as escapeHtml,i as sanitizeHtml};

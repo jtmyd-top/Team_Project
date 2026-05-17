@@ -1,0 +1,1060 @@
+"""message 模块测试
+
+覆盖:
+- send_message_api / forward_message_api
+- get_messages_api / get_message_conversations_api
+- delete_message_api / bulk_delete_messages_api / clear_conversation_api
+- mark_conversation_read_api / mark_conversation_unread_api
+- toggle_pin_api / toggle_mute_api / toggle_archive_api
+- set_disappearing_api / get_conversation_settings_api
+- search_messages_api / export_conversation_api
+- report_user_api
+- block_user_api / unblock_user_api / get_blocked_users_api
+- get_message_preference_api / update_message_preference_api
+- get_unread_messages_count_api
+- get_user_public_profile_api / search_users_api
+- update_discoverability_api / touch_messages_page_api
+- 新对话配额(Turnstile) 限流分支
+
+注: MessagePreference 有 post_save 信号在 User 创建时自动建表 (默认 allow_messages=False),
+因此本文件统一通过 _enable_messaging() 显式打开接收开关。
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.core.cache import cache
+from django.test import TestCase, override_settings
+from django.urls import reverse
+from django.utils import timezone
+
+from knowledge_project.models import (
+    ConversationSettings,
+    Message,
+    MessageAttachment,
+    MessagePreference,
+    MessageReport,
+    NewConversationQuotaLog,
+    UserBlocklist,
+    UserFollow,
+)
+
+from ._helpers import login, make_user, parse, post_json
+
+
+def _enable_messaging(user, mode: str = 'all') -> MessagePreference:
+    """打开 user 的接收开关。signal 已创建过 pref,这里走 update 路径。"""
+    pref, _ = MessagePreference.objects.get_or_create(user=user)
+    pref.allow_messages = True
+    pref.message_mode = mode
+    pref.save()
+    return pref
+
+
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+class _MessageTestBase(TestCase):
+    def setUp(self):
+        cache.clear()
+
+
+# =========================================================================
+# send_message_api
+# =========================================================================
+class SendMessageApiTests(_MessageTestBase):
+    def test_send_message_success(self):
+        sender = make_user('snd01_s')
+        recipient = make_user('snd01_r')
+        _enable_messaging(recipient)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hello world',
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            Message.objects.filter(sender=sender, recipient=recipient, content='hello world').exists()
+        )
+
+    def test_cannot_send_to_self(self):
+        user = make_user('snd02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': user.id,
+            'content': 'self talk',
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('自己', parse(response)['error'])
+
+    def test_recipient_blocked_sender(self):
+        sender = make_user('snd03_s')
+        recipient = make_user('snd03_r')
+        _enable_messaging(recipient)
+        UserBlocklist.objects.create(user=recipient, blocked_user=sender)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Message.objects.filter(sender=sender, recipient=recipient).exists())
+
+    def test_sender_blocked_recipient(self):
+        sender = make_user('snd04_s')
+        recipient = make_user('snd04_r')
+        _enable_messaging(recipient)
+        UserBlocklist.objects.create(user=sender, blocked_user=recipient)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('屏蔽', parse(response)['error'])
+
+    def test_recipient_disabled_messages(self):
+        sender = make_user('snd05_s')
+        recipient = make_user('snd05_r')
+        _enable_messaging(recipient, mode='disabled')
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 403)
+
+    def test_recipient_followers_only_blocks_non_follower(self):
+        sender = make_user('snd06_s')
+        recipient = make_user('snd06_r')
+        _enable_messaging(recipient, mode='followers_only')
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('关注', parse(response)['error'])
+
+    def test_recipient_followers_only_allows_follower(self):
+        sender = make_user('snd07_s')
+        recipient = make_user('snd07_r')
+        _enable_messaging(recipient, mode='followers_only')
+        UserFollow.objects.create(follower=sender, following=recipient)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 201)
+
+    def test_recipient_following_only_blocks_non_followed(self):
+        sender = make_user('snd07b_s')
+        recipient = make_user('snd07b_r')
+        _enable_messaging(recipient, mode='following_only')
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 403)
+
+    def test_recipient_following_only_allows_followed(self):
+        sender = make_user('snd07c_s')
+        recipient = make_user('snd07c_r')
+        _enable_messaging(recipient, mode='following_only')
+        UserFollow.objects.create(follower=recipient, following=sender)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 201)
+
+    def test_missing_recipient_id_returns_400(self):
+        sender = make_user('snd08')
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {'content': 'hi'})
+        self.assertEqual(response.status_code, 400)
+
+    def test_empty_content_returns_400(self):
+        sender = make_user('snd09_s')
+        recipient = make_user('snd09_r')
+        _enable_messaging(recipient)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': '',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_invalid_json_returns_400(self):
+        sender = make_user('snd10')
+        login(self.client, sender)
+        response = self.client.post(
+            reverse('send_message_api'), data='not-json', content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_content_too_long_returns_400(self):
+        sender = make_user('snd11_s')
+        recipient = make_user('snd11_r')
+        _enable_messaging(recipient)
+        login(self.client, sender)
+        # 5001 字符 > MESSAGE_CONTENT_MAX_LENGTH 5000
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'a' * 5001,
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_anonymous_user_redirected(self):
+        recipient = make_user('snd12_r')
+        # 未登录: login_required 应当拦截(302 重定向到 login)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'hi',
+        })
+        self.assertIn(response.status_code, (302, 401, 403))
+
+
+# =========================================================================
+# forward_message_api
+# =========================================================================
+class ForwardMessageApiTests(_MessageTestBase):
+    def test_forward_message_to_new_user(self):
+        sender = make_user('fwd01_s')
+        original_recipient = make_user('fwd01_or')
+        new_recipient = make_user('fwd01_nr')
+        _enable_messaging(original_recipient)
+        _enable_messaging(new_recipient)
+        src = Message.objects.create(sender=sender, recipient=original_recipient, content='原内容')
+        login(self.client, sender)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'message_id': src.id,
+            'recipient_id': new_recipient.id,
+        })
+        self.assertEqual(response.status_code, 201)
+        # 应该有 2 条 Message: 原始 + 转发
+        forwarded = Message.objects.filter(sender=sender, recipient=new_recipient)
+        self.assertTrue(forwarded.exists())
+        self.assertEqual(forwarded.first().content, '原内容')
+
+    def test_forward_missing_params(self):
+        sender = make_user('fwd02')
+        login(self.client, sender)
+        response = post_json(self.client, reverse('forward_message_api'), {})
+        self.assertEqual(response.status_code, 400)
+
+    def test_forward_unrelated_message_forbidden(self):
+        outsider = make_user('fwd03_o')
+        a = make_user('fwd03_a')
+        b = make_user('fwd03_b')
+        _enable_messaging(outsider)
+        src = Message.objects.create(sender=a, recipient=b, content='私密')
+        login(self.client, outsider)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'message_id': src.id,
+            'recipient_id': outsider.id,
+        })
+        # outsider 既不是 sender 也不是 recipient,不能转发
+        self.assertEqual(response.status_code, 403)
+
+
+# =========================================================================
+# get_messages_api
+# =========================================================================
+class GetMessagesApiTests(_MessageTestBase):
+    def test_get_messages_returns_both_directions(self):
+        alice = make_user('gm01_a')
+        bob = make_user('gm01_b')
+        Message.objects.create(sender=alice, recipient=bob, content='A→B')
+        Message.objects.create(sender=bob, recipient=alice, content='B→A')
+        login(self.client, alice)
+        response = self.client.get(reverse('get_messages_api') + f'?user_id={bob.id}')
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        contents = {m['content'] for m in body['messages']}
+        self.assertEqual(contents, {'A→B', 'B→A'})
+
+    def test_get_messages_marks_received_as_read(self):
+        alice = make_user('gm02_a')
+        bob = make_user('gm02_b')
+        m1 = Message.objects.create(sender=bob, recipient=alice, content='x', is_read=False)
+        m2 = Message.objects.create(sender=bob, recipient=alice, content='y', is_read=False)
+        login(self.client, alice)
+        self.client.get(reverse('get_messages_api') + f'?user_id={bob.id}')
+        m1.refresh_from_db()
+        m2.refresh_from_db()
+        self.assertTrue(m1.is_read)
+        self.assertTrue(m2.is_read)
+
+    def test_get_messages_excludes_recalled(self):
+        alice = make_user('gm03_a')
+        bob = make_user('gm03_b')
+        Message.objects.create(sender=alice, recipient=bob, content='正常')
+        Message.objects.create(
+            sender=alice, recipient=bob, content='已撤回', is_recalled=True,
+        )
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_messages_api') + f'?user_id={bob.id}'))
+        contents = {m['content'] for m in body['messages']}
+        self.assertEqual(contents, {'正常'})
+
+    def test_get_messages_supports_query_search(self):
+        alice = make_user('gm04_a')
+        bob = make_user('gm04_b')
+        Message.objects.create(sender=alice, recipient=bob, content='今天去打篮球', searchable_text='今天去打篮球')
+        Message.objects.create(sender=bob, recipient=alice, content='不用了 我去看电影', searchable_text='不用了 我去看电影')
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_messages_api') + f'?user_id={bob.id}&q=篮球'))
+        contents = {m['content'] for m in body['messages']}
+        self.assertEqual(contents, {'今天去打篮球'})
+
+    def test_missing_user_id_returns_400(self):
+        user = make_user('gm05')
+        login(self.client, user)
+        response = self.client.get(reverse('get_messages_api'))
+        self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# get_message_conversations_api
+# =========================================================================
+class ConversationListTests(_MessageTestBase):
+    def test_empty_user_returns_empty_list(self):
+        user = make_user('cv01')
+        login(self.client, user)
+        body = parse(self.client.get(reverse('get_message_conversations_api')))
+        self.assertEqual(body.get('conversations', []), [])
+
+    def test_lists_each_peer_once(self):
+        alice = make_user('cv02_a')
+        bob = make_user('cv02_b')
+        Message.objects.create(sender=alice, recipient=bob, content='m1')
+        Message.objects.create(sender=bob, recipient=alice, content='m2')
+        Message.objects.create(sender=alice, recipient=bob, content='m3')
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_message_conversations_api')))
+        peer_ids = [c['user_id'] for c in body['conversations']]
+        self.assertEqual(peer_ids, [bob.id])
+
+    def test_blocked_scope_returns_block_list(self):
+        user = make_user('cv03')
+        blocked = make_user('cv03_blocked')
+        UserBlocklist.objects.create(user=user, blocked_user=blocked)
+        login(self.client, user)
+        body = parse(self.client.get(reverse('get_message_conversations_api') + '?scope=blocked'))
+        items = body.get('conversations') or body.get('blocked_users') or body
+        self.assertTrue(any(u.get('user_id') == blocked.id or u.get('username') == blocked.username
+                            for u in items))
+
+    def test_unread_scope_filters_read_conversations(self):
+        alice = make_user('cv04_a')
+        bob = make_user('cv04_b')
+        carol = make_user('cv04_c')
+        # bob → alice 未读
+        Message.objects.create(sender=bob, recipient=alice, content='unread', is_read=False)
+        # alice → carol 已读(没有未读)
+        Message.objects.create(sender=alice, recipient=carol, content='sent')
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_message_conversations_api') + '?scope=unread'))
+        peer_ids = [c['user_id'] for c in body['conversations']]
+        self.assertEqual(peer_ids, [bob.id])
+
+
+# =========================================================================
+# delete_message_api / bulk_delete_messages_api / clear_conversation_api
+# =========================================================================
+class DeleteMessageApiTests(_MessageTestBase):
+    def test_self_delete_hides_for_sender_only(self):
+        alice = make_user('dl01_a')
+        bob = make_user('dl01_b')
+        msg = Message.objects.create(sender=alice, recipient=bob, content='hello')
+        login(self.client, alice)
+        response = post_json(self.client, reverse('delete_message_api', args=[msg.id]), {'scope': 'self'})
+        self.assertEqual(response.status_code, 200)
+        msg.refresh_from_db()
+        self.assertTrue(msg.deleted_for_sender)
+        self.assertFalse(msg.deleted_for_recipient)
+        self.assertFalse(msg.is_recalled)
+
+    def test_recall_within_window(self):
+        alice = make_user('dl02_a')
+        bob = make_user('dl02_b')
+        msg = Message.objects.create(sender=alice, recipient=bob, content='oops')
+        login(self.client, alice)
+        response = post_json(self.client, reverse('delete_message_api', args=[msg.id]), {'scope': 'both'})
+        self.assertEqual(response.status_code, 200)
+        msg.refresh_from_db()
+        self.assertTrue(msg.is_recalled)
+
+    def test_recall_after_window_rejected(self):
+        alice = make_user('dl03_a')
+        bob = make_user('dl03_b')
+        msg = Message.objects.create(sender=alice, recipient=bob, content='old')
+        # 模拟超过 120s 窗口
+        Message.objects.filter(pk=msg.pk).update(
+            created_at=timezone.now() - timedelta(seconds=300)
+        )
+        login(self.client, alice)
+        response = post_json(self.client, reverse('delete_message_api', args=[msg.id]), {'scope': 'both'})
+        self.assertEqual(response.status_code, 403)
+        msg.refresh_from_db()
+        self.assertFalse(msg.is_recalled)
+
+    def test_only_sender_can_recall(self):
+        alice = make_user('dl04_a')
+        bob = make_user('dl04_b')
+        msg = Message.objects.create(sender=alice, recipient=bob, content='alice 发的')
+        login(self.client, bob)
+        response = post_json(self.client, reverse('delete_message_api', args=[msg.id]), {'scope': 'both'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_outsider_cannot_delete(self):
+        alice = make_user('dl05_a')
+        bob = make_user('dl05_b')
+        outsider = make_user('dl05_o')
+        msg = Message.objects.create(sender=alice, recipient=bob, content='私密')
+        login(self.client, outsider)
+        response = post_json(self.client, reverse('delete_message_api', args=[msg.id]), {'scope': 'self'})
+        self.assertEqual(response.status_code, 403)
+
+
+class BulkDeleteMessagesApiTests(_MessageTestBase):
+    def test_bulk_delete_marks_messages_hidden(self):
+        alice = make_user('bd01_a')
+        bob = make_user('bd01_b')
+        m1 = Message.objects.create(sender=alice, recipient=bob, content='m1')
+        m2 = Message.objects.create(sender=bob, recipient=alice, content='m2')
+        login(self.client, alice)
+        response = post_json(self.client, reverse('bulk_delete_messages_api'), {
+            'message_ids': [m1.id, m2.id],
+        })
+        self.assertEqual(response.status_code, 200)
+        m1.refresh_from_db()
+        m2.refresh_from_db()
+        self.assertTrue(m1.deleted_for_sender)  # alice 是发送者
+        self.assertTrue(m2.deleted_for_recipient)  # alice 是接收者
+
+    def test_bulk_delete_empty_list_rejected(self):
+        user = make_user('bd02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('bulk_delete_messages_api'), {'message_ids': []})
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_delete_rejects_unrelated_messages(self):
+        alice = make_user('bd03_a')
+        bob = make_user('bd03_b')
+        carol = make_user('bd03_c')
+        m1 = Message.objects.create(sender=alice, recipient=bob, content='ab')
+        m_other = Message.objects.create(sender=bob, recipient=carol, content='bc')
+        login(self.client, alice)
+        response = post_json(self.client, reverse('bulk_delete_messages_api'), {
+            'message_ids': [m1.id, m_other.id],
+        })
+        self.assertEqual(response.status_code, 403)
+
+
+class ClearConversationApiTests(_MessageTestBase):
+    def test_clear_sets_cleared_before(self):
+        alice = make_user('cl01_a')
+        bob = make_user('cl01_b')
+        Message.objects.create(sender=alice, recipient=bob, content='m1')
+        login(self.client, alice)
+        response = post_json(self.client, reverse('clear_conversation_api'), {'user_id': bob.id})
+        self.assertEqual(response.status_code, 200)
+        cs = ConversationSettings.objects.get(user=alice, peer=bob)
+        self.assertIsNotNone(cs.cleared_before)
+        # 消息记录还在数据库
+        self.assertTrue(Message.objects.filter(content='m1').exists())
+
+    def test_clear_missing_user_id(self):
+        user = make_user('cl02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('clear_conversation_api'), {})
+        self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# mark_conversation_read_api / mark_conversation_unread_api
+# =========================================================================
+class ConversationReadStateTests(_MessageTestBase):
+    def test_mark_conversation_read(self):
+        alice = make_user('rs01_a')
+        bob = make_user('rs01_b')
+        Message.objects.create(sender=bob, recipient=alice, content='x', is_read=False)
+        Message.objects.create(sender=bob, recipient=alice, content='y', is_read=False)
+        login(self.client, alice)
+        response = post_json(self.client, reverse('mark_conversation_read_api'), {'user_id': bob.id})
+        self.assertEqual(response.status_code, 200)
+        unread = Message.objects.filter(sender=bob, recipient=alice, is_read=False).count()
+        self.assertEqual(unread, 0)
+
+    def test_mark_conversation_unread(self):
+        alice = make_user('rs02_a')
+        bob = make_user('rs02_b')
+        login(self.client, alice)
+        response = post_json(self.client, reverse('mark_conversation_unread_api'), {'user_id': bob.id})
+        self.assertEqual(response.status_code, 200)
+        cs = ConversationSettings.objects.get(user=alice, peer=bob)
+        self.assertTrue(cs.force_unread)
+
+    def test_mark_unread_invalid_body(self):
+        user = make_user('rs03')
+        login(self.client, user)
+        response = self.client.post(
+            reverse('mark_conversation_unread_api'),
+            data='not-json',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# toggle_pin / toggle_mute / toggle_archive
+# =========================================================================
+class ConversationToggleTests(_MessageTestBase):
+    def test_toggle_pin(self):
+        a = make_user('tp01_a')
+        b = make_user('tp01_b')
+        login(self.client, a)
+        response = post_json(self.client, reverse('toggle_pin_api'), {'user_id': b.id, 'value': True})
+        self.assertEqual(response.status_code, 200)
+        cs = ConversationSettings.objects.get(user=a, peer=b)
+        self.assertTrue(cs.is_pinned)
+        self.assertIsNotNone(cs.pinned_at)
+        # 取消
+        post_json(self.client, reverse('toggle_pin_api'), {'user_id': b.id, 'value': False})
+        cs.refresh_from_db()
+        self.assertFalse(cs.is_pinned)
+        self.assertIsNone(cs.pinned_at)
+
+    def test_toggle_mute(self):
+        a = make_user('tp02_a')
+        b = make_user('tp02_b')
+        login(self.client, a)
+        post_json(self.client, reverse('toggle_mute_api'), {'user_id': b.id, 'value': True})
+        cs = ConversationSettings.objects.get(user=a, peer=b)
+        self.assertTrue(cs.is_muted)
+
+    def test_toggle_archive(self):
+        a = make_user('tp03_a')
+        b = make_user('tp03_b')
+        login(self.client, a)
+        post_json(self.client, reverse('toggle_archive_api'), {'user_id': b.id, 'value': True})
+        cs = ConversationSettings.objects.get(user=a, peer=b)
+        self.assertTrue(cs.is_archived)
+        self.assertIsNotNone(cs.archived_at)
+
+    def test_toggle_missing_user_id(self):
+        user = make_user('tp04')
+        login(self.client, user)
+        response = post_json(self.client, reverse('toggle_pin_api'), {'value': True})
+        self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# set_disappearing_api / get_conversation_settings_api
+# =========================================================================
+class DisappearingMessagesTests(_MessageTestBase):
+    def test_enable_disappearing(self):
+        a = make_user('dm01_a')
+        b = make_user('dm01_b')
+        login(self.client, a)
+        response = post_json(self.client, reverse('set_disappearing_api'), {
+            'user_id': b.id, 'enabled': True, 'ttl_seconds': 3600,
+        })
+        self.assertEqual(response.status_code, 200)
+        cs = ConversationSettings.objects.get(user=a, peer=b)
+        self.assertTrue(cs.disappearing_enabled)
+        self.assertEqual(cs.disappearing_ttl_seconds, 3600)
+
+    def test_disappearing_rejects_invalid_ttl(self):
+        a = make_user('dm02_a')
+        b = make_user('dm02_b')
+        login(self.client, a)
+        # > 4 周
+        response = post_json(self.client, reverse('set_disappearing_api'), {
+            'user_id': b.id, 'enabled': True, 'ttl_seconds': 9999999,
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_get_conversation_settings(self):
+        a = make_user('dm03_a')
+        b = make_user('dm03_b')
+        cs = ConversationSettings.objects.create(user=a, peer=b, is_pinned=True)
+        login(self.client, a)
+        body = parse(self.client.get(reverse('get_conversation_settings_api') + f'?user_id={b.id}'))
+        self.assertTrue(body['settings']['is_pinned'])
+
+    def test_disappearing_destroys_read_messages_over_ttl(self):
+        a = make_user('dm04_a')
+        b = make_user('dm04_b')
+        # a 启用阅后即焚, ttl=0(立即)
+        ConversationSettings.objects.create(
+            user=a, peer=b, disappearing_enabled=True, disappearing_ttl_seconds=0,
+        )
+        m = Message.objects.create(
+            sender=b, recipient=a, content='auto-burn', is_read=True, read_at=timezone.now() - timedelta(seconds=10),
+        )
+        login(self.client, a)
+        # 触发 _apply_disappearing
+        self.client.get(reverse('get_messages_api') + f'?user_id={b.id}')
+        m.refresh_from_db()
+        self.assertTrue(m.is_recalled)
+
+
+# =========================================================================
+# search_messages_api
+# =========================================================================
+class SearchMessagesApiTests(_MessageTestBase):
+    def test_search_finds_matching(self):
+        alice = make_user('sm01_a')
+        bob = make_user('sm01_b')
+        carol = make_user('sm01_c')
+        Message.objects.create(sender=alice, recipient=bob, content='HelloWorldFoo', searchable_text='HelloWorldFoo')
+        Message.objects.create(sender=carol, recipient=alice, content='OtherMessageBar', searchable_text='OtherMessageBar')
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('search_messages_api') + '?q=HelloWorldFoo'))
+        contents = {r['content'] for r in body['results']}
+        self.assertIn('HelloWorldFoo', contents)
+        self.assertNotIn('OtherMessageBar', contents)
+
+    def test_search_below_min_length_returns_empty(self):
+        user = make_user('sm02')
+        login(self.client, user)
+        body = parse(self.client.get(reverse('search_messages_api') + '?q=a'))
+        self.assertEqual(body.get('results', []), [])
+
+
+# =========================================================================
+# export_conversation_api
+# =========================================================================
+class ExportConversationApiTests(_MessageTestBase):
+    def test_export_returns_txt(self):
+        a = make_user('ex01_a')
+        b = make_user('ex01_b')
+        Message.objects.create(sender=a, recipient=b, content='Line 1')
+        Message.objects.create(sender=b, recipient=a, content='Line 2')
+        login(self.client, a)
+        response = self.client.get(reverse('export_conversation_api') + f'?user_id={b.id}')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('text/plain', response['Content-Type'])
+        body = response.content.decode('utf-8')
+        self.assertIn('Line 1', body)
+        self.assertIn('Line 2', body)
+        self.assertIn('attachment', response['Content-Disposition'])
+
+    def test_export_missing_user_id(self):
+        user = make_user('ex02')
+        login(self.client, user)
+        response = self.client.get(reverse('export_conversation_api'))
+        self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# report_user_api
+# =========================================================================
+class ReportUserApiTests(_MessageTestBase):
+    def test_report_user_success(self):
+        a = make_user('rp01_a')
+        b = make_user('rp01_b')
+        login(self.client, a)
+        response = post_json(self.client, reverse('report_user_api'), {
+            'user_id': b.id, 'reason': 'spam', 'detail': '广告刷屏',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(MessageReport.objects.filter(reporter=a, reported_user=b, reason='spam').exists())
+
+    def test_cannot_report_self(self):
+        user = make_user('rp02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('report_user_api'), {
+            'user_id': user.id, 'reason': 'other',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_report_invalid_reason(self):
+        a = make_user('rp03_a')
+        b = make_user('rp03_b')
+        login(self.client, a)
+        response = post_json(self.client, reverse('report_user_api'), {
+            'user_id': b.id, 'reason': 'made_up_reason',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_report_message_marks_was_reported(self):
+        a = make_user('rp04_a')
+        b = make_user('rp04_b')
+        msg = Message.objects.create(sender=b, recipient=a, content='坏话')
+        login(self.client, a)
+        post_json(self.client, reverse('report_user_api'), {
+            'user_id': b.id, 'message_id': msg.id, 'reason': 'abuse',
+        })
+        msg.refresh_from_db()
+        self.assertTrue(msg.was_reported)
+
+    def test_outsider_cannot_report_message(self):
+        a = make_user('rp05_a')
+        b = make_user('rp05_b')
+        outsider = make_user('rp05_o')
+        msg = Message.objects.create(sender=a, recipient=b, content='私聊内容')
+        login(self.client, outsider)
+        response = post_json(self.client, reverse('report_user_api'), {
+            'user_id': a.id, 'message_id': msg.id, 'reason': 'spam',
+        })
+        self.assertEqual(response.status_code, 403)
+
+
+# =========================================================================
+# get_unread_messages_count_api
+# =========================================================================
+class UnreadCountApiTests(_MessageTestBase):
+    def test_zero_unread(self):
+        user = make_user('uc01')
+        login(self.client, user)
+        body = parse(self.client.get(reverse('get_unread_messages_count_api')))
+        self.assertEqual(body.get('unread_count', 0), 0)
+
+    def test_counts_only_unread(self):
+        alice = make_user('uc02_a')
+        bob = make_user('uc02_b')
+        Message.objects.create(sender=bob, recipient=alice, content='r1', is_read=True)
+        Message.objects.create(sender=bob, recipient=alice, content='u1', is_read=False)
+        Message.objects.create(sender=bob, recipient=alice, content='u2', is_read=False)
+        Message.objects.create(sender=alice, recipient=bob, content='out', is_read=False)
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_unread_messages_count_api')))
+        self.assertEqual(body['unread_count'], 2)
+
+    def test_excludes_deleted_for_recipient(self):
+        alice = make_user('uc03_a')
+        bob = make_user('uc03_b')
+        Message.objects.create(sender=bob, recipient=alice, content='visible', is_read=False)
+        Message.objects.create(
+            sender=bob, recipient=alice, content='hidden',
+            is_read=False, deleted_for_recipient=True,
+        )
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_unread_messages_count_api')))
+        self.assertEqual(body['unread_count'], 1)
+
+    def test_excludes_recalled(self):
+        alice = make_user('uc04_a')
+        bob = make_user('uc04_b')
+        Message.objects.create(sender=bob, recipient=alice, content='ok', is_read=False)
+        Message.objects.create(sender=bob, recipient=alice, content='gone', is_read=False, is_recalled=True)
+        login(self.client, alice)
+        body = parse(self.client.get(reverse('get_unread_messages_count_api')))
+        self.assertEqual(body['unread_count'], 1)
+
+
+# =========================================================================
+# get_message_preference_api / update_message_preference_api
+# =========================================================================
+class MessagePreferenceTests(_MessageTestBase):
+    def test_get_default_preference(self):
+        user = make_user('mp01')
+        login(self.client, user)
+        body = parse(self.client.get(reverse('get_message_preference_api')))
+        self.assertIn(body['preference']['message_mode'],
+                      ['all', 'followers_only', 'following_only', 'disabled'])
+
+    def test_update_preference(self):
+        user = make_user('mp02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('update_message_preference_api'), {
+            'message_mode': 'followers_only',
+            'show_read_status': False,
+        })
+        self.assertEqual(response.status_code, 200)
+        pref = MessagePreference.objects.get(user=user)
+        self.assertEqual(pref.message_mode, 'followers_only')
+        self.assertFalse(pref.show_read_status)
+
+    def test_update_rejects_invalid_mode(self):
+        user = make_user('mp03')
+        login(self.client, user)
+        post_json(self.client, reverse('update_message_preference_api'), {
+            'message_mode': 'invalid_mode',
+        })
+        pref = MessagePreference.objects.get(user=user)
+        self.assertNotEqual(pref.message_mode, 'invalid_mode')
+
+    def test_update_truncates_auto_reply(self):
+        user = make_user('mp04')
+        login(self.client, user)
+        long_text = 'x' * 1000
+        post_json(self.client, reverse('update_message_preference_api'), {
+            'auto_reply_enabled': True,
+            'auto_reply_text': long_text,
+        })
+        pref = MessagePreference.objects.get(user=user)
+        self.assertEqual(len(pref.auto_reply_text), 500)
+
+
+# =========================================================================
+# block_user_api / unblock_user_api / get_blocked_users_api
+# =========================================================================
+class BlockApiTests(_MessageTestBase):
+    def test_block_user(self):
+        a = make_user('bk01_a')
+        b = make_user('bk01_b')
+        login(self.client, a)
+        response = post_json(self.client, reverse('block_user_api'), {
+            'user_id': b.id, 'reason': 'spam',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(UserBlocklist.objects.filter(user=a, blocked_user=b).exists())
+
+    def test_block_cannot_target_self(self):
+        user = make_user('bk02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('block_user_api'), {'user_id': user.id})
+        self.assertEqual(response.status_code, 400)
+
+    def test_block_missing_user_id(self):
+        user = make_user('bk03')
+        login(self.client, user)
+        response = post_json(self.client, reverse('block_user_api'), {})
+        self.assertEqual(response.status_code, 400)
+
+    def test_block_is_idempotent(self):
+        a = make_user('bk04_a')
+        b = make_user('bk04_b')
+        UserBlocklist.objects.create(user=a, blocked_user=b, reason='first')
+        login(self.client, a)
+        response = post_json(self.client, reverse('block_user_api'), {
+            'user_id': b.id, 'reason': 'updated',
+        })
+        self.assertEqual(response.status_code, 200)
+        bl = UserBlocklist.objects.get(user=a, blocked_user=b)
+        self.assertEqual(bl.reason, 'updated')
+
+    def test_unblock_user(self):
+        a = make_user('bk05_a')
+        b = make_user('bk05_b')
+        UserBlocklist.objects.create(user=a, blocked_user=b)
+        login(self.client, a)
+        response = post_json(self.client, reverse('unblock_user_api'), {'user_id': b.id})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserBlocklist.objects.filter(user=a, blocked_user=b).exists())
+
+    def test_unblock_missing_user_id(self):
+        user = make_user('bk06')
+        login(self.client, user)
+        response = post_json(self.client, reverse('unblock_user_api'), {})
+        self.assertEqual(response.status_code, 400)
+
+    def test_get_blocked_list(self):
+        a = make_user('bk07_a')
+        b = make_user('bk07_b')
+        c = make_user('bk07_c')
+        UserBlocklist.objects.create(user=a, blocked_user=b)
+        UserBlocklist.objects.create(user=a, blocked_user=c)
+        login(self.client, a)
+        body = parse(self.client.get(reverse('get_blocked_users_api')))
+        ids = {u['id'] for u in body['blocked_users']}
+        self.assertEqual(ids, {b.id, c.id})
+
+
+# =========================================================================
+# get_user_public_profile_api
+# =========================================================================
+class UserPublicProfileApiTests(_MessageTestBase):
+    def test_get_user_profile_basic(self):
+        target = make_user('pp01_t')
+        body = parse(self.client.get(reverse('get_user_public_profile_api', args=[target.id])))
+        self.assertEqual(body['status'], 'success')
+        self.assertEqual(body['id'], target.id)
+        self.assertEqual(body['username'], target.username)
+        self.assertIn('avatar', body)
+        self.assertIn('public_notes_url', body)
+
+    def test_get_user_profile_nonexistent_returns_404(self):
+        response = self.client.get(reverse('get_user_public_profile_api', args=[9999999]))
+        self.assertEqual(response.status_code, 404)
+
+
+# =========================================================================
+# search_users_api
+# =========================================================================
+class SearchUsersApiTests(_MessageTestBase):
+    def test_short_query_returns_empty(self):
+        body = parse(self.client.get(reverse('search_users_api') + '?q=ab'))
+        self.assertEqual(body.get('users', []), [])
+
+    def test_search_by_username_requires_discoverable(self):
+        target = make_user('searchable_user')
+        # 默认 discoverable_by_username=False -> 找不到
+        body = parse(self.client.get(reverse('search_users_api') + '?q=searchable_user'))
+        self.assertEqual(body.get('users', []), [])
+
+        # 打开开关后能命中
+        target.profile.discoverable_by_username = True
+        target.profile.save(update_fields=['discoverable_by_username'])
+        body = parse(self.client.get(reverse('search_users_api') + '?q=searchable_user'))
+        self.assertEqual(len(body['users']), 1)
+        self.assertEqual(body['users'][0]['id'], target.id)
+
+    def test_cannot_search_self(self):
+        user = make_user('selfsearch01')
+        user.profile.discoverable_by_username = True
+        user.profile.save(update_fields=['discoverable_by_username'])
+        login(self.client, user)
+        body = parse(self.client.get(reverse('search_users_api') + '?q=selfsearch01'))
+        self.assertEqual(body.get('users', []), [])
+
+    def test_search_by_search_code(self):
+        target = make_user('codesearch01')
+        target.profile.search_code = 'ABCD1234'
+        target.profile.save(update_fields=['search_code'])
+        body = parse(self.client.get(reverse('search_users_api') + '?q=ABCD1234'))
+        self.assertEqual(len(body['users']), 1)
+        self.assertEqual(body['users'][0]['matched_by'], 'code')
+
+
+# =========================================================================
+# update_discoverability_api
+# =========================================================================
+class DiscoverabilityApiTests(_MessageTestBase):
+    def test_get_discoverability(self):
+        user = make_user('dc01')
+        login(self.client, user)
+        body = parse(self.client.get(reverse('update_discoverability_api')))
+        self.assertEqual(body['status'], 'success')
+        self.assertIn('discoverable_by_username', body)
+        self.assertIn('search_code', body)
+
+    def test_update_discoverability(self):
+        user = make_user('dc02')
+        login(self.client, user)
+        response = post_json(self.client, reverse('update_discoverability_api'), {
+            'discoverable_by_username': True,
+            'discoverable_by_email': True,
+        })
+        self.assertEqual(response.status_code, 200)
+        user.profile.refresh_from_db()
+        self.assertTrue(user.profile.discoverable_by_username)
+        self.assertTrue(user.profile.discoverable_by_email)
+
+    def test_regenerate_search_code(self):
+        user = make_user('dc03')
+        old_code = user.profile.search_code
+        login(self.client, user)
+        body = parse(post_json(self.client, reverse('update_discoverability_api'), {
+            'regenerate_code': True,
+        }))
+        self.assertEqual(body['status'], 'success')
+        new_code = body['search_code']
+        self.assertEqual(len(new_code), 8)
+        if old_code:
+            self.assertNotEqual(new_code, old_code)
+
+
+# =========================================================================
+# touch_messages_page_api
+# =========================================================================
+class TouchMessagesPageTests(_MessageTestBase):
+    def test_touch_updates_session(self):
+        user = make_user('tm01')
+        login(self.client, user)
+        response = post_json(self.client, reverse('touch_messages_page_api'), {})
+        self.assertEqual(response.status_code, 200)
+        # session 中应该写了 messages_page_active_at
+        self.assertIn('messages_page_active_at', self.client.session)
+
+
+# =========================================================================
+# 新对话配额(Turnstile) 限流分支
+# =========================================================================
+class NewConversationQuotaTests(_MessageTestBase):
+    def test_quota_under_limit_does_not_require_turnstile(self):
+        sender = make_user('nq01_s')
+        recipient = make_user('nq01_r')
+        _enable_messaging(recipient)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'first time',
+        })
+        self.assertEqual(response.status_code, 201)
+        # 应该有配额日志记录
+        self.assertTrue(NewConversationQuotaLog.objects.filter(user=sender, peer=recipient).exists())
+
+    def test_quota_exceeded_requires_turnstile(self):
+        sender = make_user('nq02_s')
+        login(self.client, sender)
+        # 创建 5 条已用配额日志(= NEW_CONV_DAILY_LIMIT)
+        for i in range(5):
+            peer = make_user(f'nq02_peer{i}')
+            NewConversationQuotaLog.objects.create(user=sender, peer=peer)
+        new_peer = make_user('nq02_new_peer')
+        _enable_messaging(new_peer)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': new_peer.id,
+            'content': 'hi',
+        })
+        self.assertEqual(response.status_code, 429)
+        body = parse(response)
+        self.assertTrue(body.get('need_turnstile'))
+
+    def test_quota_exceeded_passes_with_valid_turnstile(self):
+        sender = make_user('nq03_s')
+        login(self.client, sender)
+        for i in range(5):
+            peer = make_user(f'nq03_peer{i}')
+            NewConversationQuotaLog.objects.create(user=sender, peer=peer)
+        new_peer = make_user('nq03_new_peer')
+        _enable_messaging(new_peer)
+        with patch('knowledge_project.utils.turnstile.verify_turnstile_token', return_value=True):
+            response = post_json(self.client, reverse('send_message_api'), {
+                'recipient_id': new_peer.id,
+                'content': 'hi',
+                'turnstile_token': 'fake-valid-token',
+            })
+        self.assertEqual(response.status_code, 201)
+        # 应当记录 turnstile_passed=True
+        log = NewConversationQuotaLog.objects.filter(user=sender, peer=new_peer).first()
+        self.assertIsNotNone(log)
+        self.assertTrue(log.turnstile_passed)
+
+    def test_existing_conversation_skips_quota(self):
+        sender = make_user('nq04_s')
+        recipient = make_user('nq04_r')
+        _enable_messaging(recipient)
+        # 双方已有对话
+        Message.objects.create(sender=recipient, recipient=sender, content='历史消息')
+        # 用满 5 个其它新对话配额
+        for i in range(5):
+            peer = make_user(f'nq04_peer{i}')
+            NewConversationQuotaLog.objects.create(user=sender, peer=peer)
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': recipient.id,
+            'content': 'reply',
+        })
+        # 不算新对话,不应该 429
+        self.assertEqual(response.status_code, 201)
+
+
+# =========================================================================
+# 附件上传 (无文件 / 无效类型)
+# =========================================================================
+class UploadAttachmentApiTests(_MessageTestBase):
+    def test_upload_without_file_returns_400(self):
+        user = make_user('ua01')
+        login(self.client, user)
+        response = self.client.post(reverse('upload_message_attachment_api'), {})
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_unsupported_type_returns_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        user = make_user('ua02')
+        login(self.client, user)
+        # text/html 不在白名单
+        bad = SimpleUploadedFile('evil.html', b'<html></html>', content_type='text/html')
+        response = self.client.post(reverse('upload_message_attachment_api'), {'file': bad})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(MessageAttachment.objects.filter(uploader=user).exists())

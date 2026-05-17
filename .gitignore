@@ -14,7 +14,7 @@ uploads/
 xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5
-
+settings_test.py
 # Python 字节码与缓存
 __pycache__/
 *.py[cod]
@@ -31,3 +31,4 @@ staticfiles/
 
 # 本地 HTTPS dev 证书（mkcert 签发，各自机器本地生成，不入库）
 certs/
+
