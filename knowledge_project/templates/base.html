@@ -14,23 +14,10 @@
     <!-- FontAwesome Web Fonts模式 - 只加载CSS,不加载JS -->
     <link href="{% static 'fontawesome-free-6.7.2/css/all.min.css' %}" rel="stylesheet">
 
-    <!-- Material Icons -->
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
-
     <link href="{% static 'css/modern-base.css' %}" rel="stylesheet">
   <link href="{% static 'css/modern-animations.css' %}" rel="stylesheet">
   <link href="{% static 'css/layout-fix.css' %}" rel="stylesheet">
     <link href="{% static 'css/modern-inputs.css' %}" rel="stylesheet">
-<!--    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>-->
-    <script src="{%static 'JS/vue/vue.global.js'%}"></script>
-    <!-- Vue 3 -->
-<!--    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>-->
-    <script src="{%static 'JS/vue/vue.global.prod.js'%}"></script>
-    <!-- Element Plus -->
-<!--    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />-->
-    <link rel="stylesheet" href="{%static 'css/element-plus/index.css' %}" />
-<!--    <script src="https://unpkg.com/element-plus"></script>-->
-    <script src="{%static 'JS/element-plus/element-plus.js' %}"></script>
 
     <link href="{% static 'css/contents.css' %}" rel="stylesheet">
 
@@ -101,8 +88,8 @@
     <script type="module" src="{% static 'dist/theme-manager.js' %}"></script>
 
     <!-- 动画和交互效果 -->
-    <script src="{% static 'lib/particles.js' %}"></script>
-    <script src="{% static 'lib/scroll-animations.js' %}"></script>
+    <script src="{% static 'lib/particles.js' %}" defer></script>
+    <script src="{% static 'lib/scroll-animations.js' %}" defer></script>
 
     {% block head_extra %}{% endblock %}
 

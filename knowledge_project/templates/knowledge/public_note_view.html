@@ -6,7 +6,6 @@
 {% endblock %}
 
 {% block head_extra %}
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="{% static 'css/modern-note-detail.css' %}?v=author-card-inline-1">
     {% if user.is_authenticated %}
     <meta name="username" content="{{ user.username }}">
