@@ -210,6 +210,22 @@
       "assets/messages.css"
     ]
   },
+  "src/entries/moderation.js": {
+    "file": "moderation.js",
+    "name": "moderation",
+    "src": "src/entries/moderation.js",
+    "isEntry": true,
+    "imports": [
+      "_vue-vendor-BycGvb3a.js",
+      "_element-plus-3zH3XlIy.js",
+      "src/utils/csrf.js",
+      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_vendor-wzGsUuS6.js"
+    ],
+    "css": [
+      "assets/moderation.css"
+    ]
+  },
   "src/entries/public-note-entry.js": {
     "file": "public-note-entry.js",
     "name": "public-note-entry",

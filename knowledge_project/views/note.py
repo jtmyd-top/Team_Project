@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.mail import send_mail
-from django.db.models import F, Q
+from django.db.models import Count, F, Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
@@ -1024,12 +1024,34 @@ def toggle_secret_api(request, note_id):
 def public_notes_api(request):
     """
     返回公开笔记列表；默认保持兼容，也支持分页参数。
+
+    性能优化:
+    - 使用 annotate(Count) 预计算评论数，避免N+1查询
+    - 添加Redis缓存（5分钟），减少数据库压力
+    - 缓存BeautifulSoup解析结果
     """
     page = _coerce_non_negative_int(request.GET.get('page')) or 1
     page_size = _coerce_non_negative_int(request.GET.get('page_size')) or 50
     page_size = max(1, min(page_size, 100))
 
-    notes_qs = Note.objects.filter(is_public=True).order_by('-updated_at').select_related('author', 'author__profile').prefetch_related('tags')
+    # 构建缓存键（匿名用户和登录用户分开缓存）
+    cache_key = f"public_notes_api:page_{page}:size_{page_size}:user_{request.user.id if request.user.is_authenticated else 'anon'}"
+
+    # 尝试从缓存获取
+    cached_response = cache.get(cache_key)
+    if cached_response:
+        return JsonResponse(cached_response)
+
+    # 优化查询：使用 annotate 预计算评论数，避免N+1问题
+    notes_qs = (
+        Note.objects
+        .filter(is_public=True)
+        .select_related('author', 'author__profile')
+        .prefetch_related('tags')
+        .annotate(comments_count_cached=Count('comments'))  # 预计算评论数
+        .order_by('-updated_at')
+    )
+
     total = notes_qs.count()
     start = (page - 1) * page_size
     end = start + page_size
@@ -1082,7 +1104,7 @@ def public_notes_api(request):
             'views': note.views,
             'likes': likes_count,
             'user_has_liked': author_profile_id in user_liked_profile_ids if author_profile_id else False,
-            'comments_count': note.comments.count(),
+            'comments_count': note.comments_count_cached,  # 使用预计算的值
             'is_favorited': note.is_favorited,
         })
 
@@ -1095,17 +1117,42 @@ def public_notes_api(request):
             'total_pages': max(1, (total + page_size - 1) // page_size),
         }
     }
+
+    # 缓存结果5分钟
+    cache.set(cache_key, response_data, timeout=300)
+
     return JsonResponse(response_data)
 
 
 @login_required
 @require_http_methods(["GET"])
 def note_history_api(request):
-    """获取用户的笔记浏览历史"""
+    """
+    获取用户的笔记浏览历史
+
+    性能优化:
+    - 使用 annotate 预计算评论数
+    - 添加缓存（3分钟）
+    """
     from ..models import NoteHistory
 
     user = request.user
-    history = NoteHistory.objects.filter(user=user).select_related('note', 'note__author', 'note__author__profile').prefetch_related('note__tags').order_by('-viewed_at')[:100]
+
+    # 缓存键
+    cache_key = f"note_history_api:user_{user.id}"
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        return JsonResponse(cached_data, safe=False)
+
+    # 优化查询：预计算评论数
+    history = (
+        NoteHistory.objects
+        .filter(user=user)
+        .select_related('note', 'note__author', 'note__author__profile')
+        .prefetch_related('note__tags')
+        .annotate(comments_count_cached=Count('note__comments'))
+        .order_by('-viewed_at')[:100]
+    )
 
     history_data = []
     for item in history:
@@ -1134,10 +1181,13 @@ def note_history_api(request):
             'excerpt': excerpt,
             'tags': [tag.name for tag in note.tags.all()],
             'views': note.views,
-            'comments_count': note.comments.count(),
+            'comments_count': item.comments_count_cached,  # 使用预计算的值
             'is_favorited': note.is_favorited,
             'user_has_liked': False,
         })
+
+    # 缓存3分钟
+    cache.set(cache_key, history_data, timeout=180)
 
     return JsonResponse(history_data, safe=False)
 

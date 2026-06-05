@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load static_files %}
+
+{% block title %}举报处置中心{% endblock %}
+
+{% block head_extra %}
+{% vite_dev_client %}
+{% is_vite_dev as vite_dev %}
+{% if not vite_dev %}
+<link href="{% static 'dist/assets/moderation.css' %}" rel="stylesheet">
+{% endif %}
+<style>
+  main { padding: 0 !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<script>
+  window.currentUserId = {{ user.id }};
+</script>
+<div id="moderation-app"></div>
+{% endblock %}
+
+{% block scripts %}
+{% load static_files %}
+{% is_vite_dev as vite_dev %}
+{% if vite_dev %}
+<script type="module" src="http://localhost:5173/src/entries/moderation.js"></script>
+{% else %}
+<script type="module" src="{% static 'dist/moderation.js' %}"></script>
+{% endif %}
+{% endblock %}

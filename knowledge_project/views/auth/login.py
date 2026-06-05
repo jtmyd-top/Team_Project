@@ -541,6 +541,17 @@ def login_api(request):
         if not user.is_active:
             return JsonResponse({'error': '账户已被禁用'}, status=400)
 
+        # === 检查登录封禁处置（限时/永久） ===
+        from ...models import UserSanction
+        login_ban = UserSanction.is_login_banned(user)
+        if login_ban is not None:
+            if login_ban.expires_at is None:
+                msg = '账户已被永久封禁登录，请联系管理员'
+            else:
+                expire_str = timezone.localtime(login_ban.expires_at).strftime('%Y-%m-%d %H:%M')
+                msg = f'账户登录已被封禁，解除时间：{expire_str}'
+            return JsonResponse({'error': msg}, status=403)
+
         # === 检查账户是否被冻结 ===
         user_lock_key = f'vault_user_lock:{user.id}'
         user_lock_expire = cache.get(user_lock_key)

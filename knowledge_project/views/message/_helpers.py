@@ -613,8 +613,23 @@ def _load_message_attachments(user, attachment_ids):
     return attachments
 
 
+def _format_sanction_expiry(sanction):
+    """把制裁到期时间格式化为面向用户的中文提示。"""
+    if sanction is None or sanction.expires_at is None:
+        return '永久'
+    return timezone.localtime(sanction.expires_at).strftime('%Y-%m-%d %H:%M')
+
+
 def _check_send_permissions(sender, recipient):
-    from ...models import MessagePreference, UserBlocklist, UserFollow
+    from ...models import MessagePreference, UserBlocklist, UserFollow, UserSanction
+
+    # 发送方被禁言私信：直接拦截
+    mute = UserSanction.is_muted(sender)
+    if mute is not None:
+        return JsonResponse(
+            {'error': f'你已被禁止发送私信，解除时间：{_format_sanction_expiry(mute)}'},
+            status=403,
+        ), None
 
     if recipient == sender:
         return JsonResponse({'error': '不能给自己发送私信'}, status=400), None

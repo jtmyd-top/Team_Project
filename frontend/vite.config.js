@@ -73,6 +73,8 @@ export default defineConfig({
         'dashboard': path.resolve(__dirname, 'src/entries/dashboard.js'),
         // 私信页面
         'messages': path.resolve(__dirname, 'src/entries/messages.js'),
+        // 举报处置中心
+        'moderation': path.resolve(__dirname, 'src/entries/moderation.js'),
       },
       output: {
         format: 'es',  // 主格式为 ES 模块

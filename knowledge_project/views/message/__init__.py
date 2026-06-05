@@ -52,6 +52,14 @@ from .report import (
     report_user_api,
     review_reported_attachment,
 )
+from .moderation import (
+    moderation_attachment_file_api,
+    moderation_report_detail_api,
+    moderation_reports_list_api,
+    moderation_resolve_api,
+    moderation_revoke_sanction_api,
+    moderation_view,
+)
 from .search import export_conversation_api, search_messages_api
 from .users import (
     get_unread_messages_count_api,
@@ -92,6 +100,13 @@ __all__ = [
     'report_message_attachment_api',
     'report_user_api',
     'review_reported_attachment',
+    # moderation
+    'moderation_attachment_file_api',
+    'moderation_report_detail_api',
+    'moderation_reports_list_api',
+    'moderation_resolve_api',
+    'moderation_revoke_sanction_api',
+    'moderation_view',
     # search
     'export_conversation_api',
     'search_messages_api',

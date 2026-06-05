@@ -595,3 +595,27 @@ class MessagePreferenceAdmin(admin.ModelAdmin):
 class UserBlocklistAdmin(admin.ModelAdmin):
     list_display = ('user', 'blocked_user', 'reason', 'created_at')
     search_fields = ('user__username', 'blocked_user__username')
+
+
+# ---------------------------------
+#  举报处置（制裁 / 处置日志）
+# ---------------------------------
+from .models import UserSanction, ModerationLog
+
+
+@admin.register(UserSanction)
+class UserSanctionAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'sanction_type', 'expires_at', 'is_active',
+                    'created_by', 'created_at')
+    list_filter = ('sanction_type', 'is_active', 'created_at')
+    search_fields = ('user__username', 'reason')
+    readonly_fields = ('created_at', 'revoked_at')
+
+
+@admin.register(ModerationLog)
+class ModerationLogAdmin(admin.ModelAdmin):
+    list_display = ('id', 'report_type', 'report_id', 'action', 'moderator',
+                    'target_user', 'created_at')
+    list_filter = ('report_type', 'action', 'created_at')
+    search_fields = ('moderator__username', 'target_user__username', 'note')
+    readonly_fields = ('created_at',)

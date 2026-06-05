@@ -1266,6 +1266,7 @@ class AttachmentReport(models.Model):
         related_name='+',
         verbose_name="处理人",
     )
+    resolution_note = models.TextField(blank=True, verbose_name="处理备注")
 
     class Meta:
         verbose_name = "私信附件举报"
@@ -1508,6 +1509,11 @@ class MessageReport(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="举报时间")
     resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    handled_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name="处理人"
+    )
+    resolution_note = models.TextField(blank=True, verbose_name="处理备注")
 
     class Meta:
         verbose_name = "私信举报"
@@ -1520,6 +1526,131 @@ class MessageReport(models.Model):
 
     def __str__(self):
         return f"{self.reporter.username} 举报 {self.reported_user.username} ({self.get_reason_display()})"
+
+
+class UserSanction(models.Model):
+    """用户处置 / 制裁记录（实际生效的惩罚）。
+
+    采用惰性到期：不依赖定时任务，在“发送私信”“登录”等关口实时检查
+    是否存在有效（is_active 且未过期）的制裁记录。
+    """
+    SANCTION_TYPE_CHOICES = [
+        ('mute_messages', '禁言私信'),
+        ('ban_login', '封禁登录'),
+    ]
+    REPORT_TYPE_CHOICES = [
+        ('message', '私信举报'),
+        ('attachment', '附件举报'),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='sanctions', verbose_name="被处置用户"
+    )
+    sanction_type = models.CharField(
+        max_length=20, choices=SANCTION_TYPE_CHOICES, verbose_name="处置类型"
+    )
+    expires_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="到期时间", help_text="留空表示永久"
+    )
+    reason = models.TextField(blank=True, verbose_name="处置原因 / 备注")
+    created_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name="操作管理员"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="处置时间")
+    is_active = models.BooleanField(default=True, verbose_name="是否生效")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="解除时间")
+    source_report_type = models.CharField(
+        max_length=20, choices=REPORT_TYPE_CHOICES, blank=True, verbose_name="来源工单类型"
+    )
+    source_report_id = models.IntegerField(null=True, blank=True, verbose_name="来源工单 ID")
+
+    class Meta:
+        verbose_name = "用户处置"
+        verbose_name_plural = "用户处置"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'sanction_type', 'is_active'], name='usanction_user_type_act_idx'),
+            models.Index(fields=['is_active', 'expires_at'], name='usanction_active_exp_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.get_sanction_type_display()}"
+
+    @property
+    def is_effective(self):
+        """当前是否实际生效（生效中且未过期）。"""
+        from django.utils import timezone
+        if not self.is_active:
+            return False
+        if self.expires_at is not None and self.expires_at <= timezone.now():
+            return False
+        return True
+
+    @property
+    def is_permanent(self):
+        return self.expires_at is None
+
+    @classmethod
+    def active_for(cls, user, sanction_type):
+        """返回该用户某类有效制裁中最晚到期的一条（永久优先），否则 None。"""
+        from django.utils import timezone
+        if user is None or not getattr(user, 'id', None):
+            return None
+        now = timezone.now()
+        qs = cls.objects.filter(
+            user=user, sanction_type=sanction_type, is_active=True
+        ).filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+        # 永久（expires_at 为 NULL）优先；否则取最晚到期的一条
+        permanent = qs.filter(expires_at__isnull=True).first()
+        if permanent is not None:
+            return permanent
+        return qs.order_by('-expires_at').first()
+
+    @classmethod
+    def is_muted(cls, user):
+        return cls.active_for(user, 'mute_messages')
+
+    @classmethod
+    def is_login_banned(cls, user):
+        return cls.active_for(user, 'ban_login')
+
+
+class ModerationLog(models.Model):
+    """处置审计日志（append-only），记录每一次举报处置决策。"""
+    REPORT_TYPE_CHOICES = [
+        ('message', '私信举报'),
+        ('attachment', '附件举报'),
+    ]
+
+    report_type = models.CharField(
+        max_length=20, choices=REPORT_TYPE_CHOICES, verbose_name="工单类型"
+    )
+    report_id = models.IntegerField(verbose_name="工单 ID")
+    moderator = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name="处置人"
+    )
+    target_user = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name="被处置对象"
+    )
+    action = models.CharField(max_length=40, verbose_name="处置动作")
+    note = models.TextField(blank=True, verbose_name="备注")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="处置时间")
+
+    class Meta:
+        verbose_name = "处置日志"
+        verbose_name_plural = "处置日志"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['report_type', 'report_id'], name='modlog_report_idx'),
+            models.Index(fields=['-created_at'], name='modlog_created_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.report_type}#{self.report_id} - {self.action}"
 
 
 @receiver(post_save, sender=User)

@@ -94,6 +94,14 @@ urlpatterns = [
     path('api/users/blocked/', views.get_blocked_users_api, name='get_blocked_users_api'),
     path('api/users/report/', views.report_user_api, name='report_user_api'),
 
+    # ==================== 举报处置中心（仅超级管理员） ====================
+    path('moderation/reports/', views.moderation_view, name='moderation_reports'),
+    path('api/moderation/reports/', views.moderation_reports_list_api, name='moderation_reports_list_api'),
+    path('api/moderation/reports/<str:rtype>/<int:rid>/', views.moderation_report_detail_api, name='moderation_report_detail_api'),
+    path('api/moderation/reports/<str:rtype>/<int:rid>/resolve/', views.moderation_resolve_api, name='moderation_resolve_api'),
+    path('api/moderation/sanctions/<int:sid>/revoke/', views.moderation_revoke_sanction_api, name='moderation_revoke_sanction_api'),
+    path('api/moderation/attachments/<int:attachment_id>/file/', views.moderation_attachment_file_api, name='moderation_attachment_file_api'),
+
     # ==================== 未读统计 / 账户可发现性 / 关注 ====================
     path('api/messages/unread-count/', views.get_unread_messages_count_api, name='get_unread_messages_count_api'),
     path('api/users/discoverability/', views.update_discoverability_api, name='update_discoverability_api'),

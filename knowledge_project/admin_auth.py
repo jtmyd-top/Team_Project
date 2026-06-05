@@ -21,6 +21,7 @@ from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.core.cache import cache
 from django.views.decorators.csrf import csrf_protect
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.conf import settings
 from knowledge_project.utils.request_utils import get_client_ip
@@ -176,6 +177,15 @@ class SecureAdminSite(AdminSite):
         # 4. 检查账户是否激活
         if not user.is_active:
             return self._login_error(request, '账户已被禁用')
+
+        # 4.1 检查登录封禁处置（限时/永久）
+        from knowledge_project.models import UserSanction
+        login_ban = UserSanction.is_login_banned(user)
+        if login_ban is not None:
+            if login_ban.expires_at is None:
+                return self._login_error(request, '账户已被永久封禁登录，请联系管理员')
+            expire_str = timezone.localtime(login_ban.expires_at).strftime('%Y-%m-%d %H:%M')
+            return self._login_error(request, f'账户登录已被封禁，解除时间：{expire_str}')
 
         # 5. 检查账户冻结
         user_lock_key = f'vault_user_lock:{user.id}'

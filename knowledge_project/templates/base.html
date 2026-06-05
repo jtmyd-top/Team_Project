@@ -153,6 +153,9 @@
                       </li>
                       {% endif %}
                       <li><a href="{%url 'settings'%}"><i class="fas fa-cog"></i> 设置</a></li>
+                      {% if user.is_superuser %}
+                      <li><a href="{% url 'moderation_reports' %}"><i class="fas fa-gavel"></i> 举报处置</a></li>
+                      {% endif %}
                       <li class="divider"></li>
                       <li>
                         <form id="logoutForm" action="{% url 'logout' %}" method="post">
