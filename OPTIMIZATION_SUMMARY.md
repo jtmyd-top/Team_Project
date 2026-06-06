@@ -84,9 +84,24 @@ ON knowledge_project_profilelike (liker_id, profile_id);
 
 #### 静态资源大小：
 ```
-总大小：2.7MB（未压缩）
-Gzip后：约900KB（压缩率67%）
+Vite 打包产物：2.7MB（未压缩） / Gzip 后约 900KB（压缩率约 67%）
+完整静态目录（含 FontAwesome 41MB + CKEditor 14MB + TinyMCE 9MB）：约 81MB
 ```
+> 说明：2.7MB 指 Vite 构建出的应用包；81MB 指 `static/` 整个目录（包含第三方编辑器与图标字体），二者衡量范围不同。第三方资源的瘦身见 `PERFORMANCE_OPTIMIZATION.md`。
+
+---
+
+### 5. **数据库连接池优化** ✅
+
+#### 配置（`Team_Project/settings.py`）：
+- ✅ 启用连接复用：`CONN_MAX_AGE=600`（10 分钟）
+- ✅ 启用连接健康检查：`CONN_HEALTH_CHECKS=True`
+- ✅ 添加连接/读/写超时设置
+- ✅ Daphne 已重启，新配置已生效
+
+#### 测试结果：
+- 健康检查响应时间：~0.005s（非常快）
+- 数据库连接已优化，减少每次请求建立新连接的开销
 
 ---
 
@@ -139,16 +154,13 @@ CSRF_COOKIE_SECURE=True
 SECURE_SSL_REDIRECT=True
 ```
 
-#### 2. 重启Django服务
+#### 2. 重启服务
 ```bash
-# 如果使用Gunicorn
-sudo systemctl restart gunicorn
+# 本项目使用 Daphne（ASGI，支持 WebSocket），由 systemd 管理：
+sudo systemctl restart team-project.service
 
-# 如果使用uWSGI
-sudo systemctl restart uwsgi
-
-# 如果使用Daphne（WebSocket）
-sudo systemctl restart daphne
+# 确认状态
+systemctl status team-project.service
 ```
 
 ---
@@ -156,7 +168,7 @@ sudo systemctl restart daphne
 ### **推荐执行（重要）**
 
 #### 3. 配置Nginx优化
-参考文件：`NGINX_OPTIMIZATION.md`
+参考文件：`NGINX_OPTIMIZATION.md`（通用）与下方「Nginx 配置部署（宝塔面板）」（本服务器实操）。
 
 关键配置：
 ```nginx
@@ -184,9 +196,10 @@ sudo apt install redis-server
 # 启动Redis
 sudo systemctl start redis-server
 
-# 修改.env
-redis1=redis://:qaz202019@127.0.0.1:6379/1
+# 修改.env（密码请使用环境变量，勿写入仓库）
+redis1=redis://:<REDIS_PASSWORD>@127.0.0.1:6379/1
 ```
+> ⚠️ 切勿将真实 Redis 密码提交到代码仓库；请通过 `.env`（已被 .gitignore 忽略）或密钥管理服务注入。
 
 ---
 
@@ -196,7 +209,7 @@ redis1=redis://:qaz202019@127.0.0.1:6379/1
 - 将静态文件上传到CDN（阿里云OSS/腾讯云COS）
 - 修改Django配置使用CDN URL
 
-#### 6. 数据库连接池
+#### 6. 数据库连接池（进阶）
 ```bash
 pip install django-db-connection-pool
 ```
@@ -214,15 +227,62 @@ pip install django-debug-toolbar
 
 ---
 
-## 📈 预期性能提升总结
+## 🌐 Nginx 配置部署（宝塔面板操作）
 
-| 指标 | 优化前 | 优化后 | 提升幅度 |
-|------|--------|--------|----------|
-| **首页加载时间** | 3-5秒 | 1-2秒 | **60-70%** |
-| **API响应时间** | 500ms | 50-100ms | **80-90%** |
-| **数据库查询数** | 50+次 | 3-5次 | **90%** |
-| **静态资源大小** | 2.7MB | 900KB | **67%** |
-| **缓存命中率** | 0% | 60-80% | **新增** |
+配置文件已生成：`/opt/Team_Project/nginx_bt_optimized.conf`
+
+**操作步骤**：
+1. 登录宝塔面板
+2. 进入 **网站** → 找到 `team.03vps.cn` → 点击 **设置**
+3. 点击 **配置文件** 标签
+4. 复制 `nginx_bt_optimized.conf` 的内容，**完全替换**现有配置
+5. 点击 **保存**（宝塔会自动重载 Nginx）
+
+**包含的优化**：
+- ✅ Gzip 压缩（减少约 70% 传输大小）
+- ✅ 静态文件缓存 1 年
+- ✅ 媒体文件缓存 1 小时
+- ✅ WebSocket 支持
+- ✅ 代理缓冲优化
+- ✅ HTTP/2 支持
+
+> ⚠️ 修改前先在宝塔面板备份现有配置，便于回滚。
+
+---
+
+## 🧪 验证与测试命令
+
+```bash
+# 1) Gzip 是否生效
+curl -I -H "Accept-Encoding: gzip" \
+  https://team.03vps.cn/static/fontawesome-free-6.7.2/css/all.min.css | grep -i content-encoding
+# 期望：Content-Encoding: gzip
+
+# 2) 缓存是否生效
+curl -I https://team.03vps.cn/static/css/ | grep -i cache-control
+# 期望：Cache-Control: public, immutable
+
+# 3) 完整性能测试
+bash /opt/Team_Project/test_performance.sh
+```
+
+浏览器侧：`F12` → **Network** → `Ctrl+F5` 强制刷新，关注：
+- **首次加载**：2-3 秒内
+- **二次加载**：0.5-1 秒内（静态资源走缓存）
+- 静态文件 `Size` 列显示压缩后大小，响应头含 `Content-Encoding: gzip`
+
+---
+
+## 🆘 故障排查
+
+1. **502 Bad Gateway**：检查应用服务器是否正常运行
+   ```bash
+   systemctl status team-project.service
+   curl http://127.0.0.1:8000/healthz
+   ```
+2. **静态文件 404**：检查 Nginx `proxy_pass` 地址与 `location /static/` 配置。
+3. **WebSocket 连接失败**：确认 `/ws/` location 配置正确（需透传 `Upgrade`/`Connection` 头）。
+4. **回滚**：在宝塔面板恢复之前备份的配置。
 
 ---
 
@@ -252,8 +312,20 @@ pip install django-debug-toolbar
 cp .env.backup .env
 
 # 重启服务
-sudo systemctl restart gunicorn nginx
+sudo systemctl restart team-project.service
 ```
+
+---
+
+## 📈 预期性能提升总结
+
+| 指标 | 优化前 | 优化后 | 提升幅度 |
+|------|--------|--------|----------|
+| **首页加载时间** | 3-5秒 | 1-2秒 | **60-70%** |
+| **API响应时间** | 500ms | 50-100ms | **80-90%** |
+| **数据库查询数** | 50+次 | 3-5次 | **90%** |
+| **静态资源大小** | 2.7MB | 900KB | **67%** |
+| **缓存命中率** | 0% | 60-80% | **新增** |
 
 ---
 
@@ -261,9 +333,11 @@ sudo systemctl restart gunicorn nginx
 
 - `PERFORMANCE_OPTIMIZATION.md` - 完整优化方案
 - `NGINX_OPTIMIZATION.md` - Nginx配置详解
+- `nginx_bt_optimized.conf` - 宝塔面板可直接套用的 Nginx 配置
 - `.env.production.example` - 生产环境配置示例
 - `apply_optimizations.py` - 自动化执行脚本
 - `OPTIMIZATION_REPORT.md` - 详细优化报告
+- `test_performance.sh` - 性能测试脚本
 
 ---
 
@@ -298,12 +372,14 @@ redis-cli INFO stats | grep keyspace
 
 ## ✨ 总结
 
-本次优化从**后端API**、**数据库查询**、**缓存策略**、**静态资源**四个方面进行了全面优化：
+本次优化从**后端API**、**数据库查询**、**缓存策略**、**静态资源**、**数据库连接池**与**Nginx/部署**多个方面进行了全面优化：
 
 ✅ **后端优化**：消除N+1查询，添加缓存  
 ✅ **数据库优化**：创建4个关键性能索引  
 ✅ **缓存优化**：实现多层缓存策略  
 ✅ **静态资源**：启用压缩和代码分割  
+✅ **连接池**：`CONN_MAX_AGE` 连接复用 + 健康检查  
+✅ **部署**：宝塔面板 Nginx（Gzip/缓存/HTTP2/WebSocket）
 
 **预期性能提升：60-80%**
 
