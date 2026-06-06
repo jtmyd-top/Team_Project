@@ -541,9 +541,10 @@
 /* 全屏遮罩 - 背景模糊 */
 .el-overlay-dialog:has(.email-change-dialog),
 .el-overlay:has(.email-change-dialog) {
-  background: rgba(15, 23, 42, 0.42) !important;
-  backdrop-filter: blur(12px) saturate(1.2);
-  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  z-index: 3000 !important;
+  background: rgba(15, 23, 42, 0.68) !important;
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
 }
 
 /* 弹窗主体 - 毛玻璃磨砂材质 */

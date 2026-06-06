@@ -74,7 +74,7 @@ export function useSettingsPrivacy() {
       if (res.ok && data.status === 'success') {
         ElMessage.success('私信设置已保存')
       } else {
-        ElMessage.error(data.error || '保存失败')
+        ElMessage.error(data.message || data.error || '保存失败')
       }
     } catch (e) {
       ElMessage.error('保存失败，请重试')
@@ -126,7 +126,7 @@ export function useSettingsPrivacy() {
       if (res.ok && data.status === 'success') {
         ElMessage.success('可发现性已更新')
       } else {
-        ElMessage.error(data.error || '保存失败')
+        ElMessage.error(data.message || data.error || '保存失败')
       }
     } catch (e) {
       ElMessage.error('保存失败，请重试')
@@ -152,7 +152,7 @@ export function useSettingsPrivacy() {
         discoverability.value.search_code = data.search_code || ''
         ElMessage.success('已生成新的搜索码')
       } else {
-        ElMessage.error(data.error || '生成失败')
+        ElMessage.error(data.message || data.error || '生成失败')
       }
     } catch (e) {
       ElMessage.error('生成失败，请重试')
@@ -226,7 +226,7 @@ export function useSettingsPrivacy() {
         blockedUsers.value = blockedUsers.value.filter(u => u.id !== userId)
         ElMessage.success('已取消屏蔽')
       } else {
-        ElMessage.error(data.error || '操作失败')
+        ElMessage.error(data.message || data.error || '操作失败')
       }
     } catch (e) {
       ElMessage.error('操作失败，请重试')

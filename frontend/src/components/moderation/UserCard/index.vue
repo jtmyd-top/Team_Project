@@ -12,9 +12,9 @@
     </div>
 
     <div class="uc-stats">
-      <span title="公开笔记数"><i class="fas fa-file-alt"></i> {{ user.notes_count }}</span>
-      <span title="发起的举报数"><i class="fas fa-flag"></i> 发起 {{ user.reports_filed }}</span>
-      <span title="被举报次数"><i class="fas fa-exclamation-triangle"></i> 被举报 {{ user.reports_received }}</span>
+      <span title="公开笔记数"><i class="fas fa-file-alt"></i><b>{{ user.notes_count }}</b><em>笔记</em></span>
+      <span title="发起的举报数"><i class="fas fa-flag"></i><b>{{ user.reports_filed }}</b><em>发起</em></span>
+      <span title="被举报次数"><i class="fas fa-exclamation-triangle"></i><b>{{ user.reports_received }}</b><em>被举报</em></span>
     </div>
     <div class="uc-meta">
       <span v-if="user.email">{{ user.email }}</span>
@@ -60,16 +60,162 @@ function formatDate(iso) {
 </script>
 
 <style scoped>
-.uc-head { display: flex; gap: 10px; align-items: center; }
-.uc-avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
-.uc-name { font-weight: 600; color: #303133; display: flex; align-items: center; gap: 6px; }
-.uc-bio { font-size: 12px; color: #909399; overflow: hidden; text-overflow: ellipsis; }
-.uc-stats { display: flex; gap: 14px; font-size: 12px; color: #606266; margin: 10px 0 6px; flex-wrap: wrap; }
-.uc-meta { font-size: 12px; color: #c0c4cc; display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
-.uc-sanctions { border-top: 1px dashed #ebeef5; padding-top: 8px; }
-.uc-clean { font-size: 13px; color: #67c23a; }
-.uc-sanction { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-.uc-sanction-exp { font-size: 12px; color: #909399; margin-right: auto; }
-.uc-profile-link { display: inline-block; margin-top: 8px; font-size: 12px; color: #409eff; text-decoration: none; }
-.uc-empty { color: #909399; font-size: 13px; }
+.uc {
+  color: #1e293b;
+}
+
+.uc-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.uc-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+}
+
+.uc-info {
+  min-width: 0;
+}
+
+.uc-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.uc-bio {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 14px 0 10px;
+  overflow: hidden;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #e5ebf3;
+}
+
+.uc-stats span {
+  min-width: 0;
+  padding: 9px 6px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, auto);
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.uc-stats i {
+  color: #2563eb;
+}
+
+.uc-stats b {
+  color: #111827;
+  font-size: 13px;
+}
+
+.uc-stats em {
+  min-width: 0;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.uc-sanctions {
+  padding-top: 10px;
+  border-top: 1px solid #eef2f7;
+}
+
+.uc-clean {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  font-size: 12px;
+}
+
+.uc-sanction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.uc-sanction-exp {
+  margin-right: auto;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.uc-profile-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.uc-profile-link:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.uc-empty {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+@media (max-width: 520px) {
+  .uc-stats {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

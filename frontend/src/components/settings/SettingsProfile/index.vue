@@ -313,9 +313,11 @@
                   v-if="emailForm.twoFaMethod === 'email'"
                   type="text"
                   size="small"
+                  :disabled="emailTwoFaCountdown.counting"
                   :loading="emailForm.twoFaCodeSending"
                   @click="sendEmail2faCode">
-                  <i class="fas fa-redo"></i> 重新发送验证码
+                  <i :class="emailTwoFaCountdown.counting ? 'fas fa-clock' : 'fas fa-redo'"></i>
+                  {{ emailTwoFaCountdown.counting ? `${emailTwoFaCountdown.seconds}秒后重试` : '重新发送验证码' }}
                 </el-button>
 
                 <el-button
@@ -366,6 +368,7 @@ const {
   bioDraft,
   showEmailDialog,
   emailCountdown,
+  emailTwoFaCountdown,
   captchaWidgetRef,
   onCaptchaChange,
   emailForm,

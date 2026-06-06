@@ -49,7 +49,7 @@ export function useImageCaptcha(props, emit) {
         const contentType = response.headers.get('content-type')
         if (contentType && contentType.includes('application/json')) {
           const errorData = await response.json()
-          throw new Error(errorData.error || '验证码加载失败')
+          throw new Error(errorData.message || errorData.error || '验证码加载失败')
         }
         throw new Error('验证码加载失败')
       }

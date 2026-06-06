@@ -108,7 +108,7 @@ export function useSettingsSecurity() {
         // 只需要启动倒计时即可
         if (data.method === 'email') {
           ElMessage.info("验证码已发送到您的邮箱，请查收");
-          passwordCountdown.start(90);
+          passwordCountdown.start(60);
         } else {
           ElMessage.info("请输入验证器应用中的验证码");
         }
@@ -139,12 +139,15 @@ export function useSettingsSecurity() {
     passwordForm.twoFaMethod = '';
     passwordForm.useBackup = false;
     passwordForm.submitting = false;
+    passwordCountdown.stop();
   };
 
   /**
    * 发送密码修改2FA验证码
    */
   const sendPassword2faCode = async () => {
+    if (passwordForm.twoFaCodeSending) return;
+
     if (passwordCountdown.counting) {
       return ElMessage.warning(`请等待 ${passwordCountdown.seconds} 秒后重试`);
     }
@@ -154,7 +157,7 @@ export function useSettingsSecurity() {
       const data = await apiService.sendOperation2FA();
       if (data.status === "success" && data.requires_2fa) {
         ElMessage.success("验证码已发送至您的邮箱");
-        passwordCountdown.start(90);
+        passwordCountdown.start(60);
       }
     } catch (error) {
       ElMessage.error(error.message || "发送验证码失败");
@@ -281,6 +284,8 @@ export function useSettingsSecurity() {
 
   const sendDisable2faCode = async () => {
     if (twoFaDisable.useBackup || userStore.two_fa_method !== 'email') return;
+    if (twoFaDisable.codeSending) return;
+
     if (passwordCountdown.counting) {
       return ElMessage.warning(`请等待 ${passwordCountdown.seconds} 秒后重试`);
     }
@@ -290,7 +295,7 @@ export function useSettingsSecurity() {
       const data = await apiService.sendOperation2FA();
       if (data.status === "success" && data.requires_2fa) {
         ElMessage.success("验证码已发送至您的邮箱");
-        passwordCountdown.start(90);
+        passwordCountdown.start(60);
       }
     } catch (error) {
       ElMessage.error(error.message || "发送验证码失败");
@@ -346,6 +351,7 @@ export function useSettingsSecurity() {
     twoFaDisable.useBackup = false;
     twoFaDisable.method = userStore.two_fa_method || '';
     twoFaDisable.codeSending = false;
+    passwordCountdown.stop();
   };
 
   /**

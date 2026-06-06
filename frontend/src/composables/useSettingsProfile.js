@@ -23,6 +23,7 @@ export function useSettingsProfile() {
 
   // 倒计时
   const emailCountdown = useCountdown();
+  const emailTwoFaCountdown = useCountdown();
 
   // 验证码组件引用
   const captchaWidgetRef = ref(null);
@@ -395,6 +396,8 @@ export function useSettingsProfile() {
    * 发送邮箱验证码
    */
   const sendEmailCode = async () => {
+    if (emailForm.codeSending || emailCountdown.counting) return;
+
     const email = (emailForm.new_email || '').trim();
     if (!EMAIL_REGEX.test(email)) return ElMessage.warning("请输入正确邮箱");
     if (emailCheck.status !== 'ok') return ElMessage.warning(emailCheck.message || "该邮箱不可用");
@@ -491,6 +494,8 @@ export function useSettingsProfile() {
     emailForm.useBackup = false;
     emailCheck.status = null;
     emailCheck.message = '';
+    emailCountdown.stop();
+    emailTwoFaCountdown.stop();
     tempEmail.value = userStore.email;
     refreshCaptcha();
   };
@@ -499,10 +504,13 @@ export function useSettingsProfile() {
    * 发送邮箱修改2FA验证码
    */
   const sendEmail2faCode = async () => {
+    if (emailForm.twoFaCodeSending || emailTwoFaCountdown.counting) return;
+
     emailForm.twoFaCodeSending = true;
     try {
       const data = await window.apiService.auth.sendOperation2FA();
       if (data.status === "success" && data.requires_2fa) {
+        emailTwoFaCountdown.start(60);
         ElMessage.success("验证码已发送至您的邮箱");
       }
     } catch (error) {
@@ -533,6 +541,7 @@ export function useSettingsProfile() {
     bioDraft,
     showEmailDialog,
     emailCountdown,
+    emailTwoFaCountdown,
     captchaWidgetRef,
     captchaParams,
     onCaptchaChange,

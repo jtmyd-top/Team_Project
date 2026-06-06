@@ -8,6 +8,7 @@
 {% vite_dev_client %}
 {% is_vite_dev as vite_dev %}
 {% if not vite_dev %}
+<link href="{% static 'dist/assets/element.css' %}" rel="stylesheet">
 <link href="{% static 'dist/assets/moderation.css' %}" rel="stylesheet">
 {% endif %}
 <style>

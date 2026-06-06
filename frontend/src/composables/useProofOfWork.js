@@ -185,7 +185,7 @@ export function useProofOfWork() {
       const challengeData = await challengeResponse.json()
 
       if (challengeData.status !== 'challenge') {
-        throw new Error(challengeData.error || '获取 challenge 失败')
+        throw new Error(challengeData.message || challengeData.error || '获取 challenge 失败')
       }
 
       const { prefix, difficulty } = challengeData
@@ -216,13 +216,13 @@ export function useProofOfWork() {
 
       if (!verifyResponse.ok) {
         const errData = await verifyResponse.json().catch(() => ({}))
-        throw new Error(errData.error || 'PoW 验证失败')
+        throw new Error(errData.message || errData.error || 'PoW 验证失败')
       }
 
       const tokenData = await verifyResponse.json()
 
       if (tokenData.status !== 'success' || !tokenData.init_token) {
-        throw new Error(tokenData.error || '获取 init_token 失败')
+        throw new Error(tokenData.message || tokenData.error || '获取 init_token 失败')
       }
 
       return tokenData.init_token

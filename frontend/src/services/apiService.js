@@ -2,6 +2,7 @@
 // 改为直接使用fetch，避免ES6模块问题
 
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 /**
  * 统一的 POST 请求封装
@@ -35,7 +36,8 @@ async function postRequest(url, body) {
   }
 
   if (!response.ok) {
-    const error = new Error('请求失败');
+    const errorMessage = extractApiErrorMessage(data, '请求失败');
+    const error = new Error(errorMessage);
     error.response = {
       status: response.status,
       data: data
@@ -78,7 +80,7 @@ async function getRequest(url, params = {}) {
   }
 
   if (!response.ok) {
-    const errorMessage = data.error || data.message || '请求失败';
+    const errorMessage = extractApiErrorMessage(data, '请求失败');
     const error = new Error(errorMessage);
     error.response = {
       status: response.status,

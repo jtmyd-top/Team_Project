@@ -840,7 +840,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             this.followersCount = Number(data.followers_count || 0);
             this.showToast(this.isFollowing ? '关注成功' : '已取消关注', 'success');
           } else {
-            this.showToast(data.error || '关注操作失败', 'error');
+            this.showToast(data.message || data.error || '关注操作失败', 'error');
           }
         } catch (e) {
           this.showToast('网络错误，请稍后重试', 'error');
@@ -905,11 +905,11 @@ document.addEventListener('DOMContentLoaded', async function () {
             this.showToast('私信已发送！', 'success');
             this.closeMessageModal();
           } else if (res.status === 403) {
-            this.showToast(data.error || '此用户未开启私信功能', 'warning');
+            this.showToast(data.message || data.error || '此用户未开启私信功能', 'warning');
           } else if (res.status === 401) {
             this.showToast('请先登录后再发送私信', 'warning');
           } else {
-            this.showToast(data.error || '发送失败', 'error');
+            this.showToast(data.message || data.error || '发送失败', 'error');
           }
         } catch (e) {
           this.showToast('网络错误，请稍后重试', 'error');

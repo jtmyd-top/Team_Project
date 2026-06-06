@@ -120,7 +120,7 @@ const sendMessage = async () => {
         closeModal()
       }, 1500)
     } else {
-      errorMessage.value = data.error || '发送失败，请重试'
+      errorMessage.value = data.message || data.error || '发送失败，请重试'
     }
   } catch (error) {
     console.error('发送消息失败:', error)

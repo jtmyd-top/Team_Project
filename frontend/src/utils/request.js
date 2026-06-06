@@ -1,4 +1,6 @@
+import { reactive } from 'vue'
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 // 统一的请求封装工具
 const defaultHeaders = () => ({
@@ -20,7 +22,7 @@ export async function request(url, opts = {}) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      throw new Error(data?.message || `HTTP ${res.status}`);
+      throw new Error(extractApiErrorMessage(data, `HTTP ${res.status}`));
     }
 
     return data;
@@ -68,29 +70,38 @@ export function createDebouncedRequest(fn, delay = 400) {
 
 // 倒计时Hook
 export function useCountdown() {
-  const seconds = { value: 0 };
   let timer = null;
 
-  const start = (n = 60) => {
-    stop();
-    seconds.value = n;
-    timer = setInterval(() => {
-      seconds.value--;
-      if (seconds.value <= 0) {
-        stop();
+  const countdown = reactive({
+    seconds: 0,
+    get counting() {
+      return this.seconds > 0;
+    },
+    start(n = 60) {
+      this.stop();
+      const normalizedSeconds = Number(n);
+      this.seconds = Number.isFinite(normalizedSeconds) && normalizedSeconds > 0
+        ? Math.floor(normalizedSeconds)
+        : 60;
+      timer = setInterval(() => {
+        countdown.seconds--;
+        if (countdown.seconds <= 0) {
+          countdown.stop();
+        }
+      }, 1000);
+    },
+    stop() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
       }
-    }, 1000);
-  };
-
-  const stop = () => {
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
+      countdown.seconds = 0;
+    },
+    cleanup() {
+      this.stop();
     }
-  };
+  });
 
   // 返回清理函数，供组件卸载时调用
-  const cleanup = () => stop();
-
-  return { seconds, start, stop, cleanup };
+  return countdown;
 }

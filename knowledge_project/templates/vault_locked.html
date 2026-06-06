@@ -328,6 +328,7 @@
                 return (
                     message.includes("Cannot read properties of null (reading 'hitTest')")
                     || message.includes("Cannot read properties of null (reading 'getDrawableIndex')")
+                    || message.includes("Cannot read properties of null (reading 'getHitAreasCount')")
                     || message.includes("Cannot read properties of null (reading 'isHit')")
                 )
                     && (
@@ -336,6 +337,7 @@
                         || stack.includes('hitTest')
                         || stack.includes('isHit')
                         || stack.includes('getDrawableIndex')
+                        || stack.includes('getHitAreasCount')
                         || stack.includes('mouseEvent')
                         || stack.includes('cubismusermodel')
                         || stack.includes('lappmodel')

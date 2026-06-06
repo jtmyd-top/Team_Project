@@ -11,6 +11,7 @@ db.sqlite3
 media/
 uploads/
 .env
+.env.production.example
 xiaomi.py
 auto_xianyu/*
 knowledge_project/static/ckeditor5

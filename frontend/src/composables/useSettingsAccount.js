@@ -135,6 +135,8 @@ export function useSettingsAccount() {
    * 发送邮箱验证码
    */
   const sendEmailCode = async () => {
+    if (emailForm.codeSending || emailCountdown.counting) return;
+
     const email = (emailForm.new_email || '').trim();
     if (!EMAIL_REGEX.test(email)) return ElMessage.warning("请输入正确邮箱");
     if (emailCheck.status !== 'ok') return ElMessage.warning(emailCheck.message || "该邮箱不可用");
@@ -157,7 +159,7 @@ export function useSettingsAccount() {
           message: `验证码已发送至新邮箱 ${emailForm.new_email}，请查收`,
           duration: 4000
         });
-        emailCountdown.start(120);
+        emailCountdown.start(60);
         refreshCaptcha();
       } else {
         ElMessage.error(data.message || "发送验证码失败");
@@ -213,7 +215,7 @@ export function useSettingsAccount() {
             duration: 5000
           });
           // 启动2FA倒计时
-          twoFaCountdown.start(120);
+          twoFaCountdown.start(60);
         } else { // totp
           ElMessage.info("请输入验证器应用中的验证码以完成操作");
         }
@@ -244,7 +246,7 @@ export function useSettingsAccount() {
    * 重新发送2FA验证码（修改邮箱场景）
    */
   const resend2FACode = async () => {
-    if (twoFaCountdown.counting) return;
+    if (emailForm.twoFaCodeSending || twoFaCountdown.counting) return;
 
     emailForm.twoFaCodeSending = true;
     try {
@@ -255,7 +257,7 @@ export function useSettingsAccount() {
           message: '2FA验证码已重新发送至您的原邮箱',
           duration: 3000
         });
-        twoFaCountdown.start(120);
+        twoFaCountdown.start(60);
       } else {
         ElMessage.error(data.message || '发送失败');
       }

@@ -56,7 +56,6 @@
 .st-avatar-wrap {
   position: relative;
   margin-top: 24px;
-  z-index: 5;
   width: 72px;
   height: 72px;
 }

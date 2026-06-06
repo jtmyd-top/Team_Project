@@ -23,6 +23,7 @@ from django.views.decorators.http import require_http_methods
 from ._helpers import (
     _get_avatar_url,
     _message_preview,
+    _parse_merged_forward,
     _serve_attachment_file,
     _server_error_response,
 )
@@ -152,6 +153,7 @@ def _message_context_payload(message):
 
 
 def _context_message_payload(m, highlight_id=None):
+    merged_forward = _parse_merged_forward(m.content)
     return {
         'id': m.id,
         'sender': m.sender.username,
@@ -159,6 +161,7 @@ def _context_message_payload(m, highlight_id=None):
         'recipient': m.recipient.username,
         'recipient_id': m.recipient_id,
         'content': m.content,
+        'merged_forward': merged_forward,
         'created_at': m.created_at.isoformat(),
         'is_recalled': m.is_recalled,
         'deleted_for_sender': m.deleted_for_sender,

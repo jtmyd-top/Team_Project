@@ -4,6 +4,7 @@
  */
 
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 // 基础 fetch 包装器
 const fetchWrapper = async (url, options = {}) => {
@@ -22,9 +23,13 @@ const fetchWrapper = async (url, options = {}) => {
   const response = await fetch(url, { ...options, ...defaultOptions })
 
   if (!response.ok) {
-    const error = new Error(`HTTP ${response.status}: ${response.statusText}`)
+    const data = await response.clone().json().catch(() => ({}))
+    const error = new Error(
+      extractApiErrorMessage(data, `HTTP ${response.status}: ${response.statusText}`)
+    )
     error.status = response.status
     error.response = response
+    error.data = data
     throw error
   }
 

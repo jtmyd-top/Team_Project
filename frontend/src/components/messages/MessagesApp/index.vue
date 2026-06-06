@@ -614,6 +614,7 @@ import { ChatWebSocket } from '@services/chatWebSocket'
 import { getCsrfToken } from '@utils/csrf'
 import { formatRelativeListDate } from '@utils/datetime'
 import { escapeHtml, sanitizeHtml } from '@utils/sanitize'
+import { extractApiErrorMessage } from '@utils/apiError'
 import NewMessageDialog from '@components/messages/NewMessageDialog/index.vue'
 import ConversationItem from '@components/messages/ConversationItem/index.vue'
 import MessageBubble from '@components/messages/MessageBubble/index.vue'
@@ -915,7 +916,7 @@ async function apiPost(url, body) {
   })
   const d = await r.json().catch(() => ({}))
   if (!r.ok) {
-    const err = new Error(d.error || '请求失败')
+    const err = new Error(extractApiErrorMessage(d, '请求失败'))
     err.status = r.status
     err.data = d
     throw err
@@ -1591,7 +1592,7 @@ async function uploadAttachmentFile(file) {
     body: formData,
   })
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.error || `${file.name} 上传失败`)
+  if (!response.ok) throw new Error(extractApiErrorMessage(data, `${file.name} 上传失败`))
   pendingAttachments.value.push(data.attachment)
 }
 

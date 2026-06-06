@@ -3,6 +3,8 @@
  * 用于处理前端API请求中的各种错误情况
  */
 
+import { extractApiErrorMessage } from '@utils/apiError'
+
 /**
  * 处理API错误并返回用户友好的错误消息
  * @param {Error} error - 错误对象
@@ -46,54 +48,7 @@ export function handleApiError(error, defaultMessage = '操作失败') {
 
   // 处理 HTTP 响应错误
   if (error.response?.data) {
-    const data = error.response.data
-
-    // 处理各种可能的错误格式
-    if (typeof data === 'string') {
-      return data
-    } else if (data.status === 'error' && data.message) {
-      return data.message
-    } else if (data.error) {
-      return data.error
-    } else if (data.message) {
-      return data.message
-    } else if (data.errors) {
-      // {errors: {...}} 格式
-      const errors = []
-      for (const [field, messages] of Object.entries(data.errors)) {
-        if (Array.isArray(messages)) {
-          messages.forEach(msg => {
-            if (typeof msg === 'object' && msg.message) {
-              errors.push(msg.message)
-            } else if (typeof msg === 'string') {
-              errors.push(msg)
-            }
-          })
-        } else if (typeof messages === 'string') {
-          errors.push(messages)
-        }
-      }
-      return errors.join('; ')
-    } else if (typeof data === 'object' && data !== null) {
-      // Django表单验证格式: {field: ['错误1', ...]}
-      const errors = []
-      for (const [field, messages] of Object.entries(data)) {
-        if (Array.isArray(messages)) {
-          messages.forEach(msg => {
-            if (typeof msg === 'object' && msg.message) {
-              errors.push(msg.message)
-            } else if (typeof msg === 'string') {
-              errors.push(msg)
-            }
-          })
-        } else if (typeof messages === 'string') {
-          errors.push(messages)
-        } else if (typeof messages === 'object' && messages.message) {
-          errors.push(messages.message)
-        }
-      }
-      return errors.join('; ')
-    }
+    return extractApiErrorMessage(error.response.data, defaultMessage)
   }
 
   // 根据不同的操作提供更具体的默认错误消息
