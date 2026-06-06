@@ -130,7 +130,7 @@ export function useMoveToDialog(props, emit) {
       emit('close')
     } catch (e) {
       console.error('操作失败:', e)
-      ElMessage.error('操作失败，请重试')
+      ElMessage.error(e.message || '操作失败，请重试')
     }
   }
 

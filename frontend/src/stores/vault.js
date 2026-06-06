@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, onScopeDispose } from 'vue'
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 import * as vaultKey from '@/stores/vaultKey'
 
 export const useVaultStore = defineStore('vault', () => {
@@ -168,7 +169,7 @@ export const useVaultStore = defineStore('vault', () => {
       vaultInitialized.value = true
       return { success: true, alreadyInitialized: true }
     }
-    return { success: false, message: data.message || '初始化失败' }
+    return { success: false, message: extractApiErrorMessage(data, '初始化失败') }
   }
 
   // ==================== 单例锁：自动恢复 DEK ====================

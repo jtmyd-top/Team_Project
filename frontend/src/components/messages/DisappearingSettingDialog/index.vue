@@ -100,7 +100,7 @@ async function save() {
       emit('saved', { enabled: enabled.value, ttl: ttl.value })
       emit('close')
     } else {
-      ElMessage.error(d.error || '保存失败')
+      ElMessage.error(d.message || d.error || '保存失败')
     }
   } catch (e) {
     ElMessage.error('网络错误')

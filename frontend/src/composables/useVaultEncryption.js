@@ -10,6 +10,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useVaultStore } from '@/stores/vault'
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function useVaultEncryption() {
   const vaultStore = useVaultStore()
@@ -52,13 +53,14 @@ export function useVaultEncryption() {
         body: JSON.stringify({ code, use_backup: useBackup, client_pub: clientPubB64 })
       })
 
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
 
       if (!response.ok) {
-        verificationError.value = data.message || '验证失败'
+        const message = extractApiErrorMessage(data, '验证失败')
+        verificationError.value = message
         return {
           success: false,
-          message: data.message,
+          message,
           failCount: data.fail_count
         }
       }
@@ -82,8 +84,9 @@ export function useVaultEncryption() {
       }
     } catch (e) {
       console.error('2FA verification error:', e)
-      verificationError.value = '验证请求失败'
-      return { success: false, message: '验证请求失败' }
+      const message = e.message && e.message !== '请求失败' ? e.message : '验证请求失败'
+      verificationError.value = message
+      return { success: false, message }
     } finally {
       verificationPending.value = false
     }
@@ -109,8 +112,8 @@ export function useVaultEncryption() {
         }
       })
 
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message || '初始化失败')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(extractApiErrorMessage(data, '初始化失败'))
 
       return { success: true, message: data.message }
     } catch (e) {

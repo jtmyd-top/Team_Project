@@ -7,6 +7,19 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Message, Key } from '@element-plus/icons-vue'
 import { usePasswordStrength } from '@composables/usePasswordStrength'
+import { extractApiErrorMessage } from '@utils/apiError'
+
+const resolveSignupErrorMessages = (error) => {
+  const message = error.response?.data
+    ? extractApiErrorMessage(error.response.data, '')
+    : (error.message && error.message !== '请求失败' ? error.message : '')
+
+  if (!message) return []
+  if (message.includes('人机验证')) {
+    return ['人机验证已过期，请重新完成验证后重试']
+  }
+  return message.split(/;\s*/).filter(Boolean)
+}
 
 export function useSignup() {
   // ==================== Composables ====================
@@ -430,58 +443,8 @@ export function useSignup() {
       await window.apiService.auth.register(formData)
       showPromptMessage('success', '注册成功！', '您的账户已创建成功，请登录')
     } catch (error) {
-      if (error.response?.data) {
-        const data = error.response.data
-        const errors = []
-
-        if (typeof data === 'string') {
-          errors.push(data)
-        } else if (data.status === 'error' && data.message) {
-          errors.push(data.message)
-        } else if (data.error) {
-          errors.push(data.error)
-        } else if (data.errors) {
-          for (const [field, messages] of Object.entries(data.errors)) {
-            if (Array.isArray(messages)) {
-              messages.forEach(msg => {
-                if (typeof msg === 'object' && msg.message) {
-                  errors.push(msg.message)
-                } else if (typeof msg === 'string') {
-                  errors.push(msg)
-                }
-              })
-            } else if (typeof messages === 'string') {
-              errors.push(messages)
-            }
-          }
-        } else if (typeof data === 'object' && data !== null) {
-          for (const [field, messages] of Object.entries(data)) {
-            if (Array.isArray(messages)) {
-              messages.forEach(msg => {
-                if (typeof msg === 'object' && msg.message) {
-                  errors.push(msg.message)
-                } else if (typeof msg === 'string') {
-                  errors.push(msg)
-                }
-              })
-            } else if (typeof messages === 'string') {
-              errors.push(messages)
-            } else if (typeof messages === 'object' && messages.message) {
-              errors.push(messages.message)
-            }
-          }
-        }
-
-        serverErrors.value = errors.length > 0 ? errors : ['注册失败，请检查信息后重试']
-      } else if (error.message && error.message !== '请求失败') {
-        if (error.message.includes('人机验证')) {
-          serverErrors.value = ['人机验证已过期，请重新完成验证后重试']
-        } else {
-          serverErrors.value = [error.message]
-        }
-      } else {
-        serverErrors.value = ['网络错误，请稍后重试']
-      }
+      const errors = resolveSignupErrorMessages(error)
+      serverErrors.value = errors.length > 0 ? errors : ['网络错误，请稍后重试']
       refreshCaptcha()
     } finally {
       submitLoading.value = false

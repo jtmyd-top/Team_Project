@@ -162,7 +162,7 @@ export function useSettingsAccount() {
         emailCountdown.start(60);
         refreshCaptcha();
       } else {
-        ElMessage.error(data.message || "发送验证码失败");
+        ElMessage.error(data.message || data.error || "发送验证码失败");
         refreshCaptcha();
       }
     } catch (error) {
@@ -227,7 +227,7 @@ export function useSettingsAccount() {
         ElMessage.success("邮箱修改成功");
       } else {
         // 处理后端返回的其他错误
-        ElMessage.error(data.message || "邮箱修改失败");
+        ElMessage.error(data.message || data.error || "邮箱修改失败");
         // 如果是第一步出错，刷新验证码以便重试
         if (!emailForm.show2FA) {
           refreshCaptcha();
@@ -259,7 +259,7 @@ export function useSettingsAccount() {
         });
         twoFaCountdown.start(60);
       } else {
-        ElMessage.error(data.message || '发送失败');
+        ElMessage.error(data.message || data.error || '发送失败');
       }
     } catch (error) {
       ElMessage.error(error.message || '网络错误');

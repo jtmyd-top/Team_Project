@@ -2,6 +2,7 @@ import { ref, reactive, computed, onUnmounted } from 'vue';
 import { useUserStore } from '../stores/user.js';
 import { createDebouncedRequest, useCountdown } from '../utils/request.js';
 import { ElMessage } from 'element-plus';
+import { extractApiErrorMessage } from '@utils/apiError';
 
 export function useSettingsProfile() {
   const userStore = useUserStore();
@@ -242,7 +243,7 @@ export function useSettingsProfile() {
         bioEditing.value = false;
         ElMessage.success("个性签名已保存");
       } else {
-        ElMessage.error(data.message || "保存失败");
+        ElMessage.error(data.message || data.error || "保存失败");
       }
     } catch (error) {
       console.error('操作失败:', error);
@@ -257,24 +258,7 @@ export function useSettingsProfile() {
    */
   const handleApiError = (error) => {
     if (error.response?.data) {
-      const data = error.response.data;
-      if (data.error) {
-        ElMessage.error(data.error);
-      } else if (data.message) {
-        ElMessage.error(data.message);
-      } else if (typeof data === 'object' && data !== null) {
-        const errors = [];
-        for (const [field, messages] of Object.entries(data)) {
-          if (Array.isArray(messages)) {
-            errors.push(`${field}: ${messages.join(', ')}`);
-          } else {
-            errors.push(`${field}: ${messages}`);
-          }
-        }
-        ElMessage.error(errors.join('; '));
-      } else {
-        ElMessage.error("操作失败");
-      }
+      ElMessage.error(extractApiErrorMessage(error.response.data, "操作失败"));
     } else {
       ElMessage.error(error.message || "网络错误");
     }
@@ -324,7 +308,7 @@ export function useSettingsProfile() {
         originalNickname.value = (data.nickname || '').trim();
         ElMessage.success("用户名修改成功");
       } else {
-        ElMessage.error(data.message || "更新失败");
+        ElMessage.error(data.message || data.error || "更新失败");
       }
     } catch (error) {
       console.error('操作失败:', error);
@@ -420,7 +404,7 @@ export function useSettingsProfile() {
         emailCountdown.start(60);
         refreshCaptcha();
       } else {
-        ElMessage.error(data.message || "发送验证码失败");
+        ElMessage.error(data.message || data.error || "发送验证码失败");
         refreshCaptcha();
       }
     } catch (error) {
@@ -473,7 +457,7 @@ export function useSettingsProfile() {
         resetEmailForm();
         ElMessage.success("邮箱修改成功");
       } else {
-        ElMessage.error(data.message || "邮箱修改失败");
+        ElMessage.error(data.message || data.error || "邮箱修改失败");
       }
     } catch (error) {
       console.error('操作失败:', error);

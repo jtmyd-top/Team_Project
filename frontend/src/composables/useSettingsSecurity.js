@@ -117,7 +117,7 @@ export function useSettingsSecurity() {
         showPasswordDialog.value = false;
         resetPasswordForm();
       } else {
-        ElMessage.error(data.message || "密码修改失败");
+        ElMessage.error(data.message || data.error || "密码修改失败");
       }
     } catch (error) {
       console.error('修改密码错误:', error);
@@ -197,7 +197,7 @@ export function useSettingsSecurity() {
           ElMessage.success("邮箱两因素认证已启用，请务必保存您的备用验证码！");
         }
       } else {
-        ElMessage.error(data.message || "启用失败");
+        ElMessage.error(data.message || data.error || "启用失败");
       }
     } catch (error) {
       ElMessage.error(error.message || "网络错误");
@@ -217,7 +217,7 @@ export function useSettingsSecurity() {
         twoFaSetup.backupCodes = data.backup_codes || [];
         ElMessage.success("验证成功，请保存备用验证码");
       } else {
-        ElMessage.error(data.message || "验证失败");
+        ElMessage.error(data.message || data.error || "验证失败");
       }
     } catch (error) {
       ElMessage.error(error.message || "网络错误");
@@ -275,7 +275,7 @@ export function useSettingsSecurity() {
         twoFaDisable.useBackup = false;
         ElMessage.success("两因素认证已禁用");
       } else {
-        ElMessage.error(data.message || "禁用失败");
+        ElMessage.error(data.message || data.error || "禁用失败");
       }
     } catch (error) {
       ElMessage.error(error.message || "网络错误");
@@ -321,7 +321,7 @@ export function useSettingsSecurity() {
         backupCodes.newCodes = data.backup_codes || [];
         ElMessage.success("备用验证码已重新生成");
       } else {
-        ElMessage.error(data.message || "生成失败");
+        ElMessage.error(data.message || data.error || "生成失败");
       }
     } catch (error) {
       ElMessage.error(error.message || "网络错误");

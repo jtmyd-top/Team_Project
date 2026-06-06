@@ -6,6 +6,7 @@
  */
 
 import { ref } from 'vue'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 /**
  * 纯 JS 实现的 SHA256（用于 HTTP 环境，因为 crypto.subtle 只在 HTTPS 可用）
@@ -178,14 +179,13 @@ export function useProofOfWork() {
         credentials: 'include'
       })
 
+      const challengeData = await challengeResponse.json().catch(() => ({}))
       if (!challengeResponse.ok) {
-        throw new Error('获取 challenge 失败')
+        throw new Error(extractApiErrorMessage(challengeData, '获取 challenge 失败'))
       }
 
-      const challengeData = await challengeResponse.json()
-
       if (challengeData.status !== 'challenge') {
-        throw new Error(challengeData.message || challengeData.error || '获取 challenge 失败')
+        throw new Error(extractApiErrorMessage(challengeData, '获取 challenge 失败'))
       }
 
       const { prefix, difficulty } = challengeData
@@ -216,13 +216,13 @@ export function useProofOfWork() {
 
       if (!verifyResponse.ok) {
         const errData = await verifyResponse.json().catch(() => ({}))
-        throw new Error(errData.message || errData.error || 'PoW 验证失败')
+        throw new Error(extractApiErrorMessage(errData, 'PoW 验证失败'))
       }
 
       const tokenData = await verifyResponse.json()
 
       if (tokenData.status !== 'success' || !tokenData.init_token) {
-        throw new Error(tokenData.message || tokenData.error || '获取 init_token 失败')
+        throw new Error(extractApiErrorMessage(tokenData, '获取 init_token 失败'))
       }
 
       return tokenData.init_token

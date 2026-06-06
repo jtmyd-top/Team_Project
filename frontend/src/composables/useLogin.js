@@ -5,6 +5,17 @@
 
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { extractApiErrorMessage } from '@utils/apiError'
+
+const resolveLoginErrorMessage = (error) => {
+  if (error.response?.data) {
+    return extractApiErrorMessage(error.response.data, '')
+  }
+  if (error.message && error.message !== '请求失败') {
+    return error.message
+  }
+  return ''
+}
 
 export function useLogin(captchaWidgetRef) {
   // ==================== 状态管理 ====================
@@ -148,57 +159,7 @@ export function useLogin(captchaWidgetRef) {
         }, 1000)
       }
     } catch (error) {
-      let errorMessage = ''
-
-      if (error.response?.data) {
-        const data = error.response.data
-
-        if (typeof data === 'string') {
-          errorMessage = data
-        } else if (data.status === 'error' && data.message) {
-          errorMessage = data.message
-        } else if (data.error) {
-          errorMessage = data.error
-        } else if (data.message) {
-          errorMessage = data.message
-        } else if (data.errors) {
-          const errors = []
-          for (const [field, messages] of Object.entries(data.errors)) {
-            if (Array.isArray(messages)) {
-              messages.forEach(msg => {
-                if (typeof msg === 'object' && msg.message) {
-                  errors.push(msg.message)
-                } else if (typeof msg === 'string') {
-                  errors.push(msg)
-                }
-              })
-            } else if (typeof messages === 'string') {
-              errors.push(messages)
-            }
-          }
-          errorMessage = errors.join('; ')
-        } else if (typeof data === 'object' && data !== null) {
-          const errors = []
-          for (const [field, messages] of Object.entries(data)) {
-            if (Array.isArray(messages)) {
-              messages.forEach(msg => {
-                if (typeof msg === 'object' && msg.message) {
-                  errors.push(msg.message)
-                } else if (typeof msg === 'string') {
-                  errors.push(msg)
-                }
-              })
-            } else if (typeof messages === 'string') {
-              errors.push(messages)
-            } else if (typeof messages === 'object' && messages.message) {
-              errors.push(messages.message)
-            }
-          }
-          errorMessage = errors.join('; ')
-        }
-      } else if (error.message && error.message !== '请求失败') {
-        errorMessage = error.message
-      }
+      const errorMessage = resolveLoginErrorMessage(error)
 
       ElMessage.error(errorMessage || '登录失败，请检查网络连接')
       refreshCaptcha()
@@ -232,57 +193,7 @@ export function useLogin(captchaWidgetRef) {
         window.location.href = '/'
       }, 1000)
     } catch (error) {
-      let errorMessage = ''
-
-      if (error.response?.data) {
-        const data = error.response.data
-
-        if (typeof data === 'string') {
-          errorMessage = data
-        } else if (data.status === 'error' && data.message) {
-          errorMessage = data.message
-        } else if (data.error) {
-          errorMessage = data.error
-        } else if (data.message) {
-          errorMessage = data.message
-        } else if (data.errors) {
-          const errors = []
-          for (const [field, messages] of Object.entries(data.errors)) {
-            if (Array.isArray(messages)) {
-              messages.forEach(msg => {
-                if (typeof msg === 'object' && msg.message) {
-                  errors.push(msg.message)
-                } else if (typeof msg === 'string') {
-                  errors.push(msg)
-                }
-              })
-            } else if (typeof messages === 'string') {
-              errors.push(messages)
-            }
-          }
-          errorMessage = errors.join('; ')
-        } else if (typeof data === 'object' && data !== null) {
-          const errors = []
-          for (const [field, messages] of Object.entries(data)) {
-            if (Array.isArray(messages)) {
-              messages.forEach(msg => {
-                if (typeof msg === 'object' && msg.message) {
-                  errors.push(msg.message)
-                } else if (typeof msg === 'string') {
-                  errors.push(msg)
-                }
-              })
-            } else if (typeof messages === 'string') {
-              errors.push(messages)
-            } else if (typeof messages === 'object' && messages.message) {
-              errors.push(messages.message)
-            }
-          }
-          errorMessage = errors.join('; ')
-        }
-      } else if (error.message && error.message !== '请求失败') {
-        errorMessage = error.message
-      }
+      const errorMessage = resolveLoginErrorMessage(error)
 
       ElMessage.error(errorMessage || '验证失败，请检查网络连接')
     } finally {
@@ -301,18 +212,7 @@ export function useLogin(captchaWidgetRef) {
       startCountdown()
       ElMessage.success('验证码已重新发送到您的邮箱')
     } catch (error) {
-      let errorMessage = ''
-
-      if (error.message) {
-        errorMessage = error.message
-      } else if (error.response?.data) {
-        const data = error.response.data
-        if (data.error) {
-          errorMessage = data.error
-        } else if (data.message) {
-          errorMessage = data.message
-        }
-      }
+      const errorMessage = resolveLoginErrorMessage(error)
 
       ElMessage.error(errorMessage || '发送失败，请稍后重试')
     } finally {

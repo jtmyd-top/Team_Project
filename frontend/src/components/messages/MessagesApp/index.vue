@@ -2219,7 +2219,7 @@ function viewPeerProfile() {
     .then((r) => r.json())
     .then((d) => {
       if (d.status !== 'success') {
-        ElMessage.error(d.error || '加载失败')
+        ElMessage.error(d.message || d.error || '加载失败')
         return
       }
       peerProfile.value = {

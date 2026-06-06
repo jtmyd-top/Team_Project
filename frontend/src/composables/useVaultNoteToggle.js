@@ -65,7 +65,7 @@ export function useVaultNoteToggle({ sidebarStore, vaultStore, decryptContent, e
 
     if (!updateResponse.ok) {
       const errorData = await updateResponse.json()
-      throw new Error('保存加密内容失败: ' + (errorData.message || '后端错误'))
+      throw new Error('保存加密内容失败: ' + (errorData.message || errorData.error || errorData.detail || '后端错误'))
     }
   }
 
@@ -230,7 +230,7 @@ export function useVaultNoteToggle({ sidebarStore, vaultStore, decryptContent, e
 
           if (!saveResponse.ok) {
             const errorData = await saveResponse.json()
-            throw new Error('保存明文内容失败: ' + (errorData.error || '后端错误'))
+            throw new Error('保存明文内容失败: ' + (errorData.message || errorData.error || '后端错误'))
           }
         } catch (e) {
           ElMessage.error('处理笔记内容时出错: ' + e.message)

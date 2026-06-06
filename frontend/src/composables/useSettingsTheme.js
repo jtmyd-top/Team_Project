@@ -53,7 +53,7 @@ export function useSettingsTheme() {
         ElMessage.success('主题设置已保存');
         applyTheme();
       } else {
-        ElMessage.error(data.message || '保存失败');
+        ElMessage.error(data.message || data.error || '保存失败');
       }
     } catch (error) {
       ElMessage.error(error.message || '网络错误');

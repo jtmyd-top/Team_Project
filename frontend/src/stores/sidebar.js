@@ -6,6 +6,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { folderApi } from '@/api/folder'
 import { useVaultStore } from './vault.js'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 // ==================== URL 状态管理工具 ====================
 
@@ -390,7 +391,10 @@ export const useSidebarStore = defineStore('sidebar', () => {
       window.dispatchEvent(new CustomEvent('knowledge-preview-clear'))
 
       const response = await fetch('/api/folders/trashed-items/')
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || data.status === 'error') {
+        throw new Error(extractApiErrorMessage(data, '收藏操作失败'))
+      }
 
       // 存储混合列表（文件夹 + 笔记）
       currentNotes.value = data.items || []
@@ -460,11 +464,10 @@ export const useSidebarStore = defineStore('sidebar', () => {
         }
       })
 
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error('恢复失败')
+        throw new Error(extractApiErrorMessage(data, '恢复失败'))
       }
-
-      const data = await response.json()
 
       // 从当前列表移除
       currentNotes.value = currentNotes.value.filter(item => item.id !== folderId)
@@ -494,11 +497,10 @@ export const useSidebarStore = defineStore('sidebar', () => {
         }
       })
 
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error('删除失败')
+        throw new Error(extractApiErrorMessage(data, '删除失败'))
       }
-
-      const data = await response.json()
 
       // 从当前列表移除
       currentNotes.value = currentNotes.value.filter(item => item.id !== folderId)
@@ -766,8 +768,9 @@ export const useSidebarStore = defineStore('sidebar', () => {
         body: JSON.stringify({ title: newTitle })
       })
 
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error('重命名失败')
+        throw new Error(extractApiErrorMessage(data, '重命名失败'))
       }
 
       // 更新本地状态
@@ -882,13 +885,17 @@ export const useSidebarStore = defineStore('sidebar', () => {
    */
   async function trashNote(noteId) {
     try {
-      await fetch(`/api/notes/${noteId}/trash/`, {
+      const response = await fetch(`/api/notes/${noteId}/trash/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
         }
       })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || data.status === 'error') {
+        throw new Error(extractApiErrorMessage(data, '删除失败'))
+      }
 
       // 【P1】触发事件：笔记已移入回收站
       window.dispatchEvent(new CustomEvent('note-moved-to-trash', {
@@ -908,13 +915,17 @@ export const useSidebarStore = defineStore('sidebar', () => {
    */
   async function restoreNote(noteId) {
     try {
-      await fetch(`/api/notes/${noteId}/restore/`, {
+      const response = await fetch(`/api/notes/${noteId}/restore/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
         }
       })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || data.status === 'error') {
+        throw new Error(extractApiErrorMessage(data, '恢复失败'))
+      }
 
       // 從當前列表移除（回收站視圖）
       currentNotes.value = currentNotes.value.filter(n => n.id !== noteId)
@@ -934,13 +945,17 @@ export const useSidebarStore = defineStore('sidebar', () => {
    */
   async function permanentDeleteNote(noteId) {
     try {
-      await fetch(`/api/notes/${noteId}/permanent-delete/`, {
+      const response = await fetch(`/api/notes/${noteId}/permanent-delete/`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
         }
       })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || data.status === 'error') {
+        throw new Error(extractApiErrorMessage(data, '永久删除失败'))
+      }
       
       // 从当前列表移除
       currentNotes.value = currentNotes.value.filter(n => n.id !== noteId)

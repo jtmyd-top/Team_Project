@@ -6,6 +6,7 @@
 import { ref, watch, computed, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useVaultStore } from '@/stores/vault'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
   const vaultStore = useVaultStore()
@@ -153,19 +154,19 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
           'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
         }
       })
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
 
-      if (data.status === 'success') {
+      if (response.ok && data.status === 'success') {
         ElMessage.success('验证码已发送')
         startCountdown()
         nextTick(() => {
           codeInputRef.value?.focus()
         })
       } else {
-        errorMessage.value = data.message || '发送失败'
+        errorMessage.value = extractApiErrorMessage(data, '发送失败')
       }
     } catch (e) {
-      errorMessage.value = '发送失败，请稍后重试'
+      errorMessage.value = e.message || '发送失败，请稍后重试'
     } finally {
       sendingCode.value = false
     }
@@ -230,7 +231,14 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
         },
         body: JSON.stringify(requestBody)
       })
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        triggerShake()
+        errorMessage.value = extractApiErrorMessage(data, '验证失败，请稍后重试')
+        code.value = ''
+        return
+      }
 
       if (data.status === 'success') {
         ElMessage.success('验证成功')
@@ -270,12 +278,12 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
         failCount.value = data.fail_count || 0
         startLockCountdown(data.lock_seconds || 60)
         triggerShake()
-        errorMessage.value = data.message || '错误次数过多'
+        errorMessage.value = extractApiErrorMessage(data, '错误次数过多')
       } else if (data.status === 'require_captcha') {
         requireCaptcha.value = true
         failCount.value = data.fail_count || 0
         triggerShake()
-        errorMessage.value = data.message || '请完成人机验证'
+        errorMessage.value = extractApiErrorMessage(data, '请完成人机验证')
         code.value = ''
         if (captchaWidgetRef.value) {
           captchaWidgetRef.value.reset()
@@ -283,7 +291,7 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
       } else {
         failCount.value = data.fail_count || failCount.value + 1
         triggerShake()
-        errorMessage.value = data.message || '验证码错误'
+        errorMessage.value = extractApiErrorMessage(data, '验证码错误')
         code.value = ''
 
         if (data.require_captcha) {

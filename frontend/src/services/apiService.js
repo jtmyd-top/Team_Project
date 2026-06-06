@@ -4,6 +4,32 @@
 import { getCsrfToken } from '@utils/csrf'
 import { extractApiErrorMessage } from '@utils/apiError'
 
+function createResponseError(message, response, data) {
+  const error = new Error(message);
+  error.response = {
+    status: response.status,
+    data
+  };
+  throw error;
+}
+
+function extractNonJsonErrorMessage(response, text) {
+  const trimmed = (text || '').trim();
+  if (trimmed && !trimmed.startsWith('<')) {
+    return trimmed;
+  }
+
+  if (response.status === 404) {
+    return 'API端点不存在 (404)';
+  } else if (response.status === 403) {
+    return '访问被拒绝 (403)';
+  } else if (response.status === 500) {
+    return '服务器内部错误 (500)';
+  }
+
+  return `请求失败 (${response.status})`;
+}
+
 /**
  * 统一的 POST 请求封装
  */
@@ -23,26 +49,12 @@ async function postRequest(url, body) {
   try {
     data = JSON.parse(text);
   } catch (e) {
-    // 非JSON响应（HTML错误页面等）
-    if (response.status === 404) {
-      throw new Error('API端点不存在 (404)');
-    } else if (response.status === 403) {
-      throw new Error('访问被拒绝 (403)');
-    } else if (response.status === 500) {
-      throw new Error('服务器内部错误 (500)');
-    } else {
-      throw new Error(`请求失败 (${response.status})`);
-    }
+    createResponseError(extractNonJsonErrorMessage(response, text), response, text);
   }
 
   if (!response.ok) {
     const errorMessage = extractApiErrorMessage(data, '请求失败');
-    const error = new Error(errorMessage);
-    error.response = {
-      status: response.status,
-      data: data
-    };
-    throw error;
+    createResponseError(errorMessage, response, data);
   }
 
   return data;
@@ -68,25 +80,12 @@ async function getRequest(url, params = {}) {
   try {
     data = JSON.parse(text);
   } catch (e) {
-    if (response.status === 404) {
-      throw new Error('API端点不存在 (404)');
-    } else if (response.status === 403) {
-      throw new Error('访问被拒绝 (403)');
-    } else if (response.status === 500) {
-      throw new Error('服务器内部错误 (500)');
-    } else {
-      throw new Error(`请求失败 (${response.status})`);
-    }
+    createResponseError(extractNonJsonErrorMessage(response, text), response, text);
   }
 
   if (!response.ok) {
     const errorMessage = extractApiErrorMessage(data, '请求失败');
-    const error = new Error(errorMessage);
-    error.response = {
-      status: response.status,
-      data: data
-    };
-    throw error;
+    createResponseError(errorMessage, response, data);
   }
 
   return data;

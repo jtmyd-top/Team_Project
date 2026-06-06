@@ -102,7 +102,7 @@ async function submit() {
       emit('submitted')
       emit('close')
     } else {
-      ElMessage.error(d.error || '举报失败')
+      ElMessage.error(d.message || d.error || '举报失败')
     }
   } catch (e) {
     ElMessage.error('网络错误，请重试')

@@ -87,7 +87,7 @@ async function unblock(u) {
       emit('updated')
     } else {
       const d = await r.json().catch(() => ({}))
-      ElMessage.error(d.error || '解除失败')
+      ElMessage.error(d.message || d.error || '解除失败')
     }
   } catch (e) {
     ElMessage.error('网络错误')

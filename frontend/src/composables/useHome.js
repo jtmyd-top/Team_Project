@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getCsrfToken } from '@utils/csrf'
 import { formatDateOnly } from '@utils/datetime'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 // 从模板注入的全局数据中读取登录状态
 const homeData = window.__HOME_DATA__ || {}
@@ -218,10 +219,10 @@ export function useHome() {
     loading.value = true
     try {
       const response = await fetch('/api/public-notes/')
+      const raw = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error('获取文章列表失败')
+        throw new Error(extractApiErrorMessage(raw, '获取文章列表失败'))
       }
-      const raw = await response.json()
       const data = Array.isArray(raw) ? raw : (raw.notes || [])
 
       const badgeColors = ['purple', 'blue', 'green']
@@ -254,7 +255,7 @@ export function useHome() {
       hotArticles.value = [...allArticles.value].sort((a, b) => b.views - a.views)
     } catch (error) {
       console.error('获取文章列表失败:', error)
-      ElMessage.error('获取文章列表失败，请稍后重试')
+      ElMessage.error(error.message || '获取文章列表失败，请稍后重试')
     } finally {
       loading.value = false
     }
@@ -271,10 +272,10 @@ export function useHome() {
     loading.value = true
     try {
       const response = await fetch('/api/notes/favorited/')
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error('获取收藏列表失败')
+        throw new Error(extractApiErrorMessage(data, '获取收藏列表失败'))
       }
-      const data = await response.json()
 
       const badgeColors = ['purple', 'blue', 'green']
 
@@ -303,7 +304,7 @@ export function useHome() {
       })
     } catch (error) {
       console.error('获取收藏列表失败:', error)
-      ElMessage.error('获取收藏列表失败，请稍后重试')
+      ElMessage.error(error.message || '获取收藏列表失败，请稍后重试')
     } finally {
       loading.value = false
     }
@@ -509,10 +510,12 @@ export function useHome() {
       if (data.status === 'success') {
         article.user_has_liked = data.user_has_liked
         article.likes = data.total_likes
+      } else {
+        throw new Error(extractApiErrorMessage(data, '点赞失败'))
       }
     } catch (error) {
       console.error('点赞失败:', error)
-      ElMessage.error('点赞失败，请稍后重试')
+      ElMessage.error(error.message || '点赞失败，请稍后重试')
     }
   }
 
@@ -536,10 +539,12 @@ export function useHome() {
       if (data.status === 'success') {
         article.is_favorited = data.is_favorited
         ElMessage.success(data.is_favorited ? '已收藏' : '已取消收藏')
+      } else {
+        throw new Error(extractApiErrorMessage(data, '收藏失败'))
       }
     } catch (error) {
       console.error('收藏失败:', error)
-      ElMessage.error('收藏失败，请稍后重试')
+      ElMessage.error(error.message || '收藏失败，请稍后重试')
     }
   }
 

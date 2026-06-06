@@ -12,6 +12,12 @@ import { extractApiErrorMessage } from '@utils/apiError'
  * @returns {string} 用户友好的错误消息
  */
 export function handleApiError(error, defaultMessage = '操作失败') {
+  // 优先使用后端响应体中的业务错误文案
+  if (error.response?.data) {
+    const responseMessage = extractApiErrorMessage(error.response.data, '')
+    if (responseMessage) return responseMessage
+  }
+
   // 优先使用 error.message（适用于网络错误、超时等）
   if (error.message && error.message !== '请求失败') {
     // 网络相关错误的特殊处理
@@ -44,11 +50,6 @@ export function handleApiError(error, defaultMessage = '操作失败') {
     }
 
     return error.message
-  }
-
-  // 处理 HTTP 响应错误
-  if (error.response?.data) {
-    return extractApiErrorMessage(error.response.data, defaultMessage)
   }
 
   // 根据不同的操作提供更具体的默认错误消息

@@ -2,16 +2,19 @@ export function extractApiErrorMessage(data, fallback = '请求失败') {
   if (!data) return fallback
   if (typeof data === 'string') return data || fallback
 
-  const directMessage = normalizeErrorValue(data.error || data.message || data.detail)
+  const directMessage = normalizeErrorValue(data.message || data.detail || data.error || data.error_description)
   if (directMessage) return directMessage
 
   if (data.status === 'error') {
-    const statusMessage = normalizeErrorValue(data.message || data.error)
+    const statusMessage = normalizeErrorValue(data.message || data.error || data.detail)
     if (statusMessage) return statusMessage
   }
 
   const nestedErrors = normalizeErrorValue(data.errors)
   if (nestedErrors) return nestedErrors
+
+  const nonFieldErrors = normalizeErrorValue(data.non_field_errors)
+  if (nonFieldErrors) return nonFieldErrors
 
   if (typeof data === 'object') {
     const messages = []

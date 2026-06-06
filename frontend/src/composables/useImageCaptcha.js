@@ -1,5 +1,6 @@
 import { ref, watch, onMounted } from 'vue'
 import { useProofOfWork } from '@/composables/useProofOfWork'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function useImageCaptcha(props, emit) {
   const captchaSrc = ref('')
@@ -49,7 +50,7 @@ export function useImageCaptcha(props, emit) {
         const contentType = response.headers.get('content-type')
         if (contentType && contentType.includes('application/json')) {
           const errorData = await response.json()
-          throw new Error(errorData.message || errorData.error || '验证码加载失败')
+          throw new Error(extractApiErrorMessage(errorData, '验证码加载失败'))
         }
         throw new Error('验证码加载失败')
       }

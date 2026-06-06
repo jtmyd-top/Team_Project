@@ -9,6 +9,7 @@ import { useVaultStore } from '@/stores/vault'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
 import { formatMonthDayShortTime } from '@utils/datetime'
+import { extractApiErrorMessage } from '@utils/apiError'
 import { convertUbbMarkupInHtml } from '@/utils/ubb'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -110,9 +111,8 @@ export function useKnowledgeList() {
   async function fetchNoteDetail(noteId) {
     try {
       const response = await fetch(`/api/notes/${noteId}/?full_content=true`)
-      if (!response.ok) throw new Error('Failed to fetch note')
-
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(extractApiErrorMessage(data, '无法加载笔记内容'))
 
       currentNoteData.value = {
         id: data.id,
@@ -231,10 +231,10 @@ export function useKnowledgeList() {
         })
       })
 
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
 
-      if (data.error) {
-        throw new Error(data.error)
+      if (!response.ok || data.status === 'error' || data.error) {
+        throw new Error(extractApiErrorMessage(data, '创建笔记失败'))
       }
 
       const noteId = data.id || data.note_id
@@ -281,7 +281,7 @@ export function useKnowledgeList() {
         throw new Error('创建失败：未返回笔记 ID')
       }
     } catch (e) {
-      ElMessage.error('创建笔记失败')
+      ElMessage.error(e.message || '创建笔记失败')
     }
   }
 
@@ -400,11 +400,10 @@ export function useKnowledgeList() {
         })
       })
 
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        throw new Error(extractApiErrorMessage(data, '保存失败，请重试'))
       }
-
-      const data = await response.json()
 
       ElMessage.success('保存成功')
       hasUnsavedChanges.value = false
@@ -433,7 +432,7 @@ export function useKnowledgeList() {
 
       viewMode.value = 'read'
     } catch (e) {
-      ElMessage.error('保存失败，请重试')
+      ElMessage.error(e.message || '保存失败，请重试')
     } finally {
       isSaving.value = false
     }
@@ -493,17 +492,19 @@ export function useKnowledgeList() {
         }
       })
 
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
 
       if (data.status === 'success') {
         ElMessage.success('笔记已移至回收站')
         currentNoteId.value = null
         currentNoteData.value = { id: null, title: '', content: '', toc: [] }
         await sidebarStore.loadModuleData()
+      } else {
+        throw new Error(extractApiErrorMessage(data, '删除失败'))
       }
     } catch (e) {
       if (e !== 'cancel') {
-        ElMessage.error('删除失败')
+        ElMessage.error(e.message || '删除失败')
       }
     }
   }
@@ -529,11 +530,10 @@ export function useKnowledgeList() {
         })
       })
 
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        throw new Error(extractApiErrorMessage(data, `${actionText}失败，请重试`))
       }
-
-      const data = await response.json()
 
       currentNoteData.value.is_public = newPublicState
       if (newPublicState && data.public_url) {
@@ -541,7 +541,7 @@ export function useKnowledgeList() {
       }
       ElMessage.success(`笔记已${actionText}`)
     } catch (e) {
-      ElMessage.error(`${actionText}失败，请重试`)
+      ElMessage.error(e.message || `${actionText}失败，请重试`)
     }
   }
 

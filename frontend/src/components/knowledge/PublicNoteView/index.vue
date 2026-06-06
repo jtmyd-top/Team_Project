@@ -336,7 +336,7 @@ const toggleFollow = async () => {
       followersCount.value = d.followers_count ?? followersCount.value
       notificationRef.value?.showSuccess(isFollowing.value ? '关注成功' : '已取消关注')
     } else {
-      notificationRef.value?.showError(d.error || '操作失败')
+      notificationRef.value?.showError(d.message || d.error || '操作失败')
     }
   } catch (e) {
     notificationRef.value?.showError('网络错误，请稍后重试')

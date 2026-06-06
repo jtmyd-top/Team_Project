@@ -3,6 +3,8 @@ import { useSidebarStore } from '@/stores/sidebar'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { useClientCrypto } from '@/composables/useClientCrypto'
 import { useVaultStore } from '@/stores/vault'
+import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 import { ElMessage } from 'element-plus'
 
 export function useDragDropOverlay() {
@@ -10,7 +12,7 @@ export function useDragDropOverlay() {
   const vaultStore = useVaultStore()
 
   // 加密相关
-  const { isKeyValid, tryRecoverKeyFromSession, getCsrfToken } = useVaultEncryption()
+  const { isKeyValid, tryRecoverKeyFromSession } = useVaultEncryption()
   const { decryptContent, looksLikeEncrypted } = useClientCrypto()
 
   // 状态
@@ -103,10 +105,10 @@ export function useDragDropOverlay() {
 
         // 获取笔记完整内容
         const noteResponse = await fetch(`/api/notes/${noteId}/?full_content=true`)
+        const noteData = await noteResponse.json().catch(() => ({}))
         if (!noteResponse.ok) {
-          throw new Error('获取笔记内容失败')
+          throw new Error(extractApiErrorMessage(noteData, '获取笔记内容失败'))
         }
-        const noteData = await noteResponse.json()
 
         // 解密标题和内容
         let decryptedTitle = noteData.title
@@ -146,8 +148,9 @@ export function useDragDropOverlay() {
           })
         })
 
+        const updateData = await updateResponse.json().catch(() => ({}))
         if (!updateResponse.ok) {
-          throw new Error('更新笔记失败')
+          throw new Error(extractApiErrorMessage(updateData, '更新笔记失败'))
         }
 
         console.log('[Vault] Note decrypted and moved out of vault successfully')
@@ -179,7 +182,7 @@ export function useDragDropOverlay() {
       }
     } catch (e) {
       console.error('移动笔记失败:', e)
-      ElMessage.error('移动失败，请重试')
+      ElMessage.error(e.message || '移动失败，请重试')
     }
   }
 

@@ -6,6 +6,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { usePasswordStrength } from '@composables/usePasswordStrength'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function useResetPassword() {
   // ==================== Composables ====================
@@ -186,7 +187,7 @@ export function useResetPassword() {
           if (data.status === 'success') {
             showSuccessAnimation(data.redirect_url || '/')
           } else {
-            message.text = data.message || '重置失败，请稍后重试'
+            message.text = extractApiErrorMessage(data, '重置失败，请稍后重试')
             message.type = 'error'
             triggerShake()
           }
@@ -203,16 +204,7 @@ export function useResetPassword() {
       } else {
         try {
           const errorData = await response.json()
-          if (errorData.password || errorData.confirmPassword) {
-            const errors = []
-            if (errorData.password?.[0]) errors.push(errorData.password[0].message)
-            if (errorData.confirmPassword?.[0]) errors.push(errorData.confirmPassword[0].message)
-            message.text = errors.join('; ') || '重置失败，请稍后重试'
-          } else if (errorData.message) {
-            message.text = errorData.message
-          } else {
-            message.text = '重置失败，请稍后重试'
-          }
+          message.text = extractApiErrorMessage(errorData, '重置失败，请稍后重试')
         } catch (e) {
           message.text = '重置失败，请稍后重试'
         }

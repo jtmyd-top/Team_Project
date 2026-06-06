@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function usePublicNoteView(notificationRef) {
   // 状态
@@ -77,7 +78,7 @@ export function usePublicNoteView(notificationRef) {
         const message = data.action === 'liked' ? '点赞成功！' : '已取消点赞'
         showNotification(true, message)
       } else {
-        showNotification(false, data.message || '操作失败')
+        showNotification(false, extractApiErrorMessage(data, '操作失败'))
       }
     } catch (error) {
       console.error('点赞失败:', error)

@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useVaultEncryption } from '@/composables/useVaultEncryption'
 import { getCsrfToken } from '@utils/csrf'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function useEncryptedNoteEditor(props, emit) {
   const { isKeyValid } = useVaultEncryption()
@@ -58,7 +59,7 @@ export function useEncryptedNoteEditor(props, emit) {
         showEncryptionDialog.value = false
         emit('toggle-success', data)
       } else {
-        ElMessage.error(data.message || '操作失败')
+        ElMessage.error(extractApiErrorMessage(data, '操作失败'))
       }
     } catch (e) {
       console.error('Toggle encryption error:', e)

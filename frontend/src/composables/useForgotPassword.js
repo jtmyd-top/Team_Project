@@ -5,6 +5,7 @@
 
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { extractApiErrorMessage } from '@utils/apiError'
 
 export function useForgotPassword() {
   // ==================== 状态管理 ====================
@@ -143,7 +144,7 @@ export function useForgotPassword() {
           captchaWidgetRef.value.reset()
         }
       } else {
-        message.text = data.message || '发送失败，请稍后重试'
+        message.text = extractApiErrorMessage(data, '发送失败，请稍后重试')
         message.type = 'error'
         triggerShake()
       }

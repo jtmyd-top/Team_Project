@@ -1,3 +1,5 @@
+import { extractApiErrorMessage } from '@utils/apiError'
+
 export function createPublicNoteComments({ getCsrfToken, renderCommentUbb, hydrateRuntimeWidgets, scrollToLinkedComment, showToast }) {
   function decorateComment(comment) {
     return {
@@ -62,7 +64,7 @@ export function createPublicNoteComments({ getCsrfToken, renderCommentUbb, hydra
         showToast('评论发表成功！', 'success')
       } else {
         const err = await res.json()
-        showToast(err.error || '发表失败', 'error')
+        showToast(extractApiErrorMessage(err, '发表失败'), 'error')
       }
     } catch (e) {
       showToast('网络错误，请稍后重试', 'error')
@@ -91,7 +93,7 @@ export function createPublicNoteComments({ getCsrfToken, renderCommentUbb, hydra
         showToast('回复成功！', 'success')
       } else {
         const err = await res.json()
-        showToast(err.error || '回复失败', 'error')
+        showToast(extractApiErrorMessage(err, '回复失败'), 'error')
       }
     } catch (e) {
       showToast('网络错误，请稍后重试', 'error')
