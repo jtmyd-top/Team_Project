@@ -8,6 +8,24 @@ register = template.Library()
 # Vite 开发服务器地址
 VITE_DEV_SERVER = 'http://localhost:5173'
 
+
+@register.simple_tag
+def static_mtime(path):
+    candidates = []
+    static_root = getattr(settings, 'STATIC_ROOT', None)
+    if static_root:
+        candidates.append(os.path.join(static_root, path))
+    for static_dir in getattr(settings, 'STATICFILES_DIRS', []):
+        candidates.append(os.path.join(static_dir, path))
+
+    for candidate in candidates:
+        try:
+            if os.path.exists(candidate):
+                return str(int(os.path.getmtime(candidate)))
+        except OSError:
+            continue
+    return ''
+
 def is_vite_dev_mode():
     """
     检查是否处于 Vite 开发模式

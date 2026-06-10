@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load static_files %}
 {% block title %}用户登录{% endblock %}
 
 {% block head_extra %}
@@ -18,5 +19,6 @@
 </div>
 
 <!-- 加载构建后的Vue应用 -->
-<script type="module" src="{% static 'dist/login.js' %}"></script>
+{% static_mtime 'dist/login.js' as login_js_version %}
+<script type="module" src="{% static 'dist/login.js' %}?v={{ login_js_version }}"></script>
 {% endblock %}
