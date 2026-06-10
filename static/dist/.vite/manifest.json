@@ -154,12 +154,10 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-BycGvb3a.js",
-      "_element-plus-3zH3XlIy.js",
       "src/utils/csrf.js",
       "_datetime-DAc_1THF.js",
       "_apiError-BVbL-ZBU.js",
-      "__plugin-vue_export-helper-DlAUqK2U.js",
-      "_vendor-wzGsUuS6.js"
+      "__plugin-vue_export-helper-DlAUqK2U.js"
     ],
     "css": [
       "assets/home.css"

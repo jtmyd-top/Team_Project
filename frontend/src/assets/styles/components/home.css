@@ -1,9 +1,7 @@
 /* ========== 知识社区论坛样式 ========== */
 
-/* Material Icons 全局样式 */
-.material-icons-outlined {
-  font-family: 'Material Icons Outlined';
-  font-weight: normal;
+/* 首页图标使用 base.html 已加载的本地 FontAwesome。 */
+.home-fa-icon {
   font-style: normal;
   font-size: 24px;
   display: inline-flex;
@@ -37,7 +35,7 @@
 /* ========== 页面容器 ========== */
 .home-container {
   min-height: 100vh;
-  font-family: 'Inter', 'Noto Sans SC', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   color: var(--slate-dark);
   -webkit-font-smoothing: antialiased;
 }
@@ -209,7 +207,7 @@
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.nav-item .material-icons-outlined {
+.nav-item .home-fa-icon {
   flex-shrink: 0;
   font-size: 20px;
   width: 38px;
@@ -222,45 +220,45 @@
 }
 
 /* 默认状态：统一灰色图标 */
-.nav-item .material-icons-outlined {
+.nav-item .home-fa-icon {
   background: rgba(100, 116, 139, 0.08);
   color: #888;
 }
 
 /* 悬浮时：图标亮起各自的颜色 */
-.nav-item:nth-child(1):hover .material-icons-outlined {
+.nav-item:nth-child(1):hover .home-fa-icon {
   background: rgba(99, 102, 241, 0.12);
   color: var(--primary);
 }
-.nav-item:nth-child(2):hover .material-icons-outlined {
+.nav-item:nth-child(2):hover .home-fa-icon {
   background: rgba(249, 115, 22, 0.12);
   color: #f97316;
 }
-.nav-item:nth-child(3):hover .material-icons-outlined {
+.nav-item:nth-child(3):hover .home-fa-icon {
   background: rgba(236, 72, 153, 0.12);
   color: var(--accent-pink);
 }
-.nav-item:nth-child(4):hover .material-icons-outlined {
+.nav-item:nth-child(4):hover .home-fa-icon {
   background: rgba(6, 182, 212, 0.12);
   color: var(--accent-cyan);
 }
 
-.nav-group:nth-child(1) .nav-item:nth-of-type(1):hover .material-icons-outlined {
+.nav-group:nth-child(1) .nav-item:nth-of-type(1):hover .home-fa-icon {
   background: rgba(99, 102, 241, 0.12);
   color: var(--primary);
 }
 
-.nav-group:nth-child(1) .nav-item:nth-of-type(2):hover .material-icons-outlined {
+.nav-group:nth-child(1) .nav-item:nth-of-type(2):hover .home-fa-icon {
   background: rgba(249, 115, 22, 0.12);
   color: #f97316;
 }
 
-.nav-group:nth-child(2) .nav-item:nth-of-type(1):hover .material-icons-outlined {
+.nav-group:nth-child(2) .nav-item:nth-of-type(1):hover .home-fa-icon {
   background: rgba(236, 72, 153, 0.12);
   color: var(--accent-pink);
 }
 
-.nav-group:nth-child(2) .nav-item:nth-of-type(2):hover .material-icons-outlined {
+.nav-group:nth-child(2) .nav-item:nth-of-type(2):hover .home-fa-icon {
   background: rgba(6, 182, 212, 0.12);
   color: var(--accent-cyan);
 }
@@ -271,7 +269,7 @@
   transform: translateX(2px);
 }
 
-.nav-item:hover .material-icons-outlined {
+.nav-item:hover .home-fa-icon {
   transform: scale(1.06);
 }
 
@@ -287,7 +285,7 @@
   transform: translateY(-50%) scaleY(1);
 }
 
-.nav-item.active .material-icons-outlined {
+.nav-item.active .home-fa-icon {
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: white !important;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
@@ -382,7 +380,7 @@
   background: rgba(249, 115, 22, 0.15);
 }
 
-.topic-icon .material-icons-outlined {
+.topic-icon .home-fa-icon {
   font-size: 16px;
 }
 
@@ -486,7 +484,7 @@
   color: var(--slate-dark);
 }
 
-.search-clear-btn .material-icons-outlined {
+.search-clear-btn .home-fa-icon {
   font-size: 18px;
 }
 
@@ -627,8 +625,8 @@
   font-size: 0.78rem;
 }
 
-.content-type-tab .material-icons-outlined,
-.sort-chip .material-icons-outlined {
+.content-type-tab .home-fa-icon,
+.sort-chip .home-fa-icon {
   font-size: 16px;
 }
 
@@ -892,7 +890,7 @@
   color: var(--accent-pink);
 }
 
-.action-btn.like.liked .material-icons-outlined {
+.action-btn.like.liked .home-fa-icon {
   font-weight: 700;
 }
 
@@ -911,7 +909,7 @@
   background: rgba(99, 102, 241, 0.08);
 }
 
-.action-btn .material-icons-outlined {
+.action-btn .home-fa-icon {
   font-size: 18px;
 }
 
@@ -952,7 +950,7 @@
   color: var(--slate-light);
 }
 
-.empty-state .material-icons-outlined {
+.empty-state .home-fa-icon {
   font-size: 4rem;
   margin-bottom: 1rem;
   opacity: 0.3;
@@ -1009,7 +1007,7 @@
   margin-bottom: 1rem;
 }
 
-.stats-title .material-icons-outlined {
+.stats-title .home-fa-icon {
   color: var(--primary);
   font-size: 20px;
   flex-shrink: 0;
@@ -1102,7 +1100,7 @@
   background: #f8fafc;
 }
 
-.quick-action .material-icons-outlined {
+.quick-action .home-fa-icon {
   width: 24px;
   font-size: 18px;
   color: inherit;
@@ -1267,7 +1265,7 @@
   transform: scale(0.95);
 }
 
-.fab-button .material-icons-outlined {
+.fab-button .home-fa-icon {
   font-size: 28px;
 }
 
@@ -1283,6 +1281,81 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.home-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid #e2e8f0;
+  border-top-color: var(--primary);
+  border-radius: 9999px;
+  animation: homeSpin 0.8s linear infinite;
+}
+
+.home-toast-root {
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.home-toast {
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.4;
+  animation: homeToastIn 0.18s ease-out;
+}
+
+.home-toast-success {
+  background: #047857;
+}
+
+.home-toast-warning {
+  background: #b45309;
+}
+
+.home-toast-error {
+  background: #b91c1c;
+}
+
+.home-toast.is-leaving {
+  animation: homeToastOut 0.18s ease-in forwards;
+}
+
+@keyframes homeSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes homeToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes homeToastOut {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 
 /* ========== 动画 ========== */

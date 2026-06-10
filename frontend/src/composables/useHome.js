@@ -1,5 +1,4 @@
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
 import { getCsrfToken } from '@utils/csrf'
 import { formatDateOnly } from '@utils/datetime'
 import { extractApiErrorMessage } from '@utils/apiError'
@@ -11,6 +10,58 @@ const loginUrl = homeData.loginUrl || '/login/'
 const signupUrl = homeData.signupUrl || '/signup/'
 const initialAuthorFilter = new URLSearchParams(window.location.search).get('author') || ''
 const initialAuthorNameFilter = new URLSearchParams(window.location.search).get('author_name') || ''
+
+const iconClassMap = {
+  add: 'fa-solid fa-plus',
+  analytics: 'fa-solid fa-chart-line',
+  apps: 'fa-solid fa-grip',
+  auto_stories: 'fa-solid fa-book-open',
+  bookmarks: 'fa-solid fa-bookmark',
+  build_circle: 'fa-solid fa-screwdriver-wrench',
+  chat_bubble_outline: 'fa-regular fa-comment-dots',
+  close: 'fa-solid fa-xmark',
+  description: 'fa-regular fa-file-lines',
+  edit_note: 'fa-regular fa-pen-to-square',
+  explore: 'fa-regular fa-compass',
+  extension: 'fa-solid fa-puzzle-piece',
+  favorite: 'fa-solid fa-heart',
+  favorite_border: 'fa-regular fa-heart',
+  forum: 'fa-regular fa-comments',
+  history: 'fa-solid fa-clock-rotate-left',
+  local_fire_department: 'fa-solid fa-fire',
+  school: 'fa-solid fa-graduation-cap',
+  schedule: 'fa-regular fa-clock',
+  search: 'fa-solid fa-magnifying-glass',
+  share: 'fa-solid fa-share-nodes',
+  tips_and_updates: 'fa-regular fa-lightbulb',
+  visibility: 'fa-regular fa-eye',
+  whatshot: 'fa-solid fa-fire'
+}
+
+const getIconClass = (icon) => iconClassMap[icon] || 'fa-solid fa-circle'
+
+const notify = (type, message) => {
+  if (!message || typeof document === 'undefined') return
+
+  const rootId = 'home-toast-root'
+  let root = document.getElementById(rootId)
+  if (!root) {
+    root = document.createElement('div')
+    root.id = rootId
+    root.className = 'home-toast-root'
+    document.body.appendChild(root)
+  }
+
+  const toast = document.createElement('div')
+  toast.className = `home-toast home-toast-${type}`
+  toast.textContent = message
+  root.appendChild(toast)
+
+  window.setTimeout(() => {
+    toast.classList.add('is-leaving')
+    window.setTimeout(() => toast.remove(), 180)
+  }, 2600)
+}
 
 export function useHome() {
   // 状态
@@ -255,7 +306,7 @@ export function useHome() {
       hotArticles.value = [...allArticles.value].sort((a, b) => b.views - a.views)
     } catch (error) {
       console.error('获取文章列表失败:', error)
-      ElMessage.error(error.message || '获取文章列表失败，请稍后重试')
+      notify('error', error.message || '获取文章列表失败，请稍后重试')
     } finally {
       loading.value = false
     }
@@ -264,7 +315,7 @@ export function useHome() {
   // 获取收藏列表
   const fetchFavorites = async () => {
     if (!isAuthenticated.value) {
-      ElMessage.warning('请先登录')
+      notify('warning', '请先登录')
       navigateToLogin()
       return
     }
@@ -304,7 +355,7 @@ export function useHome() {
       })
     } catch (error) {
       console.error('获取收藏列表失败:', error)
-      ElMessage.error(error.message || '获取收藏列表失败，请稍后重试')
+      notify('error', error.message || '获取收藏列表失败，请稍后重试')
     } finally {
       loading.value = false
     }
@@ -471,7 +522,7 @@ export function useHome() {
     // 根据导航类型加载数据
     if (navId === 'favorites') {
       if (!isAuthenticated.value) {
-        ElMessage.warning('请先登录查看收藏')
+        notify('warning', '请先登录查看收藏')
         navigateToLogin()
         activeNav.value = 'explore'
         return
@@ -515,14 +566,14 @@ export function useHome() {
       }
     } catch (error) {
       console.error('点赞失败:', error)
-      ElMessage.error(error.message || '点赞失败，请稍后重试')
+      notify('error', error.message || '点赞失败，请稍后重试')
     }
   }
 
   // 切换收藏
   const toggleFavorite = async (article) => {
     if (!isAuthenticated.value) {
-      ElMessage.warning('请先登录')
+      notify('warning', '请先登录')
       navigateToLogin()
       return
     }
@@ -538,13 +589,13 @@ export function useHome() {
       const data = await response.json()
       if (data.status === 'success') {
         article.is_favorited = data.is_favorited
-        ElMessage.success(data.is_favorited ? '已收藏' : '已取消收藏')
+        notify('success', data.is_favorited ? '已收藏' : '已取消收藏')
       } else {
         throw new Error(extractApiErrorMessage(data, '收藏失败'))
       }
     } catch (error) {
       console.error('收藏失败:', error)
-      ElMessage.error(error.message || '收藏失败，请稍后重试')
+      notify('error', error.message || '收藏失败，请稍后重试')
     }
   }
 
@@ -571,6 +622,7 @@ export function useHome() {
     hotTopics,
     communityStats,
     activeContributors,
+    getIconClass,
     userAvatar,
     handleImageError,
     handleAvatarError,
@@ -594,4 +646,3 @@ export function useHome() {
     recordHistory
   }
 }
-
