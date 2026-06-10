@@ -59,21 +59,9 @@ def send_password_change_notification(request, user):
 
 
 def invalidate_other_user_sessions(user, keep_session_key=None):
-    if settings.SESSION_ENGINE == 'django.contrib.sessions.backends.signed_cookies':
-        return
+    from ...utils.session_activity import invalidate_other_user_sessions as invalidate_sessions
 
-    from django.contrib.sessions.models import Session
-
-    for session in Session.objects.filter(expire_date__gte=timezone.now()).iterator():
-        try:
-            data = session.get_decoded()
-        except Exception:
-            continue
-        if str(data.get('_auth_user_id')) != str(user.id):
-            continue
-        if keep_session_key and session.session_key == keep_session_key:
-            continue
-        session.delete()
+    invalidate_sessions(user.id, keep_session_key=keep_session_key)
 
 
 @login_required

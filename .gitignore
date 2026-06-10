@@ -27,6 +27,7 @@ frontend/node_modules/
 node_modules/
 .npm-cache/
 staticfiles/
+codex-runserver*.log
 # Build output (keep in static/dist for Django)
 # static/dist/ is tracked since it's needed for deployment
 

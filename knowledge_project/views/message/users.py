@@ -15,6 +15,7 @@ from django.views.decorators.http import require_http_methods
 from urllib.parse import quote
 
 from ...models import Note, ProfileLike
+from ...utils.session_activity import mark_messages_page_activity
 from ._constants import MESSAGES_PAGE_ACTIVE_AT_KEY
 from ._helpers import _get_avatar_url, _server_error_response
 
@@ -132,8 +133,10 @@ def search_users_api(request):
 @login_required
 def messages_view(request):
     """私信页面"""
-    request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = int(timezone.now().timestamp())
+    active_at = int(timezone.now().timestamp())
+    request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = active_at
     request.session.modified = True
+    mark_messages_page_activity(request.user.id, active_at)
     messages_bundle_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'dist', 'messages.js')
     try:
         messages_asset_version = int(os.path.getmtime(messages_bundle_path))
@@ -149,8 +152,10 @@ def messages_view(request):
 @require_http_methods(["POST"])
 @login_required
 def touch_messages_page_api(request):
-    request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = int(timezone.now().timestamp())
+    active_at = int(timezone.now().timestamp())
+    request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = active_at
     request.session.modified = True
+    mark_messages_page_activity(request.user.id, active_at)
     return JsonResponse({'status': 'success'})
 
 

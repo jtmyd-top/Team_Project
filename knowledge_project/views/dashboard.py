@@ -8,12 +8,15 @@ import logging
 import platform
 import re as _re
 import time
+from datetime import datetime, time as datetime_time, timedelta
 
 import psutil
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.db import connections
+from django.db.models import Count, F
+from django.db.models.functions import TruncDate
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -22,6 +25,34 @@ from django.views.decorators.http import require_http_methods
 from ..models import Asset, Folder, Note
 
 logger = logging.getLogger(__name__)
+
+
+def _aware_day_start(day):
+    value = datetime.combine(day, datetime_time.min)
+    if settings.USE_TZ and timezone.is_naive(value):
+        return timezone.make_aware(value, timezone.get_current_timezone())
+    return value
+
+
+def _dashboard_days(now, days):
+    return [(now - timedelta(days=i)).date() for i in range(days - 1, -1, -1)]
+
+
+def _daily_count_map(queryset, date_field, start, end, alias='day'):
+    filters = {
+        f'{date_field}__gte': start,
+        f'{date_field}__lt': end,
+    }
+    return {
+        row[alias]: row['count']
+        for row in (
+            queryset
+            .filter(**filters)
+            .annotate(**{alias: TruncDate(date_field)})
+            .values(alias)
+            .annotate(count=Count('id'))
+        )
+    }
 
 
 def _cache_health_details():
@@ -151,9 +182,7 @@ def dashboard_stats_api(request):
             data['assets'] = cached
         else:
             from django.contrib.auth.models import User as AuthUser
-            from datetime import timedelta
             now = timezone.now()
-            seven_days_ago = now - timedelta(days=7)
 
             total_notes = Note.objects.filter(is_trashed=False).count()
             total_folders = Folder.objects.filter(is_trashed=False).count()
@@ -167,16 +196,19 @@ def dashboard_stats_api(request):
             ).count()
 
             # 7天笔记趋势
-            trend = []
-            for i in range(6, -1, -1):
-                day = (now - timedelta(days=i)).date()
-                count = Note.objects.filter(
-                    created_at__date=day, is_trashed=False
-                ).count()
-                trend.append({
-                    'date': day.strftime('%m-%d'),
-                    'count': count,
-                })
+            days = _dashboard_days(now, 7)
+            start = _aware_day_start(days[0])
+            end = _aware_day_start(days[-1] + timedelta(days=1))
+            note_counts = _daily_count_map(
+                Note.objects.filter(is_trashed=False),
+                'created_at',
+                start,
+                end,
+            )
+            trend = [
+                {'date': day.strftime('%m-%d'), 'count': note_counts.get(day, 0)}
+                for day in days
+            ]
 
             assets_data = {
                 'total_notes': total_notes,
@@ -265,7 +297,6 @@ def dashboard_stats_api(request):
     # ---- trash_backlog: 回收站积压 ----
     if section in ('trash_backlog', 'all'):
         try:
-            from datetime import timedelta
             now = timezone.now()
             trashed_notes = Note.objects.filter(is_trashed=True)
             trashed_folders = Folder.objects.filter(is_trashed=True)
@@ -278,15 +309,28 @@ def dashboard_stats_api(request):
             stale_folders = trashed_folders.filter(trashed_at__lte=stale_cutoff).count()
 
             # 按天统计最近 7 天删除量
-            trash_trend = []
-            for i in range(6, -1, -1):
-                day = (now - timedelta(days=i)).date()
-                count = Note.objects.filter(
-                    is_trashed=True, trashed_at__date=day
-                ).count() + Folder.objects.filter(
-                    is_trashed=True, trashed_at__date=day
-                ).count()
-                trash_trend.append({'date': day.strftime('%m-%d'), 'count': count})
+            days = _dashboard_days(now, 7)
+            start = _aware_day_start(days[0])
+            end = _aware_day_start(days[-1] + timedelta(days=1))
+            note_trash_counts = _daily_count_map(
+                trashed_notes,
+                'trashed_at',
+                start,
+                end,
+            )
+            folder_trash_counts = _daily_count_map(
+                trashed_folders,
+                'trashed_at',
+                start,
+                end,
+            )
+            trash_trend = [
+                {
+                    'date': day.strftime('%m-%d'),
+                    'count': note_trash_counts.get(day, 0) + folder_trash_counts.get(day, 0),
+                }
+                for day in days
+            ]
 
             data['trash_backlog'] = {
                 'trashed_notes': trashed_notes_count,
@@ -304,21 +348,35 @@ def dashboard_stats_api(request):
     # ---- content_trend: 30天内容增长趋势（含新增+修改） ----
     if section in ('content_trend', 'all'):
         try:
-            from datetime import timedelta
             now = timezone.now()
 
-            created_trend = []
-            modified_trend = []
-            for i in range(29, -1, -1):
-                day = (now - timedelta(days=i)).date()
-                created = Note.objects.filter(
-                    created_at__date=day, is_trashed=False
-                ).count()
-                modified = Note.objects.filter(
-                    updated_at__date=day, is_trashed=False
-                ).exclude(created_at__date=day).count()
-                created_trend.append({'date': day.strftime('%m-%d'), 'count': created})
-                modified_trend.append({'date': day.strftime('%m-%d'), 'count': modified})
+            days = _dashboard_days(now, 30)
+            start = _aware_day_start(days[0])
+            end = _aware_day_start(days[-1] + timedelta(days=1))
+            visible_notes = Note.objects.filter(is_trashed=False)
+            created_counts = _daily_count_map(visible_notes, 'created_at', start, end)
+            modified_counts = {
+                row['updated_day']: row['count']
+                for row in (
+                    visible_notes
+                    .filter(updated_at__gte=start, updated_at__lt=end)
+                    .annotate(
+                        updated_day=TruncDate('updated_at'),
+                        created_day=TruncDate('created_at'),
+                    )
+                    .exclude(created_day=F('updated_day'))
+                    .values('updated_day')
+                    .annotate(count=Count('id'))
+                )
+            }
+            created_trend = [
+                {'date': day.strftime('%m-%d'), 'count': created_counts.get(day, 0)}
+                for day in days
+            ]
+            modified_trend = [
+                {'date': day.strftime('%m-%d'), 'count': modified_counts.get(day, 0)}
+                for day in days
+            ]
 
             data['content_trend'] = {
                 'created': created_trend,

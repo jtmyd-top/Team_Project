@@ -10,27 +10,14 @@ from django.utils import timezone
 from ..models import Note
 
 
-SESSION_LAST_ACTIVITY_KEY = 'last_activity_at'
 ONLINE_WINDOW_SECONDS = 5 * 60
 
 
 def _count_online_users():
     """统计最近 5 分钟内有请求活动的已登录用户数。"""
-    from django.contrib.sessions.models import Session
+    from ..utils.session_activity import count_recent_users
 
-    now = timezone.now()
-    active_since = int(now.timestamp()) - ONLINE_WINDOW_SECONDS
-    user_ids = set()
-
-    sessions = Session.objects.filter(expire_date__gte=now).iterator()
-    for session in sessions:
-        data = session.get_decoded()
-        user_id = data.get('_auth_user_id')
-        last_activity_at = data.get(SESSION_LAST_ACTIVITY_KEY)
-        if user_id and last_activity_at and int(last_activity_at) >= active_since:
-            user_ids.add(user_id)
-
-    return len(user_ids)
+    return count_recent_users(ONLINE_WINDOW_SECONDS)
 
 
 def home_stats_api(request):

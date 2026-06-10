@@ -5,6 +5,10 @@ import path from 'path'
 export default defineConfig({
   plugins: [vue()],
 
+  esbuild: {
+    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
+  },
+
   // 依赖优化：确保 crypto-js 被正确预构建
   optimizeDeps: {
     include: ['crypto-js']

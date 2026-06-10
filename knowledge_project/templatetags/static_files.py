@@ -68,7 +68,7 @@ def is_vite_dev():
 
 
 @register.simple_tag
-def get_latest_static(pattern, base_path='static/JS/dist'):
+def get_latest_static(pattern, base_path='static/dist'):
     """
     获取匹配模式的最新静态文件（CSS或JS）
     pattern: 文件名模式，如 'forgot-password*.css' 或 'login*.js'
@@ -99,7 +99,7 @@ def get_latest_static(pattern, base_path='static/JS/dist'):
         return ''
 
 @register.inclusion_tag('auto_css.html')
-def auto_css(pattern, base_path='static/JS/dist/assets'):
+def auto_css(pattern, base_path='static/dist/assets'):
     """
     自动包含最新的CSS文件
     pattern: 文件名模式，如 'forgot-password*.css'
@@ -111,7 +111,7 @@ def auto_css(pattern, base_path='static/JS/dist/assets'):
     }
 
 @register.inclusion_tag('auto_js.html')
-def auto_js(pattern, base_path='static/JS/dist'):
+def auto_js(pattern, base_path='static/dist'):
     """
     自动包含最新的JS文件
     pattern: 文件名模式，如 'forgot-password*.js'

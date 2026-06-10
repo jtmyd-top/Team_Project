@@ -473,7 +473,11 @@ def toggle_note_like(request):
         if not note_id:
             return JsonResponse({'status': 'error', 'message': '笔记ID缺失'}, status=400)
 
-        note = Note.objects.get(id=note_id)
+        note = Note.objects.select_related('author__profile').get(
+            id=note_id,
+            is_public=True,
+            is_trashed=False,
+        )
 
         # 获取作者的profile
         try:

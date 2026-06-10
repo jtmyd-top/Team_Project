@@ -14,13 +14,16 @@ from datetime import timedelta
 from urllib.parse import quote
 
 from django.conf import settings
-from django.contrib.sessions.models import Session
 from django.db.models import Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404  # noqa: F401  (保留 import 以便后续工具复用)
 from django.utils import timezone
 
 from ...realtime import push_user_event
+from ...utils.session_activity import (
+    has_recent_messages_page_activity,
+    has_recent_user_activity,
+)
 from ._constants import (
     EMAIL_NOTIFY_WINDOW_SECONDS,
     MERGED_FORWARD_MAX_DEPTH,
@@ -32,11 +35,9 @@ from ._constants import (
     MESSAGE_ATTACHMENT_MAX_COUNT,
     MESSAGE_CONTENT_MAX_LENGTH,
     MESSAGE_PURGE_DELAY_DAYS,
-    MESSAGES_PAGE_ACTIVE_AT_KEY,
     MESSAGES_PAGE_SKIP_EMAIL_WINDOW_SECONDS,
     NEW_CONV_DAILY_LIMIT,  # noqa: F401  (子模块从 _helpers 走时复用,避免到处分散)
     ONLINE_SKIP_EMAIL_WINDOW_SECONDS,
-    SESSION_LAST_ACTIVITY_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -747,39 +748,12 @@ def _maybe_send_new_message_email(sender, recipient, content):
 # ------------------------------------------------------------------
 # 在线状态(用于邮件抑制)
 # ------------------------------------------------------------------
-def _iter_user_sessions(user):
-    now = timezone.now()
-    for session in Session.objects.filter(expire_date__gte=now).iterator():
-        try:
-            data = session.get_decoded()
-        except Exception:
-            continue
-        if str(data.get('_auth_user_id') or '') == str(user.id):
-            yield data
-
-
 def _has_recent_active_session(user):
-    active_since = int(timezone.now().timestamp()) - ONLINE_SKIP_EMAIL_WINDOW_SECONDS
-    for data in _iter_user_sessions(user):
-        last_activity_at = data.get(SESSION_LAST_ACTIVITY_KEY)
-        try:
-            if last_activity_at and int(last_activity_at) >= active_since:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
+    return has_recent_user_activity(user.id, ONLINE_SKIP_EMAIL_WINDOW_SECONDS)
 
 
 def _has_recent_messages_page_session(user):
-    active_since = int(timezone.now().timestamp()) - MESSAGES_PAGE_SKIP_EMAIL_WINDOW_SECONDS
-    for data in _iter_user_sessions(user):
-        page_active_at = data.get(MESSAGES_PAGE_ACTIVE_AT_KEY)
-        try:
-            if page_active_at and int(page_active_at) >= active_since:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
+    return has_recent_messages_page_activity(user.id, MESSAGES_PAGE_SKIP_EMAIL_WINDOW_SECONDS)
 
 
 # ------------------------------------------------------------------

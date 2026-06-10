@@ -127,6 +127,7 @@ class SessionTimeoutMiddleware:
 
         if getattr(request, 'user', None) is not None and request.user.is_authenticated:
             self._ensure_metadata(request)
+            self._register_presence(request)
 
         return response
 
@@ -173,11 +174,13 @@ class SessionTimeoutMiddleware:
             return
         request.session[self.LAST_ACTIVITY_KEY] = now
         request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+        self._register_presence(request, now)
 
     def _initialize_metadata(self, request, now):
         request.session[self.STARTED_AT_KEY] = now
         request.session[self.LAST_ACTIVITY_KEY] = now
         request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+        self._register_presence(request, now)
 
     def _ensure_metadata(self, request):
         now = int(time.time())
@@ -193,6 +196,21 @@ class SessionTimeoutMiddleware:
 
         if changed:
             request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+            self._register_presence(request, now)
+
+    def _register_presence(self, request, timestamp=None):
+        if getattr(request, 'user', None) is None or not request.user.is_authenticated:
+            return
+        try:
+            from knowledge_project.utils.session_activity import (
+                mark_user_activity,
+                register_user_session,
+            )
+
+            mark_user_activity(request.user.id, timestamp)
+            register_user_session(request.user.id, request.session.session_key)
+        except Exception as exc:
+            logger.debug("Unable to register session presence: %s", exc)
 
     def _expire(self, request, reason):
         user_id = getattr(request.user, 'id', None)

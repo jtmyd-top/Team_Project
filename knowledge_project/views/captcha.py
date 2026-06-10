@@ -151,8 +151,12 @@ def captcha_init(request):
             expected_prefix = '0' * stored_difficulty
 
             # 调试日志
-            logger.info(f"[PoW DEBUG] prefix={stored_prefix}, nonce={nonce}, input={hash_input}")
-            logger.info(f"[PoW DEBUG] hash={hash_result}, expected_prefix={expected_prefix}, match={hash_result.startswith(expected_prefix)}")
+            logger.debug(
+                "[PoW] verification hash=%s..., difficulty=%s, match=%s",
+                hash_result[:12],
+                stored_difficulty,
+                hash_result.startswith(expected_prefix),
+            )
 
             if not hash_result.startswith(expected_prefix):
                 logger.warning(f"[PoW] 验证失败 (IP: {client_ip}): hash={hash_result[:16]}...")
