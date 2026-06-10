@@ -4,11 +4,11 @@
 {% block title %}账户设置{% endblock %}
 
 {% block head_extra %}
-<script type="module" src="{% static 'dist/settings.js' %}"></script>
+<script type="module" src="{% static 'dist/settings.js' %}?v={{ timestamp|default:'20260611-group-policy-fix1' }}"></script>
 <link rel="stylesheet" href="{% static 'css/setting.css' %}">
 <link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
 <!-- Vite构建生成的样式 -->
-<link rel="stylesheet" href="{% static 'dist/assets/settings.css' %}?v={{ timestamp|default:'20241214-012' }}">
+<link rel="stylesheet" href="{% static 'dist/assets/settings.css' %}?v={{ timestamp|default:'20260611-group-policy-fix1' }}">
 <style>
   main {
     padding-top: 0 !important;
