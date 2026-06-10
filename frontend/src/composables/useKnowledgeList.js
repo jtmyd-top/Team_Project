@@ -535,11 +535,16 @@ export function useKnowledgeList() {
         throw new Error(extractApiErrorMessage(data, `${actionText}失败，请重试`))
       }
 
-      currentNoteData.value.is_public = newPublicState
-      if (newPublicState && data.public_url) {
-        currentNoteData.value.public_url = data.public_url
+      const actualPublicState = !!data.is_public
+      currentNoteData.value.is_public = actualPublicState
+      currentNoteData.value.public_url = actualPublicState ? (data.public_url || '') : ''
+
+      if (newPublicState && !actualPublicState) {
+        ElMessage.warning(data.message || '笔记未公开，请刷新后确认状态')
+        return
       }
-      ElMessage.success(`笔记已${actionText}`)
+
+      ElMessage.success(actualPublicState ? '笔记已公开' : '笔记已取消公开')
     } catch (e) {
       ElMessage.error(e.message || `${actionText}失败，请重试`)
     }

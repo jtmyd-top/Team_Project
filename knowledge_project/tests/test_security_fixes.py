@@ -175,6 +175,22 @@ class VaultLockMiddlewareFixTests(TestCase):
 
 
 class SessionTimeoutMiddlewareTests(TestCase):
+    @override_settings(SESSION_COOKIE_AGE=10800)
+    @patch('Team_Project.middleware.time.time')
+    def test_missing_session_metadata_is_initialized(self, mocked_time):
+        middleware = SessionTimeoutMiddleware(lambda request: None)
+        request = RequestFactory().get('/api/notes/')
+        request.session = SessionStore()
+        request.session.modified = False
+        mocked_time.return_value = 2000
+
+        response = middleware._expire_if_needed(request)
+
+        self.assertIsNone(response)
+        self.assertEqual(request.session['auth_started_at'], 2000)
+        self.assertEqual(request.session['last_activity_at'], 2000)
+        self.assertTrue(request.session.modified)
+
     @override_settings(SESSION_TOUCH_INTERVAL_SECONDS=300, SESSION_COOKIE_AGE=10800)
     @patch('Team_Project.middleware.time.time')
     def test_touch_is_throttled_inside_window(self, mocked_time):

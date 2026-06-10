@@ -132,6 +132,9 @@ class LoginApiTests(_AuthTestBase):
         session_cookie = response.cookies.get(settings.SESSION_COOKIE_NAME)
         self.assertIsNotNone(session_cookie)
         self.assertEqual(int(session_cookie['max-age']), settings.SESSION_COOKIE_AGE)
+        session = self.client.session
+        self.assertIn('auth_started_at', session)
+        self.assertIn('last_activity_at', session)
 
     def test_login_wrong_password_returns_400(self):
         user = make_user('login02')

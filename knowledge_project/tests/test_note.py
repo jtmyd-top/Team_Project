@@ -298,6 +298,29 @@ class PublicNoteViewTests(_NoteTestBase):
         response = self.client.get(reverse('public_note_view', args=[note.public_id]))
         self.assertEqual(response.status_code, 200)
 
+    def test_author_note_count_excludes_trashed_public_notes(self):
+        user = make_user('pubview03')
+        note = Note.objects.create(author=user, title='visible', content='<p>x</p>', is_public=True)
+        Note.objects.create(author=user, title='trashed', content='', is_public=True, is_trashed=True)
+
+        response = self.client.get(reverse('public_note_view', args=[note.public_id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['note_data']['author']['note_count'], 1)
+
+
+class HomeViewTests(_NoteTestBase):
+    def test_home_excludes_trashed_public_notes(self):
+        author = make_user('homepub01')
+        Note.objects.create(author=author, title='visible', content='', is_public=True)
+        Note.objects.create(author=author, title='trashed', content='', is_public=True, is_trashed=True)
+
+        response = self.client.get(reverse('home'))
+
+        self.assertEqual(response.status_code, 200)
+        titles = {note.title for note in response.context['articles']}
+        self.assertEqual(titles, {'visible'})
+
 
 # =========================================================================
 # search_notes_api
@@ -370,6 +393,14 @@ class NoteHistoryTests(_NoteTestBase):
         response = post_json(self.client, reverse('record_note_history_api'), {'note_id': note.id})
         self.assertEqual(response.status_code, 404)
 
+    def test_record_history_rejects_trashed_public_note(self):
+        author = make_user('histauth06')
+        viewer = make_user('histview06')
+        note = Note.objects.create(author=author, title='trashed', content='', is_public=True, is_trashed=True)
+        login(self.client, viewer)
+        response = post_json(self.client, reverse('record_note_history_api'), {'note_id': note.id})
+        self.assertEqual(response.status_code, 404)
+
     def test_record_history_is_idempotent(self):
         # 多次记录同一条只产生一条历史(update_or_create)
         author = make_user('histauth03')
@@ -412,3 +443,37 @@ class PublicNotesApiFilterTests(_NoteTestBase):
         body = parse(response)
         titles = {n['title'] for n in body['notes']}
         self.assertEqual(titles, {'public'})
+
+    def test_does_not_include_trashed_public_notes(self):
+        author = make_user('pubapi02')
+        Note.objects.create(author=author, title='public', content='', is_public=True)
+        Note.objects.create(author=author, title='trashed', content='', is_public=True, is_trashed=True)
+
+        response = self.client.get(reverse('public_notes_api'))
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        titles = {n['title'] for n in body['notes']}
+        self.assertEqual(titles, {'public'})
+
+    def test_public_note_update_invalidates_cached_list(self):
+        author = make_user('pubapi03')
+        note = Note.objects.create(author=author, title='old title', content='', is_public=True)
+
+        first = self.client.get(reverse('public_notes_api'))
+        self.assertEqual(first.status_code, 200)
+        self.assertIn('old title', {n['title'] for n in parse(first)['notes']})
+
+        login(self.client, author)
+        update = post_json(self.client, reverse('update_note_api', args=[note.id]), {
+            'title': 'new title',
+            'content': '',
+        })
+        self.assertEqual(update.status_code, 200)
+        self.client.logout()
+
+        second = self.client.get(reverse('public_notes_api'))
+        self.assertEqual(second.status_code, 200)
+        titles = {n['title'] for n in parse(second)['notes']}
+        self.assertIn('new title', titles)
+        self.assertNotIn('old title', titles)

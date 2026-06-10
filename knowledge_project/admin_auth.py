@@ -370,6 +370,9 @@ class SecureAdminSite(AdminSite):
         """完成登录"""
         self._clear_2fa_session(request)
         login(request, user)
+        now = int(time.time())
+        request.session['auth_started_at'] = now
+        request.session['last_activity_at'] = now
         request.session.set_expiry(settings.SESSION_COOKIE_AGE)
         logger.info(f"Admin 登录成功: {user.username}, IP: {self._get_client_ip(request)}")
 

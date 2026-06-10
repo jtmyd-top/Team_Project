@@ -142,7 +142,8 @@ class SessionTimeoutMiddleware:
         fallback_activity_at = last_activity_at if last_activity_at is not None else started_at
 
         if started_at is None:
-            return self._expire(request, 'missing_started_at')
+            self._initialize_metadata(request, now)
+            return None
 
         if self.absolute_timeout > 0 and now - started_at > self.absolute_timeout:
             return self._expire(request, 'absolute_timeout')
@@ -170,6 +171,11 @@ class SessionTimeoutMiddleware:
             and now - last_activity_at < self.touch_interval
         ):
             return
+        request.session[self.LAST_ACTIVITY_KEY] = now
+        request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+
+    def _initialize_metadata(self, request, now):
+        request.session[self.STARTED_AT_KEY] = now
         request.session[self.LAST_ACTIVITY_KEY] = now
         request.session.set_expiry(settings.SESSION_COOKIE_AGE)
 

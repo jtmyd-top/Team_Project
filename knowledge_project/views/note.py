@@ -33,9 +33,20 @@ from ..utils.misc import get_sidebar_cache_key, log_action
 logger = logging.getLogger(__name__)
 
 VAULT_PENDING_ENCRYPTION_GUARDS_SESSION_KEY = 'vault_pending_encryption_guards'
+PUBLIC_NOTES_CACHE_VERSION_KEY = 'public_notes_api:version'
 
 
 # === 共享辅助 ===
+
+def _get_public_notes_cache_version():
+    return cache.get(PUBLIC_NOTES_CACHE_VERSION_KEY) or 1
+
+
+def _invalidate_public_notes_cache():
+    try:
+        cache.incr(PUBLIC_NOTES_CACHE_VERSION_KEY)
+    except Exception:
+        cache.set(PUBLIC_NOTES_CACHE_VERSION_KEY, int(timezone.now().timestamp()), timeout=None)
 
 def get_paginated_html(html_content, page_number=1, chars_per_page=3000):
     """
@@ -328,14 +339,15 @@ def send_note_activity_notification(request, user, note_title, action_type):
 
 def public_note_view(request, public_id):
     try:
-        note = Note.objects.get(public_id=public_id, is_public=True)
+        note = Note.objects.get(public_id=public_id, is_public=True, is_trashed=False)
         # 原子递增，避免并发访问时丢失计数
         Note.objects.filter(pk=note.pk).update(views=F('views') + 1)
         note.refresh_from_db(fields=['views'])
 
         # 获取所有公开文章的导航数据
         all_public_notes = Note.objects.filter(
-            is_public=True
+            is_public=True,
+            is_trashed=False,
         ).select_related('author').order_by('-updated_at')
 
         # 构建导航列表
@@ -387,7 +399,11 @@ def public_note_view(request, public_id):
         comment_count = NoteComment.objects.filter(note=note).count()
 
         # 获取作者笔记数
-        author_note_count = Note.objects.filter(author=note.author, is_public=True).count()
+        author_note_count = Note.objects.filter(
+            author=note.author,
+            is_public=True,
+            is_trashed=False,
+        ).count()
 
         context = {
             'note_data': {
@@ -499,7 +515,8 @@ def home_view(request):
     """
     # 获取所有公开的文章，按更新时间倒序排列
     articles = Note.objects.filter(
-        is_public=True
+        is_public=True,
+        is_trashed=False,
     ).select_related('author').prefetch_related('tags').order_by('-updated_at')[:20]
 
     context = {
@@ -605,10 +622,13 @@ def note_detail_api(request, note_id):
         if not allowed:
             return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
 
+        was_public = note.is_public
         note.title = data.get('title', note.title)
         note.content = data.get('content', note.content)
         note.last_modified_by = request.user
         note.save()
+        if was_public:
+            _invalidate_public_notes_cache()
         if clear_vault_guard:
             _clear_vault_pending_encryption_guard(request, note.id)
 
@@ -653,6 +673,7 @@ def note_detail_api(request, note_id):
                     return JsonResponse({'error': error_msg}, status=403)
 
             # 只更新提供的字段
+            was_public = note.is_public
             was_secret = note.is_secret
             will_be_secret = data.get('is_secret', note.is_secret)
             allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(
@@ -690,6 +711,8 @@ def note_detail_api(request, note_id):
                 note.public_id = uuid.uuid4()
 
             note.save()
+            if was_public or note.is_public:
+                _invalidate_public_notes_cache()
             if clear_vault_guard:
                 _clear_vault_pending_encryption_guard(request, note.id)
             if 'is_secret' in data:
@@ -891,6 +914,8 @@ def update_note_api(request, note_id):
         if not allowed:
             return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
 
+        was_public = note.is_public
+
         # 更新笔记（前端已处理加密，后端直接存储）
         if title is not None:
             note.title = title
@@ -899,6 +924,8 @@ def update_note_api(request, note_id):
 
         note.last_modified_by = user
         note.save()
+        if was_public:
+            _invalidate_public_notes_cache()
         if clear_vault_guard:
             _clear_vault_pending_encryption_guard(request, note.id)
 
@@ -942,10 +969,14 @@ def delete_note_api(request, note_id):
         except Note.DoesNotExist:
             return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
 
+        was_public = note.is_public
+
         # 移至回收站
         note.is_trashed = True
         note.trashed_at = timezone.now()
         note.save()
+        if was_public:
+            _invalidate_public_notes_cache()
 
         # 清除侧边栏缓存
         try:
@@ -991,6 +1022,7 @@ def toggle_secret_api(request, note_id):
             return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
 
         # 切换 is_secret 标记
+        was_public = note.is_public
         was_secret = note.is_secret
         note.is_secret = not note.is_secret
         if not was_secret and note.is_secret:
@@ -1000,6 +1032,8 @@ def toggle_secret_api(request, note_id):
         else:
             _clear_vault_pending_encryption_guard(request, note.id)
         note.save()
+        if was_public or note.is_public:
+            _invalidate_public_notes_cache()
 
         # 清除侧边栏缓存
         try:
@@ -1035,7 +1069,8 @@ def public_notes_api(request):
     page_size = max(1, min(page_size, 100))
 
     # 构建缓存键（匿名用户和登录用户分开缓存）
-    cache_key = f"public_notes_api:page_{page}:size_{page_size}:user_{request.user.id if request.user.is_authenticated else 'anon'}"
+    cache_version = _get_public_notes_cache_version()
+    cache_key = f"public_notes_api:v{cache_version}:page_{page}:size_{page_size}:user_{request.user.id if request.user.is_authenticated else 'anon'}"
 
     # 尝试从缓存获取
     cached_response = cache.get(cache_key)
@@ -1045,7 +1080,7 @@ def public_notes_api(request):
     # 优化查询：使用 annotate 预计算评论数，避免N+1问题
     notes_qs = (
         Note.objects
-        .filter(is_public=True)
+        .filter(is_public=True, is_trashed=False)
         .select_related('author', 'author__profile')
         .prefetch_related('tags')
         .annotate(comments_count_cached=Count('comments'))  # 预计算评论数
@@ -1208,7 +1243,7 @@ def record_note_history_api(request):
         return JsonResponse({'error': '缺少 note_id 参数'}, status=400)
 
     try:
-        note = Note.objects.get(id=note_id, is_public=True)
+        note = Note.objects.get(id=note_id, is_public=True, is_trashed=False)
     except Note.DoesNotExist:
         return JsonResponse({'error': '笔记不存在或不是公开笔记'}, status=404)
 

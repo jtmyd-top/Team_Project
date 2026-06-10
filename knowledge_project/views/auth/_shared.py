@@ -72,6 +72,9 @@ USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
 def login_with_persistent_session(request, user):
     """Log in and write the configured session lifetime immediately."""
     login(request, user)
+    now = int(time.time())
+    request.session['auth_started_at'] = now
+    request.session['last_activity_at'] = now
     request.session.set_expiry(settings.SESSION_COOKIE_AGE)
 
 
