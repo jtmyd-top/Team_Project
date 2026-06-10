@@ -17,6 +17,14 @@ const resolveLoginErrorMessage = (error) => {
   return ''
 }
 
+const getSafeRedirectUrl = () => {
+  const next = new URLSearchParams(window.location.search).get('next')
+  if (next && next.startsWith('/') && !next.startsWith('//')) {
+    return next
+  }
+  return '/'
+}
+
 export function useLogin(captchaWidgetRef) {
   // ==================== 状态管理 ====================
   const loginFormRef = ref()
@@ -155,7 +163,7 @@ export function useLogin(captchaWidgetRef) {
       } else {
         ElMessage.success('登录成功！')
         setTimeout(() => {
-          window.location.href = '/'
+          window.location.href = getSafeRedirectUrl()
         }, 1000)
       }
     } catch (error) {
@@ -190,7 +198,7 @@ export function useLogin(captchaWidgetRef) {
 
       ElMessage.success('登录成功！')
       setTimeout(() => {
-        window.location.href = '/'
+        window.location.href = getSafeRedirectUrl()
       }, 1000)
     } catch (error) {
       const errorMessage = resolveLoginErrorMessage(error)
