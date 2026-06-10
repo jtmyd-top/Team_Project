@@ -31,6 +31,8 @@
           <el-form-item prop="username" class="form-item">
             <el-input
               v-model="loginForm.username"
+              name="username"
+              autocomplete="username"
               placeholder="请输入用户名"
               size="large"
               clearable
@@ -46,6 +48,8 @@
             <el-input
               v-model="loginForm.password"
               type="password"
+              name="current-password"
+              autocomplete="current-password"
               placeholder="请输入密码"
               size="large"
               show-password

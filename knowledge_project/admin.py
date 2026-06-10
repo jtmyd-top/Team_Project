@@ -489,6 +489,7 @@ class TrustedDeviceAdmin(admin.ModelAdmin):
 from .models import (
     Message, MessagePreference, UserBlocklist,
     ConversationSettings, MessageReport, AttachmentReport,
+    NoteReport, CommentReport, MessageGroupPolicy, MessageGroup, MessageGroupMember, GroupMessage,
 )
 
 
@@ -499,6 +500,45 @@ class MessageAdmin(admin.ModelAdmin):
     list_filter = ('is_read', 'is_recalled', 'created_at')
     search_fields = ('sender__username', 'recipient__username', 'content', 'searchable_text')
     readonly_fields = ('created_at', 'read_at', 'recalled_at')
+
+    def short_content(self, obj):
+        return (obj.content or '')[:40]
+    short_content.short_description = '内容'
+
+
+@admin.register(MessageGroupPolicy)
+class MessageGroupPolicyAdmin(admin.ModelAdmin):
+    list_display = ('enabled', 'min_public_notes', 'min_followers', 'updated_at')
+    fields = ('enabled', 'min_public_notes', 'min_followers')
+
+    def has_add_permission(self, request):
+        return not MessageGroupPolicy.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class MessageGroupMemberInline(admin.TabularInline):
+    model = MessageGroupMember
+    extra = 0
+    autocomplete_fields = ['user']
+
+
+@admin.register(MessageGroup)
+class MessageGroupAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'owner', 'is_active', 'created_at', 'updated_at')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('name', 'owner__username')
+    autocomplete_fields = ['owner', 'created_by']
+    inlines = [MessageGroupMemberInline]
+
+
+@admin.register(GroupMessage)
+class GroupMessageAdmin(admin.ModelAdmin):
+    list_display = ('id', 'group', 'sender', 'short_content', 'is_recalled', 'was_reported', 'created_at')
+    list_filter = ('is_recalled', 'was_reported', 'created_at')
+    search_fields = ('group__name', 'sender__username', 'content', 'searchable_text')
+    readonly_fields = ('created_at', 'recalled_at')
 
     def short_content(self, obj):
         return (obj.content or '')[:40]
@@ -583,6 +623,22 @@ class AttachmentReportAdmin(admin.ModelAdmin):
         )
 
 
+@admin.register(NoteReport)
+class NoteReportAdmin(admin.ModelAdmin):
+    list_display = ('id', 'note', 'reporter', 'reported_user', 'reason', 'status', 'created_at', 'handled_at', 'handled_by')
+    list_filter = ('status', 'created_at', 'handled_at')
+    search_fields = ('note__title', 'reporter__username', 'reported_user__username', 'reason', 'detail')
+    readonly_fields = ('note', 'reporter', 'reported_user', 'reason', 'detail', 'created_at', 'handled_at', 'handled_by')
+
+
+@admin.register(CommentReport)
+class CommentReportAdmin(admin.ModelAdmin):
+    list_display = ('id', 'comment', 'note', 'reporter', 'reported_user', 'reason', 'status', 'created_at', 'handled_at', 'handled_by')
+    list_filter = ('status', 'created_at', 'handled_at')
+    search_fields = ('comment__content', 'note__title', 'reporter__username', 'reported_user__username', 'reason', 'detail')
+    readonly_fields = ('comment', 'note', 'reporter', 'reported_user', 'reason', 'detail', 'created_at', 'handled_at', 'handled_by')
+
+
 @admin.register(MessagePreference)
 class MessagePreferenceAdmin(admin.ModelAdmin):
     list_display = ('user', 'allow_messages', 'message_mode',
@@ -600,7 +656,7 @@ class UserBlocklistAdmin(admin.ModelAdmin):
 # ---------------------------------
 #  举报处置（制裁 / 处置日志）
 # ---------------------------------
-from .models import UserSanction, ModerationLog
+from .models import ModerationAppeal, ModerationLog, ModerationTemplate, UserNotification, UserSanction
 
 
 @admin.register(UserSanction)
@@ -619,3 +675,26 @@ class ModerationLogAdmin(admin.ModelAdmin):
     list_filter = ('report_type', 'action', 'created_at')
     search_fields = ('moderator__username', 'target_user__username', 'note')
     readonly_fields = ('created_at',)
+
+
+@admin.register(UserNotification)
+class UserNotificationAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'kind', 'title', 'is_read', 'created_at')
+    list_filter = ('kind', 'is_read', 'created_at')
+    search_fields = ('user__username', 'title', 'body')
+    readonly_fields = ('created_at',)
+
+
+@admin.register(ModerationAppeal)
+class ModerationAppealAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'sanction', 'status', 'created_at', 'handled_at', 'handled_by')
+    list_filter = ('status', 'created_at', 'handled_at')
+    search_fields = ('user__username', 'reason', 'resolution_note')
+    readonly_fields = ('created_at', 'handled_at')
+
+
+@admin.register(ModerationTemplate)
+class ModerationTemplateAdmin(admin.ModelAdmin):
+    list_display = ('id', 'title', 'report_type', 'decision', 'is_active', 'updated_at')
+    list_filter = ('report_type', 'decision', 'is_active')
+    search_fields = ('title', 'content')

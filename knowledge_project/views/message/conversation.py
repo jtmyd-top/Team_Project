@@ -294,7 +294,7 @@ def get_messages_api(request):
 def get_message_conversations_api(request):
     """对话列表，支持 scope=all|unread|archived|blocked"""
     try:
-        from ...models import Message, ConversationSettings, UserBlocklist
+        from ...models import GroupMessage, Message, MessageGroupMember, ConversationSettings, UserBlocklist
 
         scope = request.GET.get('scope', 'all')
 
@@ -414,6 +414,7 @@ def get_message_conversations_api(request):
 
             preview = _message_preview(last_msg)
             conversations.append({
+                'conversation_type': 'user',
                 'user_id': peer.id,
                 'username': peer.username,
                 'avatar': _get_avatar_url(peer),
@@ -428,6 +429,52 @@ def get_message_conversations_api(request):
                 'disappearing_enabled': cs.disappearing_enabled,
                 'force_unread': cs.force_unread,
                 'is_blocked': peer_id in blocked_ids,
+            })
+
+        memberships = (
+            MessageGroupMember.objects
+            .filter(user=request.user, left_at__isnull=True, group__is_active=True)
+            .select_related('group')
+        )
+        for membership in memberships:
+            if scope == 'archived' and not membership.is_archived:
+                continue
+            if scope in ('all', 'unread') and membership.is_archived:
+                continue
+
+            group = membership.group
+            group_messages = GroupMessage.objects.filter(group=group, is_recalled=False)
+            if membership.cleared_before:
+                group_messages = group_messages.filter(created_at__gt=membership.cleared_before)
+            group_messages = group_messages.exclude(deletions__user=request.user).select_related('sender')
+            last_group_message = group_messages.order_by('-created_at').first()
+
+            unread_qs = group_messages.exclude(sender=request.user)
+            if membership.last_read_at:
+                unread_qs = unread_qs.filter(created_at__gt=membership.last_read_at)
+            unread = unread_qs.count()
+            if unread == 0 and membership.force_unread:
+                unread = 1
+            if scope == 'unread' and unread == 0:
+                continue
+
+            conversations.append({
+                'conversation_type': 'group',
+                'group_id': group.id,
+                'user_id': None,
+                'username': group.name,
+                'avatar': '/static/img/default-avatar.png',
+                'last_message': last_group_message.content if last_group_message else '群组已创建',
+                'last_message_time': (last_group_message.created_at if last_group_message else group.updated_at).isoformat(),
+                'last_sender_id': last_group_message.sender_id if last_group_message else None,
+                'unread_count': unread,
+                'is_pinned': membership.is_pinned,
+                'pinned_at': membership.pinned_at.isoformat() if membership.pinned_at else None,
+                'is_muted': membership.is_muted,
+                'is_archived': membership.is_archived,
+                'disappearing_enabled': False,
+                'force_unread': membership.force_unread,
+                'is_blocked': False,
             })
 
         # 排序：置顶在前（按 pinned_at 降序），其它按 last_message_time 降序

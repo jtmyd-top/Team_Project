@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -32,13 +33,26 @@ from django.utils import timezone
 
 from knowledge_project.models import (
     ConversationSettings,
+    GroupMessage,
     Message,
     MessageAttachment,
+    MessageGroup,
+    MessageGroupMember,
+    MessageGroupPolicy,
+    NoteComment,
     MessagePreference,
     MessageReport,
+    ModerationAppeal,
+    ModerationLog,
+    ModerationTemplate,
+    CommentReport,
+    Note,
+    NoteReport,
     NewConversationQuotaLog,
     UserBlocklist,
     UserFollow,
+    UserNotification,
+    UserSanction,
 )
 
 from ._helpers import login, make_user, parse, post_json
@@ -216,6 +230,224 @@ class SendMessageApiTests(_MessageTestBase):
             'content': 'hi',
         })
         self.assertIn(response.status_code, (302, 401, 403))
+
+
+# =========================================================================
+# message groups
+# =========================================================================
+class MessageGroupTests(_MessageTestBase):
+    def _make_public_notes(self, user, count):
+        for i in range(count):
+            Note.objects.create(
+                author=user,
+                title=f'public note {i}',
+                content='<p>public content</p>',
+                is_public=True,
+            )
+
+    def _create_group_directly(self, owner, members):
+        group = MessageGroup.objects.create(name='direct group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        for member in members:
+            MessageGroupMember.objects.create(group=group, user=member, role='member')
+        return group
+
+    def test_group_policy_defaults_are_configurable_values(self):
+        user = make_user('grp_policy_user')
+        login(self.client, user)
+        body = parse(self.client.get(reverse('get_group_policy_api')))
+        policy = body['policy']
+        self.assertTrue(policy['enabled'])
+        self.assertEqual(policy['min_public_notes'], 10)
+        self.assertEqual(policy['min_followers'], 50)
+        self.assertFalse(policy['eligible'])
+
+    def test_ineligible_user_cannot_create_group(self):
+        owner = make_user('grp_ineligible_owner')
+        member = make_user('grp_ineligible_member')
+        login(self.client, owner)
+        response = post_json(self.client, reverse('create_message_group_api'), {
+            'name': 'blocked group',
+            'member_ids': [member.id],
+        })
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(MessageGroup.objects.exists())
+
+    def test_user_with_required_public_notes_can_create_group(self):
+        owner = make_user('grp_notes_owner')
+        member = make_user('grp_notes_member')
+        self._make_public_notes(owner, 10)
+        login(self.client, owner)
+        response = post_json(self.client, reverse('create_message_group_api'), {
+            'name': 'notes group',
+            'member_ids': [member.id],
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        group = MessageGroup.objects.get(name='notes group')
+        self.assertEqual(group.owner, owner)
+        self.assertEqual(group.memberships.filter(left_at__isnull=True).count(), 2)
+
+    def test_admin_adjusted_follower_threshold_is_used(self):
+        owner = make_user('grp_follow_owner')
+        member = make_user('grp_follow_member')
+        MessageGroupPolicy.objects.create(min_public_notes=99, min_followers=2)
+        for i in range(2):
+            follower = make_user(f'grp_follow_follower_{i}')
+            UserFollow.objects.create(follower=follower, following=owner)
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('create_message_group_api'), {
+            'name': 'followers group',
+            'member_ids': [member.id],
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_disabled_group_policy_blocks_creation_even_when_threshold_met(self):
+        owner = make_user('grp_disabled_owner')
+        member = make_user('grp_disabled_member')
+        self._make_public_notes(owner, 10)
+        MessageGroupPolicy.objects.create(enabled=False)
+        login(self.client, owner)
+        response = post_json(self.client, reverse('create_message_group_api'), {
+            'name': 'disabled group',
+            'member_ids': [member.id],
+        })
+        self.assertEqual(response.status_code, 403)
+
+    def test_group_message_send_list_recall_and_report(self):
+        owner = make_user('grp_msg_owner')
+        member = make_user('grp_msg_member')
+        group = self._create_group_directly(owner, [member])
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'hello group',
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        message = GroupMessage.objects.get(group=group, sender=owner)
+
+        self.client.logout()
+        login(self.client, member)
+        body = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))
+        self.assertEqual(body['conversation_type'], 'group')
+        self.assertFalse(body['settings']['disappearing_enabled'])
+        self.assertEqual(body['messages'][0]['content'], 'hello group')
+
+        report_response = post_json(self.client, reverse('report_group_message_api', args=[group.id, message.id]), {
+            'reason': 'abuse',
+            'detail': 'bad group message',
+        })
+        self.assertEqual(report_response.status_code, 200, report_response.content)
+        message.refresh_from_db()
+        self.assertTrue(message.was_reported)
+        self.assertTrue(MessageReport.objects.filter(group_message=message, reported_user=owner).exists())
+
+        self.client.logout()
+        login(self.client, owner)
+        recall_response = post_json(self.client, reverse('delete_group_message_api', args=[group.id, message.id]), {
+            'scope': 'both',
+        })
+        self.assertEqual(recall_response.status_code, 200, recall_response.content)
+        message.refresh_from_db()
+        self.assertTrue(message.is_recalled)
+
+    def test_group_owner_can_manage_members_and_group_name(self):
+        owner = make_user('grp_manage_owner')
+        member = make_user('grp_manage_member')
+        newcomer = make_user('grp_manage_newcomer')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, owner)
+
+        rename_response = post_json(self.client, reverse('message_group_detail_api', args=[group.id]), {
+            'name': 'renamed group',
+        })
+        self.assertEqual(rename_response.status_code, 200, rename_response.content)
+        group.refresh_from_db()
+        self.assertEqual(group.name, 'renamed group')
+
+        add_response = post_json(self.client, reverse('add_group_members_api', args=[group.id]), {
+            'member_ids': [newcomer.id],
+        })
+        self.assertEqual(add_response.status_code, 200, add_response.content)
+        self.assertTrue(MessageGroupMember.objects.filter(group=group, user=newcomer, left_at__isnull=True).exists())
+
+        remove_response = post_json(self.client, reverse('remove_group_member_api', args=[group.id, newcomer.id]), {})
+        self.assertEqual(remove_response.status_code, 200, remove_response.content)
+        self.assertFalse(MessageGroupMember.objects.filter(group=group, user=newcomer, left_at__isnull=True).exists())
+
+    def test_group_member_cannot_manage_members(self):
+        owner = make_user('grp_manage2_owner')
+        member = make_user('grp_manage2_member')
+        newcomer = make_user('grp_manage2_newcomer')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, member)
+
+        response = post_json(self.client, reverse('add_group_members_api', args=[group.id]), {
+            'member_ids': [newcomer.id],
+        })
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(MessageGroupMember.objects.filter(group=group, user=newcomer).exists())
+
+    def test_group_message_sender_can_edit_sent_message(self):
+        owner = make_user('grp_edit_owner')
+        member = make_user('grp_edit_member')
+        group = self._create_group_directly(owner, [member])
+        message = GroupMessage.objects.create(group=group, sender=owner, content='old content')
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('edit_group_message_api', args=[group.id, message.id]), {
+            'content': 'new content',
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        message.refresh_from_db()
+        self.assertEqual(message.content, 'new content')
+        self.assertTrue(message.is_edited)
+        self.assertIsNotNone(message.edited_at)
+        body = parse(response)
+        self.assertEqual(body['message']['content'], 'new content')
+        self.assertTrue(body['message']['is_edited'])
+
+    def test_group_member_cannot_edit_other_member_message(self):
+        owner = make_user('grp_edit2_owner')
+        member = make_user('grp_edit2_member')
+        group = self._create_group_directly(owner, [member])
+        message = GroupMessage.objects.create(group=group, sender=owner, content='owner content')
+        login(self.client, member)
+
+        response = post_json(self.client, reverse('edit_group_message_api', args=[group.id, message.id]), {
+            'content': 'changed',
+        })
+        self.assertEqual(response.status_code, 403, response.content)
+        message.refresh_from_db()
+        self.assertEqual(message.content, 'owner content')
+
+    def test_group_personal_settings_leave_and_dissolve(self):
+        owner = make_user('grp_settings_owner')
+        member = make_user('grp_settings_member')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, member)
+
+        response = post_json(self.client, reverse('toggle_group_setting_api', args=[group.id, 'pin']), {'value': True})
+        self.assertEqual(response.status_code, 200, response.content)
+        membership = MessageGroupMember.objects.get(group=group, user=member)
+        self.assertTrue(membership.is_pinned)
+
+        response = post_json(self.client, reverse('toggle_group_setting_api', args=[group.id, 'clear']), {})
+        self.assertEqual(response.status_code, 200, response.content)
+        membership.refresh_from_db()
+        self.assertIsNotNone(membership.cleared_before)
+
+        response = post_json(self.client, reverse('leave_message_group_api', args=[group.id]), {})
+        self.assertEqual(response.status_code, 200, response.content)
+        membership.refresh_from_db()
+        self.assertIsNotNone(membership.left_at)
+
+        self.client.logout()
+        login(self.client, owner)
+        response = post_json(self.client, reverse('dissolve_message_group_api', args=[group.id]), {})
+        self.assertEqual(response.status_code, 200, response.content)
+        group.refresh_from_db()
+        self.assertFalse(group.is_active)
 
 
 # =========================================================================
@@ -705,6 +937,434 @@ class ReportUserApiTests(_MessageTestBase):
             'user_id': a.id, 'message_id': msg.id, 'reason': 'spam',
         })
         self.assertEqual(response.status_code, 403)
+
+
+# =========================================================================
+# moderation_user_sanction_api
+# =========================================================================
+class ModerationUserSanctionApiTests(_MessageTestBase):
+    def test_non_admin_cannot_manually_sanction_user(self):
+        moderator = make_user('ms01_mod')
+        target = make_user('ms01_target')
+        login(self.client, moderator)
+
+        response = post_json(self.client, reverse('moderation_user_sanction_api', args=[target.id]), {
+            'type': 'mute_messages',
+            'duration': '24h',
+            'note': 'repeat violation',
+        })
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(UserSanction.objects.filter(user=target).exists())
+
+    def test_manual_resanction_requires_report_context(self):
+        admin = make_user('ms04_admin', is_superuser=True)
+        target = make_user('ms04_target')
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_user_sanction_api', args=[target.id]), {
+            'type': 'ban_login',
+            'duration': '24h',
+            'note': 'missing source report',
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(UserSanction.objects.filter(user=target).exists())
+
+    def test_admin_can_manually_resanction_user_with_report_context(self):
+        admin = make_user('ms02_admin', is_superuser=True)
+        reporter = make_user('ms02_reporter')
+        target = make_user('ms02_target')
+        msg = Message.objects.create(sender=target, recipient=reporter, content='repeat abuse')
+        report = MessageReport.objects.create(
+            reporter=reporter,
+            reported_user=target,
+            message=msg,
+            reason='abuse',
+            status='resolved',
+            handled_by=admin,
+            resolved_at=timezone.now(),
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_user_sanction_api', args=[target.id]), {
+            'type': 'mute_messages',
+            'duration': '7d',
+            'note': 'continued violation after revoke',
+            'source_report_type': 'message',
+            'source_report_id': report.id,
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        sanction = UserSanction.objects.get(user=target, sanction_type='mute_messages')
+        self.assertTrue(sanction.is_active)
+        self.assertEqual(sanction.source_report_type, 'message')
+        self.assertEqual(sanction.source_report_id, report.id)
+        self.assertTrue(
+            ModerationLog.objects.filter(
+                report_type='message',
+                report_id=report.id,
+                target_user=target,
+                action='manual:mute_7d',
+            ).exists()
+        )
+
+    def test_manual_resanction_rejects_unrelated_report_context(self):
+        admin = make_user('ms03_admin', is_superuser=True)
+        author = make_user('ms03_author')
+        reporter = make_user('ms03_reporter')
+        note = Note.objects.create(author=author, title='note', content='content', is_public=True)
+        comment = NoteComment.objects.create(note=note, author=author, content='bad comment')
+        report = CommentReport.objects.create(
+            comment=comment,
+            note=note,
+            reporter=reporter,
+            reported_user=author,
+            reason='abuse',
+            status='removed',
+            handled_by=admin,
+            handled_at=timezone.now(),
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_user_sanction_api', args=[author.id]), {
+            'type': 'mute_messages',
+            'duration': '7d',
+            'note': 'wrong manual sanction type',
+            'source_report_type': 'comment',
+            'source_report_id': report.id,
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(UserSanction.objects.filter(user=author, sanction_type='mute_messages').exists())
+
+    def test_manual_resanction_rejects_user_outside_source_report(self):
+        admin = make_user('ms05_admin', is_superuser=True)
+        reporter = make_user('ms05_reporter')
+        target = make_user('ms05_target')
+        unrelated = make_user('ms05_unrelated')
+        msg = Message.objects.create(sender=target, recipient=reporter, content='repeat abuse')
+        report = MessageReport.objects.create(
+            reporter=reporter,
+            reported_user=target,
+            message=msg,
+            reason='abuse',
+            status='resolved',
+            handled_by=admin,
+            resolved_at=timezone.now(),
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_user_sanction_api', args=[unrelated.id]), {
+            'type': 'mute_messages',
+            'duration': '7d',
+            'note': 'wrong target user',
+            'source_report_type': 'message',
+            'source_report_id': report.id,
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(UserSanction.objects.filter(user=unrelated).exists())
+
+
+# =========================================================================
+# note/comment report moderation
+# =========================================================================
+class NoteAndCommentReportTests(_MessageTestBase):
+    def test_logged_in_user_can_report_public_note(self):
+        author = make_user('nr01_author')
+        reporter = make_user('nr01_reporter')
+        note = Note.objects.create(
+            author=author,
+            title='reported note',
+            content='<p>bad article</p>',
+            is_public=True,
+        )
+        login(self.client, reporter)
+
+        response = post_json(self.client, reverse('note_report_api', args=[note.id]), {
+            'reason': 'abuse',
+            'detail': 'contains abuse',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        report = NoteReport.objects.get(note=note, reporter=reporter)
+        self.assertEqual(report.reported_user, author)
+        self.assertEqual(report.status, 'pending')
+
+    def test_cannot_report_own_comment(self):
+        author = make_user('cr01_author')
+        note = Note.objects.create(author=author, title='note', content='content', is_public=True)
+        comment = NoteComment.objects.create(note=note, author=author, content='my comment')
+        login(self.client, author)
+
+        response = post_json(self.client, reverse('note_comment_report_api', args=[comment.id]), {
+            'reason': 'other',
+        })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CommentReport.objects.exists())
+
+    def test_admin_can_take_down_reported_note_and_sanction_author(self):
+        admin = make_user('nr02_admin', is_superuser=True)
+        author = make_user('nr02_author')
+        reporter = make_user('nr02_reporter')
+        note = Note.objects.create(
+            author=author,
+            title='reported note',
+            content='<p>bad article</p>',
+            is_public=True,
+        )
+        report = NoteReport.objects.create(
+            note=note,
+            reporter=reporter,
+            reported_user=author,
+            reason='abuse',
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_resolve_api', args=['note', report.id]), {
+            'decision': 'uphold',
+            'remove_content': True,
+            'sanctions': [{'target': 'reported', 'type': 'ban_login', 'duration': '24h'}],
+            'note': 'article violates rules',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        note.refresh_from_db()
+        report.refresh_from_db()
+        self.assertFalse(note.is_public)
+        self.assertEqual(report.status, 'removed')
+        self.assertTrue(UserSanction.objects.filter(user=author, sanction_type='ban_login', source_report_type='note').exists())
+        self.assertTrue(ModerationLog.objects.filter(report_type='note', report_id=report.id, action='remove_content').exists())
+
+    def test_admin_can_delete_reported_comment(self):
+        admin = make_user('cr02_admin', is_superuser=True)
+        author = make_user('cr02_author')
+        reporter = make_user('cr02_reporter')
+        note = Note.objects.create(author=reporter, title='note', content='content', is_public=True)
+        comment = NoteComment.objects.create(note=note, author=author, content='bad comment')
+        report = CommentReport.objects.create(
+            comment=comment,
+            note=note,
+            reporter=reporter,
+            reported_user=author,
+            reason='abuse',
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_resolve_api', args=['comment', report.id]), {
+            'decision': 'uphold',
+            'remove_content': True,
+            'sanctions': [],
+            'note': 'comment violates rules',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        report.refresh_from_db()
+        self.assertEqual(report.status, 'removed')
+        self.assertFalse(NoteComment.objects.filter(id=comment.id).exists())
+
+    def test_admin_can_apply_contextual_bans(self):
+        admin = make_user('nr03_admin', is_superuser=True)
+        author = make_user('nr03_author')
+        reporter = make_user('nr03_reporter')
+        note = Note.objects.create(author=author, title='note', content='content', is_public=True)
+        note_report = NoteReport.objects.create(
+            note=note,
+            reporter=reporter,
+            reported_user=author,
+            reason='abuse',
+        )
+        comment = NoteComment.objects.create(note=note, author=author, content='bad comment')
+        comment_report = CommentReport.objects.create(
+            comment=comment,
+            note=note,
+            reporter=reporter,
+            reported_user=author,
+            reason='abuse',
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_resolve_api', args=['note', note_report.id]), {
+            'decision': 'uphold',
+            'remove_content': False,
+            'sanctions': [
+                {'target': 'reported', 'type': 'ban_public_notes', 'duration': '7d'},
+            ],
+            'note': 'repeat violations',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(UserSanction.objects.filter(user=author, sanction_type='ban_public_notes').exists())
+        self.assertTrue(ModerationLog.objects.filter(report_type='note', report_id=note_report.id, action='ban_public_notes_7d').exists())
+
+        response = post_json(self.client, reverse('moderation_resolve_api', args=['comment', comment_report.id]), {
+            'decision': 'uphold',
+            'remove_content': False,
+            'sanctions': [
+                {'target': 'reported', 'type': 'ban_comments', 'duration': '24h'},
+            ],
+            'note': 'comment violations',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(UserSanction.objects.filter(user=author, sanction_type='ban_comments').exists())
+        self.assertTrue(ModerationLog.objects.filter(report_type='comment', report_id=comment_report.id, action='ban_comments_24h').exists())
+
+    def test_report_type_rejects_unrelated_sanction(self):
+        admin = make_user('nr06_admin', is_superuser=True)
+        author = make_user('nr06_author')
+        reporter = make_user('nr06_reporter')
+        note = Note.objects.create(author=reporter, title='note', content='content', is_public=True)
+        comment = NoteComment.objects.create(note=note, author=author, content='bad comment')
+        report = CommentReport.objects.create(
+            comment=comment,
+            note=note,
+            reporter=reporter,
+            reported_user=author,
+            reason='abuse',
+        )
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_resolve_api', args=['comment', report.id]), {
+            'decision': 'uphold',
+            'remove_content': False,
+            'sanctions': [
+                {'target': 'reported', 'type': 'ban_public_notes', 'duration': '7d'},
+            ],
+            'note': 'wrong sanction type',
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(UserSanction.objects.filter(user=author, sanction_type='ban_public_notes').exists())
+
+    def test_note_report_captures_snapshot_and_notifies_reporter(self):
+        author = make_user('nr07_author')
+        reporter = make_user('nr07_reporter')
+        note = Note.objects.create(
+            author=author,
+            title='snapshot title',
+            content='<p>snapshot body</p>',
+            is_public=True,
+        )
+        login(self.client, reporter)
+
+        response = post_json(self.client, reverse('note_report_api', args=[note.id]), {
+            'reason': 'privacy',
+            'detail': 'contains private info',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        report = NoteReport.objects.get(note=note, reporter=reporter)
+        self.assertEqual(report.evidence_snapshot['title'], 'snapshot title')
+        self.assertIn('snapshot body', report.evidence_snapshot['content_preview'])
+        self.assertTrue(UserNotification.objects.filter(user=reporter, kind='report_received').exists())
+
+    def test_admin_resolve_merges_duplicate_pending_reports(self):
+        admin = make_user('nr08_admin', is_superuser=True)
+        author = make_user('nr08_author')
+        reporter_a = make_user('nr08_reporter_a')
+        reporter_b = make_user('nr08_reporter_b')
+        note = Note.objects.create(author=author, title='duplicate note', content='content', is_public=True)
+        first = NoteReport.objects.create(note=note, reporter=reporter_a, reported_user=author, reason='abuse')
+        second = NoteReport.objects.create(note=note, reporter=reporter_b, reported_user=author, reason='spam')
+        login(self.client, admin)
+
+        response = post_json(self.client, reverse('moderation_resolve_api', args=['note', first.id]), {
+            'decision': 'uphold',
+            'remove_content': False,
+            'resolve_related': True,
+            'sanctions': [],
+            'note': 'merged decision',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, 'removed')
+        self.assertEqual(second.status, 'removed')
+        self.assertTrue(ModerationLog.objects.filter(report_type='note', report_id=second.id, action='merged_resolve').exists())
+        self.assertTrue(UserNotification.objects.filter(user=reporter_b, kind='report_resolved').exists())
+
+    def test_admin_can_load_moderation_templates(self):
+        admin = make_user('nr09_admin', is_superuser=True)
+        ModerationTemplate.objects.create(
+            title='note uphold template',
+            report_type='note',
+            decision='uphold',
+            content='template body',
+        )
+        login(self.client, admin)
+
+        response = self.client.get(reverse('moderation_templates_api'), {'type': 'note', 'decision': 'uphold'})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = parse(response)
+        self.assertTrue(any(t['title'] == 'note uphold template' for t in body['templates']))
+
+    def test_user_can_appeal_and_admin_can_accept(self):
+        admin = make_user('nr10_admin', is_superuser=True)
+        user = make_user('nr10_user')
+        sanction = UserSanction.objects.create(
+            user=user,
+            sanction_type='ban_comments',
+            created_by=admin,
+            source_report_type='comment',
+            source_report_id=123,
+        )
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('moderation_sanction_appeal_api', args=[sanction.id]), {
+            'reason': 'I think this was a mistake',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        appeal = ModerationAppeal.objects.get(sanction=sanction)
+        self.assertTrue(UserNotification.objects.filter(user=user, kind='appeal_submitted').exists())
+
+        login(self.client, admin)
+        response = post_json(self.client, reverse('moderation_appeal_resolve_api', args=[appeal.id]), {
+            'decision': 'accepted',
+            'note': 'appeal accepted',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        appeal.refresh_from_db()
+        sanction.refresh_from_db()
+        self.assertEqual(appeal.status, 'accepted')
+        self.assertFalse(sanction.is_active)
+        self.assertTrue(UserNotification.objects.filter(user=user, kind='appeal_resolved').exists())
+
+    def test_comment_ban_blocks_public_note_comments(self):
+        author = make_user('nr04_author')
+        commenter = make_user('nr04_commenter')
+        note = Note.objects.create(author=author, title='note', content='content', is_public=True)
+        UserSanction.objects.create(user=commenter, sanction_type='ban_comments', created_by=author)
+        login(self.client, commenter)
+
+        response = post_json(self.client, reverse('note_comment_create_api', args=[note.id]), {
+            'content': 'blocked comment',
+        })
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(NoteComment.objects.filter(note=note, author=commenter).exists())
+
+    def test_public_note_ban_blocks_publishing(self):
+        user = make_user('nr05_user')
+        note = Note.objects.create(author=user, title='note', content='content', is_public=False)
+        UserSanction.objects.create(user=user, sanction_type='ban_public_notes')
+        login(self.client, user)
+
+        response = self.client.patch(
+            reverse('api_note_detail', args=[note.id]),
+            data=json.dumps({'is_public': True}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        note.refresh_from_db()
+        self.assertFalse(note.is_public)
 
 
 # =========================================================================

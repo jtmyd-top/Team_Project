@@ -98,6 +98,8 @@ def change_password(request):
         return JsonResponse({"status": "error", "message": "两次输入的新密码不一致"}, status=400)
     if len(new_password) < 8:
         return JsonResponse({"status": "error", "message": "新密码长度至少为 8 位"}, status=400)
+    if request.user.check_password(new_password):
+        return JsonResponse({"status": "error", "message": "新密码不能与当前密码相同"}, status=400)
 
     profile = getattr(request.user, 'profile', None)
     if profile and profile.two_fa_enabled:
@@ -138,6 +140,17 @@ def forgot_password_view(request):
     if request.user.is_authenticated:
         return redirect('/')
     return render(request, 'registration/forgot_password.html')
+
+
+def _reset_password_context(user=None, token='', *, validlink=False, error=None, success_message=None):
+    return {
+        'validlink': validlink,
+        'user_id': user.id if user else None,
+        'token': token if validlink else '',
+        'username': user.username if user else '',
+        'error': error,
+        'success_message': success_message,
+    }
 
 
 @require_http_methods(["POST"])
@@ -220,39 +233,54 @@ def reset_password_view(request, user_id, token):
     token_generator = PasswordResetTokenGenerator()
 
     if not token_generator.check_token(user, token):
-        return render(request, 'registration/reset_password.html', {
-            'validlink': False,
-            'message': '重置链接无效或已过期',
-        })
+        return render(request, 'registration/reset_password.html', _reset_password_context(
+            error='重置链接无效或已过期',
+        ))
 
     if request.method == 'POST':
-        password = request.POST.get('password', '').strip()
-        confirm_password = request.POST.get('confirm_password', '').strip()
+        password = request.POST.get('password', '')
+        confirm_password = request.POST.get('confirm_password', '')
 
         if not password or not confirm_password:
-            return render(request, 'registration/reset_password.html', {
-                'validlink': True,
-                'error_message': '请输入并确认新密码',
-            })
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'status': 'error', 'message': '请输入并确认新密码'}, status=400)
+            return render(request, 'registration/reset_password.html', _reset_password_context(
+                user, token, validlink=True, error='请输入并确认新密码',
+            ))
         if password != confirm_password:
-            return render(request, 'registration/reset_password.html', {
-                'validlink': True,
-                'error_message': '两次输入的密码不一致',
-            })
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'status': 'error', 'message': '两次输入的密码不一致'}, status=400)
+            return render(request, 'registration/reset_password.html', _reset_password_context(
+                user, token, validlink=True, error='两次输入的密码不一致',
+            ))
         if len(password) < 8:
-            return render(request, 'registration/reset_password.html', {
-                'validlink': True,
-                'error_message': '密码长度至少为 8 位',
-            })
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'status': 'error', 'message': '密码长度至少为 8 位'}, status=400)
+            return render(request, 'registration/reset_password.html', _reset_password_context(
+                user, token, validlink=True, error='密码长度至少为 8 位',
+            ))
+        if user.check_password(password):
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'status': 'error', 'message': '新密码不能与原密码相同'}, status=400)
+            return render(request, 'registration/reset_password.html', _reset_password_context(
+                user, token, validlink=True, error='新密码不能与原密码相同',
+            ))
 
         user.set_password(password)
         user.save()
         invalidate_other_user_sessions(user)
         if request.user.is_authenticated and request.user.pk == user.pk:
             update_session_auth_hash(request, user)
-        return render(request, 'registration/reset_password.html', {
-            'validlink': False,
-            'success_message': '密码已重置，请重新登录',
-        })
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'status': 'success',
+                'message': '密码已重置，请重新登录',
+                'redirect_url': '/login/',
+            })
+        return render(request, 'registration/reset_password.html', _reset_password_context(
+            success_message='密码已重置，请重新登录',
+        ))
 
-    return render(request, 'registration/reset_password.html', {'validlink': True})
+    return render(request, 'registration/reset_password.html', _reset_password_context(
+        user, token, validlink=True,
+    ))

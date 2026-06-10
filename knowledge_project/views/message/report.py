@@ -8,6 +8,7 @@ from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
+from ...moderation_utils import attachment_report_snapshot, message_report_snapshot, notify_user
 from ._helpers import _body_string, _serve_attachment_file, _server_error_response
 
 
@@ -52,6 +53,8 @@ def report_message_attachment_api(request, attachment_id):
 
     reason = _body_string(data, 'reason', 'other')[:120]
     detail = _body_string(data, 'detail', '')[:1000]
+    if reason not in dict(AttachmentReport.REASON_CHOICES):
+        return JsonResponse({'error': '无效的举报原因'}, status=400)
     report, created = AttachmentReport.objects.get_or_create(
         attachment=attachment,
         reporter=request.user,
@@ -59,7 +62,16 @@ def report_message_attachment_api(request, attachment_id):
         defaults={
             'reason': reason,
             'detail': detail,
+            'evidence_snapshot': attachment_report_snapshot(attachment, request),
         }
+    )
+    notify_user(
+        request.user,
+        'report_received',
+        '举报已收到',
+        '你的附件举报已提交，管理员会尽快处理。',
+        report_type='attachment',
+        report_id=report.id,
     )
     if not attachment.was_reported:
         attachment.was_reported = True
@@ -108,12 +120,21 @@ def report_user_api(request):
         if message is not None and request.user.id not in (message.sender_id, message.recipient_id):
             return JsonResponse({'error': '只有私信参与者才能举报该内容'}, status=403)
 
-        MessageReport.objects.create(
+        report = MessageReport.objects.create(
             reporter=request.user,
             reported_user=reported_user,
             message=message,
             reason=reason,
             detail=detail,
+            evidence_snapshot=message_report_snapshot(message=message, request=request),
+        )
+        notify_user(
+            request.user,
+            'report_received',
+            '举报已收到',
+            '你的私信举报已提交，管理员会尽快处理。',
+            report_type='message',
+            report_id=report.id,
         )
 
         if message is not None:
@@ -134,6 +155,7 @@ def report_user_api(request):
                     defaults={
                         'reason': reason,
                         'detail': detail,
+                        'evidence_snapshot': attachment_report_snapshot(attachment, request),
                     }
                 )
 

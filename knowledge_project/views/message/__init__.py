@@ -39,6 +39,21 @@ from .conversation import (
     toggle_mute_api,
     toggle_pin_api,
 )
+from .groups import (
+    add_group_members_api,
+    create_message_group_api,
+    delete_group_message_api,
+    dissolve_message_group_api,
+    edit_group_message_api,
+    leave_message_group_api,
+    message_group_detail_api,
+    remove_group_member_api,
+    get_group_messages_api,
+    get_group_policy_api,
+    report_group_message_api,
+    send_group_message_api,
+    toggle_group_setting_api,
+)
 from .preference import (
     block_user_api,
     get_blocked_users_api,
@@ -54,10 +69,14 @@ from .report import (
 )
 from .moderation import (
     moderation_attachment_file_api,
+    moderation_appeal_resolve_api,
     moderation_report_detail_api,
     moderation_reports_list_api,
     moderation_resolve_api,
     moderation_revoke_sanction_api,
+    moderation_sanction_appeal_api,
+    moderation_templates_api,
+    moderation_user_sanction_api,
     moderation_view,
 )
 from .search import export_conversation_api, search_messages_api
@@ -89,6 +108,20 @@ __all__ = [
     'toggle_archive_api',
     'toggle_mute_api',
     'toggle_pin_api',
+    # groups
+    'add_group_members_api',
+    'create_message_group_api',
+    'delete_group_message_api',
+    'dissolve_message_group_api',
+    'edit_group_message_api',
+    'leave_message_group_api',
+    'message_group_detail_api',
+    'remove_group_member_api',
+    'get_group_messages_api',
+    'get_group_policy_api',
+    'report_group_message_api',
+    'send_group_message_api',
+    'toggle_group_setting_api',
     # preference
     'block_user_api',
     'get_blocked_users_api',
@@ -102,10 +135,14 @@ __all__ = [
     'review_reported_attachment',
     # moderation
     'moderation_attachment_file_api',
+    'moderation_appeal_resolve_api',
     'moderation_report_detail_api',
     'moderation_reports_list_api',
     'moderation_resolve_api',
     'moderation_revoke_sanction_api',
+    'moderation_sanction_appeal_api',
+    'moderation_templates_api',
+    'moderation_user_sanction_api',
     'moderation_view',
     # search
     'export_conversation_api',

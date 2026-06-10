@@ -136,6 +136,16 @@ class LoginApiTests(_AuthTestBase):
         self.assertIn('auth_started_at', session)
         self.assertIn('last_activity_at', session)
 
+    @patch('knowledge_project.views.auth.login.CustomLoginView.send_login_notification', return_value=None)
+    def test_login_preserves_password_whitespace(self, _mocked):
+        user = make_user('login05', password=' Pass-word-123! ')
+        response = post_json(self.client, reverse('login_api'), {
+            'username': user.username,
+            'password': ' Pass-word-123! ',
+            'turnstile_token': 'dummy',
+        })
+        self.assertEqual(response.status_code, 200)
+
     def test_login_wrong_password_returns_400(self):
         user = make_user('login02')
         response = post_json(self.client, reverse('login_api'), {
@@ -266,6 +276,17 @@ class PasswordChangeTests(_AuthTestBase):
         })
         self.assertEqual(response.status_code, 400)
 
+    def test_change_password_rejects_current_password_reuse(self):
+        user = make_user('changer05')
+        login(self.client, user)
+        response = post_json(self.client, reverse('change_password'), {
+            'current_password': 'pass-word-123!',
+            'new_password': 'pass-word-123!',
+            'confirm_password': 'pass-word-123!',
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('不能与当前密码相同', parse(response)['message'])
+
     def test_change_password_success(self):
         user = make_user('changer04')
         login(self.client, user)
@@ -318,6 +339,59 @@ class PasswordResetTests(_AuthTestBase):
         self.assertEqual(response.status_code, 200)
         user.refresh_from_db()
         self.assertTrue(user.check_password('NewPass1234!'))
+
+    def test_reset_password_view_exposes_valid_link_context(self):
+        user = make_user('reset04')
+        token = PasswordResetTokenGenerator().make_token(user)
+        response = self.client.get(reverse('reset_password', args=[user.id, token]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['validlink'])
+        self.assertEqual(response.context['user_id'], user.id)
+        self.assertEqual(response.context['token'], token)
+        self.assertEqual(response.context['username'], user.username)
+
+    def test_reset_password_ajax_success_returns_json(self):
+        user = make_user('reset05')
+        token = PasswordResetTokenGenerator().make_token(user)
+        response = self.client.post(
+            reverse('reset_password', args=[user.id, token]),
+            data={'password': 'NewPass1234!', 'confirm_password': 'NewPass1234!'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(parse(response)['status'], 'success')
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('NewPass1234!'))
+
+    def test_reset_password_preserves_password_whitespace(self):
+        user = make_user('reset06')
+        token = PasswordResetTokenGenerator().make_token(user)
+        response = self.client.post(
+            reverse('reset_password', args=[user.id, token]),
+            data={'password': ' NewPass1234! ', 'confirm_password': ' NewPass1234! '},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password(' NewPass1234! '))
+        self.assertFalse(user.check_password('NewPass1234!'))
+
+    def test_reset_password_rejects_original_password_reuse(self):
+        user = make_user('reset07')
+        token = PasswordResetTokenGenerator().make_token(user)
+        response = self.client.post(
+            reverse('reset_password', args=[user.id, token]),
+            data={'password': 'pass-word-123!', 'confirm_password': 'pass-word-123!'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('不能与原密码相同', parse(response)['message'])
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('pass-word-123!'))
 
 
 # =========================================================================

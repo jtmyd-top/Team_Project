@@ -511,7 +511,7 @@ def login_api(request):
         # 解析JSON数据
         data = json.loads(request.body)
         username = data.get('username', '').strip()
-        password = data.get('password', '').strip()
+        password = data.get('password', '')
 
         # 验证码参数：支持 turnstile 和图形验证码
         turnstile_token = data.get('turnstile_token', '').strip()

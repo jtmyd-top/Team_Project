@@ -92,6 +92,7 @@
 
       <div class="bubble-meta">
         <span class="time">{{ formatTime(msg.created_at) }}</span>
+        <span v-if="msg.is_edited" class="edited-state">已编辑</span>
         <span v-if="msg.is_own" class="read-state" :class="{ unread: !msg.is_read }">
           <i class="fas" :class="msg.is_read ? 'fa-check-double' : 'fa-check'"></i>
           <span>{{ msg.is_read ? '已读' : '未读' }}</span>
@@ -373,6 +374,10 @@ onUpdated(() => {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.edited-state {
+  opacity: 0.86;
 }
 
 .read-state.unread {

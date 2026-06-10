@@ -223,6 +223,7 @@ class Note(models.Model):
             models.Index(fields=['is_favorited']),
             models.Index(fields=['is_secret']),
             models.Index(fields=['author', 'is_trashed', 'is_secret'], name='note_author_trash_secret_idx'),
+            models.Index(fields=['is_public', '-updated_at'], name='note_public_updated_idx', condition=models.Q(is_public=True)),
         ]
 
     def move_to_trash(self):
@@ -603,6 +604,7 @@ class ProfileLike(models.Model):
         unique_together = ('liker', 'profile')  # 确保一个用户只能点赞同一个资料一次
         indexes = [
             models.Index(fields=['liker', 'profile']),
+            models.Index(fields=['liker', 'profile'], name='profilelike_liker_profile_idx'),
         ]
 
     def __str__(self):
@@ -1060,6 +1062,9 @@ class NoteComment(models.Model):
         verbose_name = "笔记评论"
         verbose_name_plural = "笔记评论"
         ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['note', 'created_at'], name='notecomment_note_created_idx'),
+        ]
 
     def __str__(self):
         return f"{self.author.username} 评论了 《{self.note.title}》"
@@ -1089,6 +1094,7 @@ class NoteHistory(models.Model):
         unique_together = ('user', 'note')
         indexes = [
             models.Index(fields=['user', '-viewed_at']),
+            models.Index(fields=['user', '-viewed_at'], name='notehistory_user_viewed_idx'),
         ]
 
     def __str__(self):
@@ -1223,6 +1229,15 @@ class MessageAttachment(models.Model):
 
 class AttachmentReport(models.Model):
     """私信附件举报工单。只有待处理工单会临时打开管理员审查权限。"""
+    REASON_CHOICES = [
+        ('spam', '垃圾广告'),
+        ('abuse', '辱骂骚扰'),
+        ('porn', '色情低俗'),
+        ('scam', '诈骗欺诈'),
+        ('privacy', '侵犯隐私'),
+        ('illegal', '违法违规'),
+        ('other', '其他'),
+    ]
     STATUS_CHOICES = [
         ('pending', '待处理'),
         ('removed', '已违规删除'),
@@ -1247,8 +1262,9 @@ class AttachmentReport(models.Model):
         default='pending',
         verbose_name="处理状态",
     )
-    reason = models.CharField(max_length=120, blank=True, verbose_name="举报原因")
+    reason = models.CharField(max_length=120, choices=REASON_CHOICES, default='other', verbose_name="举报原因")
     detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    evidence_snapshot = models.JSONField(default=dict, blank=True, verbose_name="举报证据快照")
     pending_dedup_key = models.CharField(
         max_length=16,
         null=True,
@@ -1290,6 +1306,159 @@ class AttachmentReport(models.Model):
 
     def __str__(self):
         return f"{self.reporter.username} 举报附件 {self.attachment_id} ({self.get_status_display()})"
+
+
+class NoteReport(models.Model):
+    """Report ticket for a public note/article."""
+    REASON_CHOICES = [
+        ('spam', '垃圾广告'),
+        ('abuse', '辱骂骚扰'),
+        ('porn', '色情低俗'),
+        ('scam', '诈骗欺诈'),
+        ('privacy', '侵犯隐私'),
+        ('illegal', '违法违规'),
+        ('other', '其他'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', '待处理'),
+        ('removed', '已下架'),
+        ('dismissed', '已驳回'),
+    ]
+
+    note = models.ForeignKey(
+        Note,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reports',
+        verbose_name="关联文章",
+    )
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+', verbose_name="举报人")
+    reported_user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        verbose_name="被举报用户",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="处理状态")
+    reason = models.CharField(max_length=120, choices=REASON_CHOICES, default='other', verbose_name="举报原因")
+    detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    evidence_snapshot = models.JSONField(default=dict, blank=True, verbose_name="举报证据快照")
+    pending_dedup_key = models.CharField(max_length=16, null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="举报时间")
+    handled_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    handled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    resolution_note = models.TextField(blank=True, verbose_name="处理备注")
+
+    class Meta:
+        verbose_name = "文章举报"
+        verbose_name_plural = "文章举报"
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['note', 'reporter', 'pending_dedup_key'],
+                name='uniq_pending_note_report_per_reporter',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['note', 'status']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['reporter', '-created_at']),
+            models.Index(fields=['reported_user']),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.pending_dedup_key = 'pending' if self.status == 'pending' else None
+        if self.note_id and self.reported_user_id is None:
+            self.reported_user = self.note.author
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.reporter.username} reported note {self.note_id} ({self.get_status_display()})"
+
+
+class CommentReport(models.Model):
+    """Report ticket for a note comment or reply."""
+    REASON_CHOICES = [
+        ('spam', '垃圾广告'),
+        ('abuse', '辱骂骚扰'),
+        ('porn', '色情低俗'),
+        ('scam', '诈骗欺诈'),
+        ('privacy', '侵犯隐私'),
+        ('illegal', '违法违规'),
+        ('other', '其他'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', '待处理'),
+        ('removed', '已删除'),
+        ('dismissed', '已驳回'),
+    ]
+
+    comment = models.ForeignKey(
+        NoteComment,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reports',
+        verbose_name="关联评论",
+    )
+    note = models.ForeignKey(
+        Note,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='comment_reports',
+        verbose_name="关联文章",
+    )
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+', verbose_name="举报人")
+    reported_user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        verbose_name="被举报用户",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="处理状态")
+    reason = models.CharField(max_length=120, choices=REASON_CHOICES, default='other', verbose_name="举报原因")
+    detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    evidence_snapshot = models.JSONField(default=dict, blank=True, verbose_name="举报证据快照")
+    pending_dedup_key = models.CharField(max_length=16, null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="举报时间")
+    handled_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    handled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    resolution_note = models.TextField(blank=True, verbose_name="处理备注")
+
+    class Meta:
+        verbose_name = "评论举报"
+        verbose_name_plural = "评论举报"
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['comment', 'reporter', 'pending_dedup_key'],
+                name='uniq_pending_comment_report_per_reporter',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['comment', 'status']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['reporter', '-created_at']),
+            models.Index(fields=['reported_user']),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.pending_dedup_key = 'pending' if self.status == 'pending' else None
+        if self.comment_id:
+            if self.note_id is None:
+                self.note = self.comment.note
+            if self.reported_user_id is None:
+                self.reported_user = self.comment.author
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.reporter.username} reported comment {self.comment_id} ({self.get_status_display()})"
 
 
 class MessagePreference(models.Model):
@@ -1475,6 +1644,163 @@ class ConversationSettings(models.Model):
         return f"{self.user.username} → {self.peer.username} 会话设置"
 
 
+class MessageGroupPolicy(models.Model):
+    """私信群组创建策略。管理员可在后台调整阈值，默认开启。"""
+    enabled = models.BooleanField(default=True, verbose_name="允许用户创建群组")
+    min_public_notes = models.PositiveIntegerField(default=10, verbose_name="公开文章数门槛")
+    min_followers = models.PositiveIntegerField(default=50, verbose_name="关注者数门槛")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "私信群组创建策略"
+        verbose_name_plural = "私信群组创建策略"
+
+    def __str__(self):
+        status = "开启" if self.enabled else "关闭"
+        return f"群组创建策略（{status}，公开文章≥{self.min_public_notes} 或关注者≥{self.min_followers}）"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_current(cls):
+        policy, _ = cls.objects.get_or_create(pk=1)
+        return policy
+
+    def user_stats(self, user):
+        public_notes = Note.objects.filter(author=user, is_public=True, is_trashed=False).count()
+        followers = UserFollow.objects.filter(following=user).count()
+        return {
+            'public_notes': public_notes,
+            'followers': followers,
+        }
+
+    def can_create_group(self, user):
+        stats = self.user_stats(user)
+        eligible = self.enabled and (
+            stats['public_notes'] >= self.min_public_notes or
+            stats['followers'] >= self.min_followers
+        )
+        return eligible, stats
+
+
+class MessageGroup(models.Model):
+    """私信群组。群组不支持阅后即焚，消息可撤回、可举报。"""
+    name = models.CharField(max_length=80, verbose_name="群组名称")
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='owned_message_groups', verbose_name="群主"
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name='+', verbose_name="创建者"
+    )
+    is_active = models.BooleanField(default=True, verbose_name="是否启用")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "私信群组"
+        verbose_name_plural = "私信群组"
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['owner', '-created_at']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class MessageGroupMember(models.Model):
+    ROLE_CHOICES = [
+        ('owner', '群主'),
+        ('admin', '管理员'),
+        ('member', '成员'),
+    ]
+
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='memberships', verbose_name="群组"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='message_group_memberships', verbose_name="成员"
+    )
+    role = models.CharField(max_length=12, choices=ROLE_CHOICES, default='member', verbose_name="角色")
+    joined_at = models.DateTimeField(auto_now_add=True, verbose_name="加入时间")
+    left_at = models.DateTimeField(null=True, blank=True, verbose_name="退出时间")
+    last_read_at = models.DateTimeField(null=True, blank=True, verbose_name="最后读取时间")
+    is_pinned = models.BooleanField(default=False, verbose_name="置顶")
+    pinned_at = models.DateTimeField(null=True, blank=True, verbose_name="置顶时间")
+    is_muted = models.BooleanField(default=False, verbose_name="消息免打扰")
+    is_archived = models.BooleanField(default=False, verbose_name="已归档")
+    archived_at = models.DateTimeField(null=True, blank=True, verbose_name="归档时间")
+    force_unread = models.BooleanField(default=False, verbose_name="手动标记未读")
+    cleared_before = models.DateTimeField(null=True, blank=True, verbose_name="清空时间")
+
+    class Meta:
+        verbose_name = "私信群组成员"
+        verbose_name_plural = "私信群组成员"
+        unique_together = ('group', 'user')
+        indexes = [
+            models.Index(fields=['user', 'is_archived']),
+            models.Index(fields=['group', 'left_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} @ {self.group.name}"
+
+    @property
+    def is_active(self):
+        return self.left_at is None and self.group.is_active
+
+
+class GroupMessage(models.Model):
+    """群组消息。独立于一对一 Message，避免继承阅后即焚语义。"""
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='messages', verbose_name="群组"
+    )
+    sender = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='sent_group_messages', verbose_name="发送者"
+    )
+    content = models.TextField(verbose_name="消息内容")
+    searchable_text = models.TextField(blank=True, default='', verbose_name="搜索文本")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="发送时间")
+    is_edited = models.BooleanField(default=False, verbose_name="已编辑")
+    edited_at = models.DateTimeField(null=True, blank=True, verbose_name="编辑时间")
+    is_recalled = models.BooleanField(default=False, verbose_name="已撤回")
+    recalled_at = models.DateTimeField(null=True, blank=True, verbose_name="撤回时间")
+    was_reported = models.BooleanField(default=False, verbose_name="是否曾被举报")
+
+    class Meta:
+        verbose_name = "群组消息"
+        verbose_name_plural = "群组消息"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['sender', '-created_at']),
+            models.Index(fields=['was_reported']),
+        ]
+
+    def __str__(self):
+        return f"{self.sender.username} → {self.group.name}"
+
+
+class GroupMessageDeletion(models.Model):
+    """群组消息对单个成员隐藏。"""
+    message = models.ForeignKey(
+        GroupMessage, on_delete=models.CASCADE, related_name='deletions', verbose_name="群组消息"
+    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+', verbose_name="用户")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="删除时间")
+
+    class Meta:
+        verbose_name = "群组消息删除记录"
+        verbose_name_plural = "群组消息删除记录"
+        unique_together = ('message', 'user')
+        indexes = [
+            models.Index(fields=['user', 'message']),
+        ]
+
+
 class MessageReport(models.Model):
     """举报记录"""
     REASON_CHOICES = [
@@ -1482,6 +1808,8 @@ class MessageReport(models.Model):
         ('abuse', '辱骂骚扰'),
         ('porn', '色情低俗'),
         ('scam', '诈骗欺诈'),
+        ('privacy', '侵犯隐私'),
+        ('illegal', '违法违规'),
         ('other', '其他'),
     ]
     STATUS_CHOICES = [
@@ -1502,8 +1830,13 @@ class MessageReport(models.Model):
         Message, null=True, blank=True, on_delete=models.SET_NULL,
         related_name='reports', verbose_name="关联消息"
     )
+    group_message = models.ForeignKey(
+        GroupMessage, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='reports', verbose_name="关联群组消息"
+    )
     reason = models.CharField(max_length=20, choices=REASON_CHOICES, verbose_name="原因")
     detail = models.TextField(blank=True, max_length=1000, verbose_name="补充说明")
+    evidence_snapshot = models.JSONField(default=dict, blank=True, verbose_name="举报证据快照")
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="处理状态"
     )
@@ -1536,11 +1869,15 @@ class UserSanction(models.Model):
     """
     SANCTION_TYPE_CHOICES = [
         ('mute_messages', '禁言私信'),
+        ('ban_comments', '禁止评论'),
+        ('ban_public_notes', '禁止发布公开文章'),
         ('ban_login', '封禁登录'),
     ]
     REPORT_TYPE_CHOICES = [
         ('message', '私信举报'),
         ('attachment', '附件举报'),
+        ('note', '文章举报'),
+        ('comment', '评论举报'),
     ]
 
     user = models.ForeignKey(
@@ -1613,6 +1950,14 @@ class UserSanction(models.Model):
         return cls.active_for(user, 'mute_messages')
 
     @classmethod
+    def is_comment_banned(cls, user):
+        return cls.active_for(user, 'ban_comments')
+
+    @classmethod
+    def is_public_note_banned(cls, user):
+        return cls.active_for(user, 'ban_public_notes')
+
+    @classmethod
     def is_login_banned(cls, user):
         return cls.active_for(user, 'ban_login')
 
@@ -1622,6 +1967,8 @@ class ModerationLog(models.Model):
     REPORT_TYPE_CHOICES = [
         ('message', '私信举报'),
         ('attachment', '附件举报'),
+        ('note', '文章举报'),
+        ('comment', '评论举报'),
     ]
 
     report_type = models.CharField(
@@ -1651,6 +1998,96 @@ class ModerationLog(models.Model):
 
     def __str__(self):
         return f"{self.report_type}#{self.report_id} - {self.action}"
+
+
+class UserNotification(models.Model):
+    """Lightweight in-app notification record."""
+    KIND_CHOICES = [
+        ('report_received', '举报已收到'),
+        ('report_resolved', '举报已处理'),
+        ('sanction_applied', '用户处置'),
+        ('sanction_revoked', '处置解除'),
+        ('appeal_submitted', '申诉已提交'),
+        ('appeal_resolved', '申诉已处理'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name="接收用户")
+    kind = models.CharField(max_length=40, choices=KIND_CHOICES, verbose_name="通知类型")
+    title = models.CharField(max_length=120, verbose_name="标题")
+    body = models.TextField(blank=True, verbose_name="内容")
+    data = models.JSONField(default=dict, blank=True, verbose_name="附加数据")
+    is_read = models.BooleanField(default=False, verbose_name="是否已读")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "用户通知"
+        verbose_name_plural = "用户通知"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read', '-created_at'], name='unotify_user_read_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.title}"
+
+
+class ModerationAppeal(models.Model):
+    """Appeal submitted by a sanctioned user."""
+    STATUS_CHOICES = [
+        ('pending', '待处理'),
+        ('accepted', '申诉通过'),
+        ('rejected', '申诉驳回'),
+    ]
+
+    sanction = models.ForeignKey(UserSanction, on_delete=models.CASCADE, related_name='appeals', verbose_name="关联处置")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='moderation_appeals', verbose_name="申诉用户")
+    reason = models.TextField(max_length=2000, verbose_name="申诉理由")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="处理状态")
+    handled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+', verbose_name="处理人")
+    resolution_note = models.TextField(blank=True, verbose_name="处理备注")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="提交时间")
+    handled_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+
+    class Meta:
+        verbose_name = "处置申诉"
+        verbose_name_plural = "处置申诉"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at'], name='mappeal_status_idx'),
+            models.Index(fields=['user', '-created_at'], name='mappeal_user_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} appeal sanction #{self.sanction_id}"
+
+
+class ModerationTemplate(models.Model):
+    """Reusable moderator note template."""
+    DECISION_CHOICES = [
+        ('uphold', '举报成立'),
+        ('dismiss', '驳回举报'),
+        ('manual', '重新处置'),
+        ('appeal', '申诉处理'),
+    ]
+
+    title = models.CharField(max_length=80, verbose_name="模板名称")
+    report_type = models.CharField(max_length=20, choices=ModerationLog.REPORT_TYPE_CHOICES, blank=True, verbose_name="适用举报类型")
+    decision = models.CharField(max_length=20, choices=DECISION_CHOICES, blank=True, verbose_name="适用场景")
+    content = models.TextField(max_length=2000, verbose_name="模板内容")
+    is_active = models.BooleanField(default=True, verbose_name="是否启用")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "处置模板"
+        verbose_name_plural = "处置模板"
+        ordering = ['report_type', 'decision', 'title']
+        indexes = [
+            models.Index(fields=['is_active', 'report_type', 'decision'], name='mtemplate_lookup_idx'),
+        ]
+
+    def __str__(self):
+        return self.title
 
 
 @receiver(post_save, sender=User)

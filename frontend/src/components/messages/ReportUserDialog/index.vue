@@ -62,6 +62,7 @@ const props = defineProps({
   targetUserId: { type: Number, required: true },
   targetUsername: { type: String, default: '' },
   messageId: { type: Number, default: null },
+  submitUrl: { type: String, default: '' },
   messageSnippet: { type: String, default: '' },
   csrfToken: { type: String, default: '' },
 })
@@ -83,18 +84,24 @@ const reasons = [
 async function submit() {
   submitting.value = true
   try {
-    const r = await fetch('/api/users/report/', {
+    const body = props.submitUrl
+      ? {
+          reason: selectedReason.value,
+          detail: detail.value.trim(),
+        }
+      : {
+          user_id: props.targetUserId,
+          message_id: props.messageId,
+          reason: selectedReason.value,
+          detail: detail.value.trim(),
+        }
+    const r = await fetch(props.submitUrl || '/api/users/report/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': props.csrfToken,
       },
-      body: JSON.stringify({
-        user_id: props.targetUserId,
-        message_id: props.messageId,
-        reason: selectedReason.value,
-        detail: detail.value.trim(),
-      }),
+      body: JSON.stringify(body),
     })
     const d = await r.json().catch(() => ({}))
     if (r.ok) {

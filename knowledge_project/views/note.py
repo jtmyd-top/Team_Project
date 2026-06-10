@@ -26,6 +26,7 @@ from ..models import (
     NoteComment,
     Profile,
     ProfileLike,
+    UserSanction,
     auto_generate_tags_for_note,
 )
 from ..utils.misc import get_sidebar_cache_key, log_action
@@ -135,6 +136,16 @@ def check_note_secret_operation_permission(note, operation):
         }
         return False, messages.get(operation, f'保密柜的筆記無法執行 {operation} 操作。')
     return True, None
+
+
+def check_public_note_publish_permission(user):
+    sanction = UserSanction.is_public_note_banned(user)
+    if sanction is None:
+        return True, None
+    if sanction.expires_at is None:
+        return False, '你已被禁止发布公开文章。'
+    expire_str = timezone.localtime(sanction.expires_at).strftime('%Y-%m-%d %H:%M')
+    return False, f'你已被禁止发布公开文章，限制将于 {expire_str} 解除。'
 
 
 def _coerce_non_negative_int(value):
@@ -667,6 +678,10 @@ def note_detail_api(request, note_id):
 
         try:
             # 【新增】安全檢查：防止保密柜筆記發布為公開
+            if 'is_public' in data and data['is_public']:
+                allowed, error_msg = check_public_note_publish_permission(request.user)
+                if not allowed:
+                    return JsonResponse({'error': error_msg, 'message': error_msg}, status=403)
             if 'is_public' in data and data['is_public'] and note.is_secret:
                 allowed, error_msg = check_note_secret_operation_permission(note, 'publish')
                 if not allowed:
@@ -826,6 +841,12 @@ def create_note_api(request):
         content = data.get('content', '')
         folder_id = data.get('folder_id')
         is_secret = data.get('is_secret', False)  # 添加保密参数
+        is_public = data.get('is_public', False)
+
+        if is_public:
+            allowed, error_msg = check_public_note_publish_permission(user)
+            if not allowed:
+                return JsonResponse({'error': error_msg, 'message': error_msg}, status=403)
 
         # 【安全检查】创建保密笔记时，必须已通过 2FA 验证
         if is_secret:
@@ -858,8 +879,12 @@ def create_note_api(request):
             title=title,
             content=content,
             folder=folder,
-            is_secret=is_secret  # 设置保密标志
+            is_secret=is_secret,  # 设置保密标志
+            is_public=is_public,
         )
+        if new_note.is_public and not new_note.public_id:
+            new_note.public_id = uuid.uuid4()
+            new_note.save(update_fields=['public_id'])
 
         # 清除侧边栏缓存
         try:

@@ -94,9 +94,9 @@
         </div>
         <ConversationItem
           v-for="conv in filteredConversations"
-          :key="conv.user_id"
+          :key="conversationKey(conv)"
           :conv="conv"
-          :active="selectedUserId === conv.user_id"
+          :active="selectedConversationKey === conversationKey(conv)"
           :current-user-id="currentUserId"
           @select="selectConversation"
           @context-menu="onConversationContextMenu"
@@ -107,7 +107,7 @@
     <!-- 右侧：聊天区域 -->
     <main class="chat-area">
       <!-- 未选中会话 -->
-      <div v-if="!selectedUserId || scope === 'blocked'" class="empty-chat-state">
+      <div v-if="!selectedConversationKey || scope === 'blocked'" class="empty-chat-state">
         <i class="fas fa-comments"></i>
         <p v-if="scope === 'blocked'">屏蔽管理模式<br />在左侧管理你已屏蔽的用户</p>
         <p v-else>
@@ -123,16 +123,22 @@
           <button class="mobile-back-btn" @click="closeMobileChat" title="返回">
             <i class="fas fa-arrow-left"></i>
           </button>
-          <div class="chat-user-info" @click="viewPeerProfile">
+          <div class="chat-user-info" @click="isCurrentGroup ? openGroupInfo() : viewPeerProfile()">
             <img :src="selectedConversation?.avatar" :alt="selectedConversation?.username" class="chat-avatar" />
             <div class="chat-user-meta">
               <h2>{{ selectedConversation?.username }}</h2>
-              <span class="chat-subtitle secure-subtitle">
+              <span v-if="!isCurrentGroup" class="chat-subtitle secure-subtitle">
                 <span class="presence-dot" :class="{ offline: !peerOnline }"></span>
                 <span>{{ peerOnline ? '在线' : '离线' }}</span>
                 <span class="secure-chip">
                   <i class="fas fa-lock"></i>
                   安全连接
+                </span>
+              </span>
+              <span v-else class="chat-subtitle secure-subtitle">
+                <span class="secure-chip">
+                  <i class="fas fa-users"></i>
+                  群组会话
                 </span>
               </span>
             </div>
@@ -153,39 +159,64 @@
                 <i class="fas fa-ellipsis-vertical"></i>
               </button>
               <div v-if="showChatMenu" class="dropdown-menu">
-                <button class="dm-item" @click="viewPeerProfile">
+                <button v-if="!isCurrentGroup" class="dm-item" @click="viewPeerProfile">
                   <i class="fas fa-user-circle"></i> 查看资料
                 </button>
-                <button class="dm-item" @click="toggleMarkRead">
+                <button v-if="isCurrentGroup" class="dm-item" @click="openGroupInfo">
+                  <i class="fas fa-users-gear"></i> 群设置
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item" @click="toggleMarkRead">
                   <i class="fas" :class="currentSettings.force_unread || hasUnread ? 'fa-check-double' : 'fa-envelope'"></i>
                   <span v-if="currentSettings.force_unread || hasUnread">标记为已读</span><span v-else>标记为未读</span>
                 </button>
-                <button class="dm-item" @click="togglePin">
+                <button v-if="isCurrentGroup" class="dm-item" @click="toggleGroupMarkRead">
+                  <i class="fas" :class="currentSettings.force_unread || hasUnread ? 'fa-check-double' : 'fa-envelope'"></i>
+                  <span v-if="currentSettings.force_unread || hasUnread">标记为已读</span><span v-else>标记为未读</span>
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item" @click="togglePin">
                   <i class="fas fa-thumbtack" :class="{ active: currentSettings.is_pinned }"></i>
                   {{ currentSettings.is_pinned ? '取消置顶' : '置顶会话' }}
                 </button>
-                <button class="dm-item" @click="toggleMute">
+                <button v-if="isCurrentGroup" class="dm-item" @click="toggleGroupPin">
+                  <i class="fas fa-thumbtack" :class="{ active: currentSettings.is_pinned }"></i>
+                  {{ currentSettings.is_pinned ? '取消置顶' : '置顶会话' }}
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item" @click="toggleMute">
                   <i class="fas" :class="currentSettings.is_muted ? 'fa-bell' : 'fa-bell-slash'"></i>
                   {{ currentSettings.is_muted ? '取消免打扰' : '消息免打扰' }}
                 </button>
-                <button class="dm-item" @click="openDisappearing">
+                <button v-if="isCurrentGroup" class="dm-item" @click="toggleGroupMute">
+                  <i class="fas" :class="currentSettings.is_muted ? 'fa-bell' : 'fa-bell-slash'"></i>
+                  {{ currentSettings.is_muted ? '取消免打扰' : '消息免打扰' }}
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item" @click="openDisappearing">
                   <i class="fas fa-fire-alt"></i> 阅后即焚
                 </button>
-                <button class="dm-item" @click="toggleArchive">
+                <button v-if="!isCurrentGroup" class="dm-item" @click="toggleArchive">
                   <i class="fas" :class="currentSettings.is_archived ? 'fa-inbox' : 'fa-box-archive'"></i>
                   {{ currentSettings.is_archived ? '取消归档' : '归档会话' }}
                 </button>
-                <button class="dm-item" @click="exportChat">
+                <button v-if="isCurrentGroup" class="dm-item" @click="toggleGroupArchive">
+                  <i class="fas" :class="currentSettings.is_archived ? 'fa-inbox' : 'fa-box-archive'"></i>
+                  {{ currentSettings.is_archived ? '取消归档' : '归档会话' }}
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item" @click="exportChat">
                   <i class="fas fa-download"></i> 导出聊天记录
                 </button>
                 <div class="dm-sep"></div>
-                <button class="dm-item danger" @click="clearConversation">
+                <button v-if="!isCurrentGroup" class="dm-item danger" @click="clearConversation">
                   <i class="fas fa-eraser"></i> 清空聊天记录
                 </button>
-                <button class="dm-item danger" @click="blockPeer">
+                <button v-if="isCurrentGroup" class="dm-item danger" @click="clearGroupConversation">
+                  <i class="fas fa-eraser"></i> 清空聊天记录
+                </button>
+                <button v-if="isCurrentGroup" class="dm-item danger" @click="leaveCurrentGroup">
+                  <i class="fas fa-right-from-bracket"></i> 退出群组
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item danger" @click="blockPeer">
                   <i class="fas fa-ban"></i> 拉黑用户
                 </button>
-                <button class="dm-item danger" @click="reportPeer">
+                <button v-if="!isCurrentGroup" class="dm-item danger" @click="reportPeer">
                   <i class="fas fa-flag"></i> 举报
                 </button>
               </div>
@@ -194,7 +225,7 @@
         </header>
 
         <!-- 阅后即焚提示条 -->
-        <div v-if="currentSettings.disappearing_enabled" class="disappearing-banner">
+        <div v-if="!isCurrentGroup && currentSettings.disappearing_enabled" class="disappearing-banner">
           <i class="fas fa-fire-alt"></i>
           已开启阅后即焚 · {{ formatTtl(currentSettings.disappearing_ttl_seconds) }}内消息将自动销毁        </div>
 
@@ -353,17 +384,17 @@
             <button
               class="tool-btn"
               :class="{ recording: isRecordingVoice }"
-              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
+              :disabled="isCurrentGroup || isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
               @click="toggleVoiceRecording"
-              :title="isRecordingVoice ? '停止录音' : '语音消息'"
+              :title="isCurrentGroup ? '群组暂不支持语音' : (isRecordingVoice ? '停止录音' : '语音消息')"
             >
               <i :class="isRecordingVoice ? 'fas fa-stop' : 'fas fa-microphone'"></i>
             </button>
             <button
               class="tool-btn"
-              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
+              :disabled="isCurrentGroup || isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
               @click="openFilePicker"
-              title="添加图片或文件"
+              :title="isCurrentGroup ? '群组暂不支持附件' : '添加图片或文件'"
             >
               <i v-if="!isUploadingAttachment" class="fas fa-paperclip"></i>
               <i v-else class="fas fa-spinner fa-spin"></i>
@@ -453,6 +484,13 @@
       <button class="dm-item" @click="messageCtxAction('copy')">
         <i class="fas fa-copy"></i> 复制
       </button>
+      <button
+        v-if="isCurrentGroup && messageCtxMenu.msg?.is_own"
+        class="dm-item"
+        @click="messageCtxAction('edit')"
+      >
+        <i class="fas fa-pen"></i> 编辑
+      </button>
       <button class="dm-item" @click="messageCtxAction('report')">
         <i class="fas fa-flag"></i> 举报
       </button>
@@ -473,10 +511,11 @@
       v-if="showNewMessageDialog"
       @close="closeNewMessageDialog"
       @select="startNewConversation"
+      @group-created="startGroupConversation"
     />
 
     <ChatSearchDrawer
-      v-if="showChatSearch && selectedUserId"
+      v-if="showChatSearch && selectedUserId && !isCurrentGroup"
       :peer-id="selectedUserId"
       @close="showChatSearch = false"
       @jump="jumpToMessage"
@@ -487,6 +526,7 @@
       :target-user-id="reportTarget.userId"
       :target-username="reportTarget.username"
       :message-id="reportTarget.messageId"
+      :submit-url="reportTarget.submitUrl || ''"
       :message-snippet="reportTarget.snippet"
       :csrf-token="csrfToken"
       @close="reportTarget = null"
@@ -499,6 +539,100 @@
       :current-user-name="currentUserName()"
       @close="closeMergedForwardDialog"
     />
+
+    <div v-if="groupPanel.visible" class="group-panel-overlay" @click.self="closeGroupInfo">
+      <section class="group-panel">
+        <header class="group-panel-header">
+          <div>
+            <h3>群设置</h3>
+            <p>{{ groupPanel.detail?.member_count || 0 }} 名成员</p>
+          </div>
+          <button class="close-btn" type="button" title="关闭" @click="closeGroupInfo">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+
+        <div v-if="groupPanel.loading" class="group-panel-state">
+          <i class="fas fa-spinner fa-spin"></i>
+          加载中...
+        </div>
+
+        <template v-else-if="groupPanel.detail">
+          <div class="group-edit-row">
+            <input
+              v-model="groupPanel.nameDraft"
+              class="group-input"
+              type="text"
+              maxlength="80"
+              :disabled="!canManageCurrentGroup"
+            />
+            <button class="group-primary-btn" :disabled="!canManageCurrentGroup || !groupPanel.nameDraft.trim()" @click="saveGroupName">
+              保存
+            </button>
+          </div>
+
+          <div v-if="canManageCurrentGroup" class="group-add-box">
+            <div class="group-add-search">
+              <input
+                v-model="groupPanel.searchInput"
+                class="group-input"
+                type="text"
+                placeholder="搜索完整用户名 / 邮箱 / 搜索码"
+                @keydown.enter.prevent="searchGroupInviteUser"
+              />
+              <button class="group-secondary-btn" :disabled="groupPanel.searchInput.trim().length < 3 || groupPanel.searching" @click="searchGroupInviteUser">
+                <i :class="groupPanel.searching ? 'fas fa-spinner fa-spin' : 'fas fa-search'"></i>
+              </button>
+            </div>
+            <button
+              v-if="groupPanel.searchResult"
+              class="group-member-row invite"
+              type="button"
+              @click="addGroupMember(groupPanel.searchResult)"
+            >
+              <img :src="groupPanel.searchResult.avatar" :alt="groupPanel.searchResult.username" />
+              <span>{{ groupPanel.searchResult.username }}</span>
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+
+          <div class="group-members">
+            <div
+              v-for="member in groupPanel.detail.members"
+              :key="member.user_id"
+              class="group-member-row"
+            >
+              <img :src="member.avatar" :alt="member.username" />
+              <div class="group-member-meta">
+                <strong>{{ member.username }}</strong>
+                <span>{{ roleLabel(member.role) }}<template v-if="member.is_self"> · 我</template></span>
+              </div>
+              <button
+                v-if="canRemoveGroupMember(member)"
+                class="group-icon-btn danger"
+                title="移出群组"
+                @click="removeGroupMember(member)"
+              >
+                <i class="fas fa-user-minus"></i>
+              </button>
+            </div>
+          </div>
+
+          <footer class="group-panel-footer">
+            <button class="group-secondary-btn" @click="toggleGroupMute">
+              <i class="fas" :class="currentSettings.is_muted ? 'fa-bell' : 'fa-bell-slash'"></i>
+              {{ currentSettings.is_muted ? '取消免打扰' : '消息免打扰' }}
+            </button>
+            <button v-if="groupPanel.detail.viewer_role !== 'owner'" class="group-danger-btn" @click="leaveCurrentGroup">
+              退出群组
+            </button>
+            <button v-else class="group-danger-btn" @click="dissolveCurrentGroup">
+              解散群组
+            </button>
+          </footer>
+        </template>
+      </section>
+    </div>
 
     <div v-if="peerProfile.visible" class="profile-card-overlay" @click.self="closePeerProfile">
       <section class="profile-card-modal">
@@ -569,7 +703,7 @@
     </div>
 
     <DisappearingSettingDialog
-      v-if="showDisappearingDialog && selectedUserId"
+      v-if="showDisappearingDialog && selectedUserId && !isCurrentGroup"
       :peer-id="selectedUserId"
       :initial-enabled="currentSettings.disappearing_enabled"
       :initial-ttl="currentSettings.disappearing_ttl_seconds"
@@ -642,6 +776,7 @@ const scope = ref('all')
 const conversations = ref([])
 const loadingConversations = ref(false)
 const selectedUserId = ref(null)
+const selectedConversationKey = ref(null)
 const messages = ref([])
 const loadingMessages = ref(false)
 const currentSettings = ref({
@@ -666,6 +801,15 @@ const showChatSearch = ref(false)
 const showDisappearingDialog = ref(false)
 const reportTarget = ref(null)
 const mergedForwardDialog = ref({ visible: false, payload: null })
+const groupPanel = ref({
+  visible: false,
+  loading: false,
+  detail: null,
+  nameDraft: '',
+  searchInput: '',
+  searchResult: null,
+  searching: false,
+})
 const ctxMenu = ref({ visible: false, x: 0, y: 0, conv: null })
 const messageCtxMenu = ref({ visible: false, x: 0, y: 0, msg: null })
 const selectionMode = ref(false)
@@ -734,14 +878,19 @@ const emojiChoices = [
 
 // ==== 璁＄畻灞炴€?====
 const selectedConversation = computed(() => {
-  const currentId = normalizeUserId(selectedUserId.value)
-  return findConversationByUserId(currentId)
+  return findConversationByKey(selectedConversationKey.value)
 })
 // 后端可选增强字段：
 // 1) selectedConversation.peer_online: Boolean 对方在线状态（无该字段时前端默认展示在线）
 // 2) message.reply_to_id / reply_preview: 若要持久化引用关系，后端需返回并保存这些字段
 // 3) message.is_read / message.read_at: 渲染消息底部已读状态（双勾）与已读时间
 const peerOnline = computed(() => selectedConversation.value?.peer_online ?? true)
+
+const isCurrentGroup = computed(() => selectedConversation.value?.conversation_type === 'group')
+
+const canManageCurrentGroup = computed(() =>
+  ['owner', 'admin'].includes(groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '')
+)
 
 const peerBlockedByMe = computed(() => !!selectedConversation.value?.is_blocked)
 
@@ -825,8 +974,7 @@ function persistDrafts() {
 }
 
 function currentDraftKey() {
-  const peerId = normalizeUserId(selectedUserId.value)
-  return peerId ? String(peerId) : ''
+  return selectedConversationKey.value || ''
 }
 
 function saveCurrentDraft() {
@@ -841,13 +989,13 @@ function saveCurrentDraft() {
 }
 
 function applyDraftForConversation(peerId) {
-  const key = String(normalizeUserId(peerId) || '')
+  const key = typeof peerId === 'string' ? peerId : String(normalizeUserId(peerId) || '')
   newMessage.value = key ? (conversationDrafts.value[key] || '') : ''
   nextTick(autoGrowComposer)
 }
 
 function clearDraftForConversation(peerId) {
-  const key = String(normalizeUserId(peerId) || '')
+  const key = typeof peerId === 'string' ? peerId : String(normalizeUserId(peerId) || '')
   if (!key || !(key in conversationDrafts.value)) return
   const next = { ...conversationDrafts.value }
   delete next[key]
@@ -860,9 +1008,30 @@ function normalizeUserId(value) {
   return Number.isFinite(normalized) && normalized > 0 ? normalized : null
 }
 
+function conversationKey(conv) {
+  if (!conv) return ''
+  if (conv.conversation_type === 'group') return `group:${conv.group_id}`
+  const userId = normalizeUserId(conv.user_id)
+  return userId ? `user:${userId}` : ''
+}
+
+function groupIdFromKey(key) {
+  const match = String(key || '').match(/^group:(\d+)$/)
+  return match ? Number(match[1]) : null
+}
+
+function selectedGroupId() {
+  return groupIdFromKey(selectedConversationKey.value)
+}
+
 function findConversationByUserId(userId) {
   const normalizedUserId = normalizeUserId(userId)
   return conversations.value.find((c) => normalizeUserId(c.user_id) === normalizedUserId)
+}
+
+function findConversationByKey(key) {
+  if (!key) return null
+  return conversations.value.find((c) => conversationKey(c) === key) || null
 }
 
 function conversationVersion(conv) {
@@ -877,7 +1046,7 @@ function conversationVersion(conv) {
 
 function applyDraftPreviews() {
   for (const conv of conversations.value) {
-    const draft = conversationDrafts.value[String(normalizeUserId(conv.user_id) || '')]
+    const draft = conversationDrafts.value[conversationKey(conv)]
     conv.draft_preview = draft || ''
   }
 }
@@ -895,6 +1064,9 @@ function resolveRealtimePeerId(event, message) {
 }
 
 function eventBelongsToSelectedConversation(event, message) {
+  if (selectedConversationKey.value?.startsWith('group:')) {
+    return normalizeUserId(event?.group_id || message?.group_id) === selectedGroupId()
+  }
   const selectedId = normalizeUserId(selectedUserId.value)
   if (!selectedId) return false
   return [
@@ -1087,15 +1259,15 @@ function initRealtimeMessages() {
 
 function syncConversations(nextConversations, { preserveOrder = false } = {}) {
   const existingByUserId = new Map(
-    conversations.value.map((conversation) => [normalizeUserId(conversation.user_id), conversation])
+    conversations.value.map((conversation) => [conversationKey(conversation), conversation])
   )
   if (preserveOrder) {
     const nextByUserId = new Map(
-      nextConversations.map((conversation) => [normalizeUserId(conversation.user_id), conversation])
+      nextConversations.map((conversation) => [conversationKey(conversation), conversation])
     )
     const merged = conversations.value
       .map((existing) => {
-        const nextConversation = nextByUserId.get(normalizeUserId(existing.user_id))
+        const nextConversation = nextByUserId.get(conversationKey(existing))
         if (!nextConversation) return existing
         for (const key of Object.keys(existing)) {
           if (!(key in nextConversation)) delete existing[key]
@@ -1103,10 +1275,10 @@ function syncConversations(nextConversations, { preserveOrder = false } = {}) {
         Object.assign(existing, nextConversation)
         return existing
       })
-      .filter((conversation) => nextByUserId.has(normalizeUserId(conversation.user_id)))
+      .filter((conversation) => nextByUserId.has(conversationKey(conversation)))
 
     for (const nextConversation of nextConversations) {
-      if (!existingByUserId.has(normalizeUserId(nextConversation.user_id))) {
+      if (!existingByUserId.has(conversationKey(nextConversation))) {
         merged.push(nextConversation)
       }
     }
@@ -1116,7 +1288,7 @@ function syncConversations(nextConversations, { preserveOrder = false } = {}) {
   }
 
   const merged = nextConversations.map((nextConversation) => {
-    const existing = existingByUserId.get(normalizeUserId(nextConversation.user_id))
+    const existing = existingByUserId.get(conversationKey(nextConversation))
     if (!existing) return nextConversation
     for (const key of Object.keys(existing)) {
       if (!(key in nextConversation)) delete existing[key]
@@ -1138,7 +1310,7 @@ let notificationSnapshot = new Map()
 function updateBrowserNotificationSnapshot(nextConversations) {
   const nextSnapshot = new Map()
   for (const conv of nextConversations) {
-    nextSnapshot.set(conv.user_id, conversationTimestamp(conv))
+    nextSnapshot.set(conversationKey(conv), conversationTimestamp(conv))
   }
 
   if (!notificationSnapshotReady) {
@@ -1155,11 +1327,12 @@ function updateBrowserNotificationSnapshot(nextConversations) {
 
   if (canNotify) {
     for (const conv of nextConversations) {
-      const latestTs = nextSnapshot.get(conv.user_id) || 0
-      const previousTs = notificationSnapshot.get(conv.user_id) || 0
+      const key = conversationKey(conv)
+      const latestTs = nextSnapshot.get(key) || 0
+      const previousTs = notificationSnapshot.get(key) || 0
       const isIncoming = conv.last_sender_id && conv.last_sender_id !== currentUserId.value
       const hasUnread = (conv.unread_count || 0) > 0
-      const isCurrentVisibleConversation = selectedUserId.value === conv.user_id && !document.hidden
+      const isCurrentVisibleConversation = selectedConversationKey.value === key && !document.hidden
 
       if (
         latestTs > previousTs &&
@@ -1178,17 +1351,19 @@ function updateBrowserNotificationSnapshot(nextConversations) {
 
 function showBrowserMessageNotification(conv) {
   const preview = String(conv.last_message || '').replace(/\s+/g, ' ').slice(0, 120)
+  const key = conversationKey(conv)
   try {
     const notification = new Notification(`来自 ${conv.username} 的新私信`, {
       body: preview || '你收到了一条新消息',
       icon: conv.avatar || '/static/img/default-avatar.png',
-      tag: `dm-${conv.user_id}`,
+      tag: `dm-${key}`,
       renotify: true,
     })
     notification.onclick = () => {
       window.focus()
       scope.value = 'all'
-      selectedUserId.value = conv.user_id
+      selectedConversationKey.value = key
+      selectedUserId.value = conv.conversation_type === 'group' ? null : conv.user_id
       mobileChatOpen.value = true
       loadMessages()
       loadConversations()
@@ -1220,8 +1395,9 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
   if (!silent) loadingConversations.value = true
   try {
     const selectedId = normalizeUserId(selectedUserId.value)
-    const previousSelectedVersion = selectedId
-      ? conversationVersion(findConversationByUserId(selectedId))
+    const selectedKey = selectedConversationKey.value
+    const previousSelectedVersion = selectedKey
+      ? conversationVersion(findConversationByKey(selectedKey))
       : ''
     const r = await fetch(`/api/messages/conversations/?scope=${scope.value}`)
     if (r.ok) {
@@ -1230,10 +1406,10 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
       updateBrowserNotificationSnapshot(nextConversations)
       syncConversations(nextConversations, { preserveOrder })
       applyDraftPreviews()
-      const currentSelected = selectedId ? findConversationByUserId(selectedId) : null
+      const currentSelected = selectedKey ? findConversationByKey(selectedKey) : null
       const nextSelectedVersion = conversationVersion(currentSelected)
       if (
-        selectedId &&
+        selectedKey &&
         currentSelected &&
         previousSelectedVersion &&
         nextSelectedVersion &&
@@ -1252,10 +1428,14 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
 }
 
 async function loadMessages({ silent = false } = {}) {
-  if (!selectedUserId.value) return
+  if (!selectedConversationKey.value) return
   if (!silent) loadingMessages.value = true
   try {
-    const r = await fetch(`/api/messages/get/?user_id=${selectedUserId.value}`)
+    const groupId = selectedGroupId()
+    const url = groupId
+      ? `/api/messages/groups/${groupId}/messages/`
+      : `/api/messages/get/?user_id=${selectedUserId.value}`
+    const r = await fetch(url)
     if (r.ok) {
       const d = await r.json()
       messages.value = (d.messages || []).map(normalizeIncomingMessage)
@@ -1279,11 +1459,12 @@ function selectConversation(conv) {
     return
   }
   saveCurrentDraft()
-  selectedUserId.value = conv.user_id
+  selectedConversationKey.value = conversationKey(conv)
+  selectedUserId.value = conv.conversation_type === 'group' ? null : conv.user_id
   hideTypingIndicator()
   selectionMode.value = false
   clearSelectedMessages()
-  applyDraftForConversation(conv.user_id)
+  applyDraftForConversation(selectedConversationKey.value)
   pendingAttachments.value = []
   showEmojiPicker.value = false
   forwardDraft.value = null
@@ -1296,7 +1477,7 @@ function selectConversation(conv) {
 }
 
 async function sendMessage(turnstileToken = '') {
-  if ((!newMessage.value.trim() && pendingAttachments.value.length === 0) || !selectedUserId.value) return
+  if ((!newMessage.value.trim() && pendingAttachments.value.length === 0) || !selectedConversationKey.value) return
   // 用户提交消息后，立即让对方屏幕清除"正在输入"提示，不必等 2s timeout
   sendTypingStop()
   composerWasNotEmpty = false
@@ -1307,6 +1488,29 @@ async function sendMessage(turnstileToken = '') {
     ? buildQuotedMessage(replyDraft.value, newMessage.value.trim())
     : newMessage.value.trim()
   try {
+    const groupId = selectedGroupId()
+    if (groupId) {
+      if (pendingAttachments.value.length > 0) {
+        ElMessage.warning('群组暂不支持附件消息')
+        return
+      }
+      const d = await apiPost(`/api/messages/groups/${groupId}/send/`, { content: finalContent })
+      const sentMessage = normalizeIncomingMessage(d.message)
+      if (!messages.value.some((message) => message.id === sentMessage.id)) {
+        messages.value.push(sentMessage)
+      }
+      clearDraftForConversation(selectedConversationKey.value)
+      newMessage.value = ''
+      applyDraftPreviews()
+      showEmojiPicker.value = false
+      replyDraft.value = null
+      forwardDraft.value = null
+      resetComposerHeight()
+      await nextTick()
+      scrollToBottomSoon()
+      loadConversations({ silent: true, preserveOrder: true })
+      return
+    }
     if (forwardDraft.value?.sourceMessageId && attachmentIds.length === 0) {
       const forwardedMessage = await sendForwardedMessage(
         forwardDraft.value.sourceMessageId,
@@ -1579,6 +1783,10 @@ function formatForwardTime(iso) {
 }
 
 function openFilePicker() {
+  if (isCurrentGroup.value) {
+    ElMessage.info('群组暂不支持附件消息')
+    return
+  }
   if (isUploadingAttachment.value || pendingAttachments.value.length >= maxPendingAttachments) return
   fileInputRef.value?.click()
 }
@@ -1673,6 +1881,10 @@ function getSupportedVoiceMimeType() {
 }
 
 async function toggleVoiceRecording() {
+  if (isCurrentGroup.value) {
+    ElMessage.info('群组暂不支持语音消息')
+    return
+  }
   if (isRecordingVoice.value) {
     stopVoiceRecording()
     return
@@ -1754,7 +1966,7 @@ function openNewMessageDialog() {
 
 function closeNewMessageDialog() {
   showNewMessageDialog.value = false
-  if (forwardDraft.value?.autoSendChatlog || !selectedUserId.value || !newMessage.value) {
+  if (forwardDraft.value?.autoSendChatlog || !selectedConversationKey.value || !newMessage.value) {
     forwardDraft.value = null
   }
 }
@@ -1816,7 +2028,7 @@ function onComposerInput() {
 }
 
 function scheduleTypingNotice() {
-  if (!selectedUserId.value || !newMessage.value.trim()) return
+  if (isCurrentGroup.value || !selectedUserId.value || !newMessage.value.trim()) return
   // 节流：同一会话内 1.4s 最多向后端发一次 typing 事件
   if (typingThrottleTimer) return
   typingThrottleTimer = window.setTimeout(() => {
@@ -1829,7 +2041,7 @@ function scheduleTypingNotice() {
 }
 
 function sendTypingStop() {
-  if (!selectedUserId.value) return
+  if (isCurrentGroup.value || !selectedUserId.value) return
   // 立即清除节流定时器，确保下一次 typing 事件不会被吞
   if (typingThrottleTimer) {
     clearTimeout(typingThrottleTimer)
@@ -1864,6 +2076,7 @@ async function startNewConversation(userId) {
   }
   saveCurrentDraft()
   selectedUserId.value = userId
+  selectedConversationKey.value = `user:${userId}`
   hideTypingIndicator()
   selectionMode.value = false
   clearSelectedMessages()
@@ -1878,6 +2091,31 @@ async function startNewConversation(userId) {
   mobileChatOpen.value = true
   loadMessages()
   loadConversations()
+  nextTick(() => {
+    inputRef.value?.focus()
+    autoGrowComposer()
+  })
+}
+
+async function startGroupConversation(group) {
+  showNewMessageDialog.value = false
+  scope.value = 'all'
+  saveCurrentDraft()
+  const groupId = normalizeUserId(group?.id || group?.group_id)
+  if (!groupId) return
+  selectedUserId.value = null
+  selectedConversationKey.value = `group:${groupId}`
+  hideTypingIndicator()
+  selectionMode.value = false
+  clearSelectedMessages()
+  applyDraftForConversation(selectedConversationKey.value)
+  pendingAttachments.value = []
+  showEmojiPicker.value = false
+  replyDraft.value = null
+  forwardDraft.value = null
+  mobileChatOpen.value = true
+  await loadConversations()
+  loadMessages()
   nextTick(() => {
     inputRef.value?.focus()
     autoGrowComposer()
@@ -1945,6 +2183,7 @@ function highlightText(text, q) {
 function switchScope(s) {
   scope.value = s
   selectedUserId.value = null
+  selectedConversationKey.value = null
   closeMessageCtxMenu()
   mobileChatOpen.value = false
   loadConversations()
@@ -1986,6 +2225,7 @@ function searchResultText(result) {
 async function jumpToResult(r) {
   clearGlobalSearch()
   selectedUserId.value = r.peer_id
+  selectedConversationKey.value = `user:${r.peer_id}`
   highlightMessageId.value = r.id
   mobileChatOpen.value = true
   await loadMessages()
@@ -2053,7 +2293,11 @@ async function deleteSingleMessage(message) {
   }
 
   try {
-    await apiPost(`/api/messages/${message.id}/delete/`, { scope: 'self' })
+    const groupId = selectedGroupId()
+    const url = groupId
+      ? `/api/messages/groups/${groupId}/messages/${message.id}/delete/`
+      : `/api/messages/${message.id}/delete/`
+    await apiPost(url, { scope: 'self' })
     messages.value = messages.value.filter((item) => item.id !== message.id)
     const next = new Set(selectedMessageIds.value)
     next.delete(message.id)
@@ -2080,7 +2324,14 @@ async function deleteSelectedMessages() {
   }
 
   try {
-    await apiPost('/api/messages/bulk-delete/', { message_ids: ids })
+    const groupId = selectedGroupId()
+    if (groupId) {
+      await Promise.all(ids.map((id) =>
+        apiPost(`/api/messages/groups/${groupId}/messages/${id}/delete/`, { scope: 'self' })
+      ))
+    } else {
+      await apiPost('/api/messages/bulk-delete/', { message_ids: ids })
+    }
     messages.value = messages.value.filter((message) => !selectedMessageIds.value.has(message.id))
     clearSelectedMessages()
     selectionMode.value = false
@@ -2127,6 +2378,7 @@ async function sendChatlogForwardToUser(userId, content, turnstileToken = '') {
     const sentMessage = normalizeIncomingMessage(d.message)
     const wasCurrentConversation = normalizeUserId(selectedUserId.value) === normalizeUserId(userId)
     selectedUserId.value = userId
+    selectedConversationKey.value = `user:${userId}`
     mobileChatOpen.value = true
     scope.value = 'all'
     hideTypingIndicator()
@@ -2200,7 +2452,11 @@ async function recallMessage(m) {
     return
   }
   try {
-    await apiPost(`/api/messages/${m.id}/delete/`, { scope: 'both' })
+    const groupId = selectedGroupId()
+    const url = groupId
+      ? `/api/messages/groups/${groupId}/messages/${m.id}/delete/`
+      : `/api/messages/${m.id}/delete/`
+    await apiPost(url, { scope: 'both' })
     messages.value = messages.value.filter((x) => x.id !== m.id)
     loadConversations()
     ElMessage.success('已撤回')
@@ -2209,9 +2465,47 @@ async function recallMessage(m) {
   }
 }
 
+async function editGroupMessage(message) {
+  const groupId = selectedGroupId()
+  if (!groupId || !message?.is_own) return
+  let result
+  try {
+    result = await ElMessageBox.prompt('编辑已发送的群消息', '编辑消息', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputValue: message.content || '',
+      inputValidator: (value) => {
+        const text = String(value || '').trim()
+        if (!text) return '消息内容不能为空'
+        if (text.length > 5000) return '消息内容不能超过 5000 字'
+        return true
+      },
+    })
+  } catch {
+    return
+  }
+
+  const content = String(result?.value || '').trim()
+  if (!content || content === String(message.content || '').trim()) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/messages/${message.id}/edit/`, { content })
+    const edited = normalizeIncomingMessage(d.message)
+    const index = messages.value.findIndex((item) => item.id === edited.id)
+    if (index !== -1) {
+      messages.value[index] = edited
+      messages.value = [...messages.value]
+    }
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('已保存编辑')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
 // ==== 对话顶部菜单动作 ====
 function viewPeerProfile() {
-  if (!selectedUserId.value) return
+  if (isCurrentGroup.value || !selectedUserId.value) return
   showChatMenu.value = false
   const url = `/api/users/${selectedUserId.value}/profile/?_=${Date.now()}`
   peerProfile.value.loading = true
@@ -2376,6 +2670,237 @@ async function clearConversation() {
   }
 }
 
+async function postGroupSetting(action, body = {}) {
+  const groupId = selectedGroupId()
+  if (!groupId) return null
+  const d = await apiPost(`/api/messages/groups/${groupId}/settings/${action}/`, body)
+  if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
+  return d
+}
+
+async function toggleGroupMarkRead() {
+  showChatMenu.value = false
+  const shouldMarkRead = hasUnread.value || currentSettings.value.force_unread
+  try {
+    await postGroupSetting(shouldMarkRead ? 'mark-read' : 'mark-unread')
+    loadConversations()
+    ElMessage.success(shouldMarkRead ? '已标记为已读' : '已标记为未读')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function toggleGroupPin() {
+  showChatMenu.value = false
+  const v = !currentSettings.value.is_pinned
+  try {
+    await postGroupSetting('pin', { value: v })
+    currentSettings.value.is_pinned = v
+    loadConversations()
+    ElMessage.success(v ? '已置顶' : '已取消置顶')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function toggleGroupMute() {
+  showChatMenu.value = false
+  const v = !currentSettings.value.is_muted
+  try {
+    await postGroupSetting('mute', { value: v })
+    currentSettings.value.is_muted = v
+    loadConversations()
+    ElMessage.success(v ? '已开启免打扰' : '已关闭免打扰')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function toggleGroupArchive() {
+  showChatMenu.value = false
+  const v = !currentSettings.value.is_archived
+  try {
+    await postGroupSetting('archive', { value: v })
+    currentSettings.value.is_archived = v
+    loadConversations()
+    ElMessage.success(v ? '已归档' : '已取消归档')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function clearGroupConversation() {
+  showChatMenu.value = false
+  try {
+    await ElMessageBox.confirm(
+      '清空后你将看不到此群组的历史消息（其他成员不受影响），确认清空？',
+      '清空群聊记录',
+      { confirmButtonText: '清空', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await postGroupSetting('clear')
+    messages.value = []
+    loadConversations()
+    ElMessage.success('已清空')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function openGroupInfo() {
+  showChatMenu.value = false
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  groupPanel.value.visible = true
+  groupPanel.value.loading = true
+  groupPanel.value.searchResult = null
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群设置失败'))
+    groupPanel.value.detail = d.group
+    groupPanel.value.nameDraft = d.group?.name || ''
+    if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.loading = false
+  }
+}
+
+function closeGroupInfo() {
+  groupPanel.value.visible = false
+  groupPanel.value.searchInput = ''
+  groupPanel.value.searchResult = null
+}
+
+async function saveGroupName() {
+  const groupId = selectedGroupId()
+  const name = groupPanel.value.nameDraft.trim()
+  if (!groupId || !name) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/`, { name })
+    groupPanel.value.detail = d.group
+    const conv = findConversationByKey(`group:${groupId}`)
+    if (conv) conv.username = name
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('群名称已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function searchGroupInviteUser() {
+  const q = groupPanel.value.searchInput.trim()
+  if (q.length < 3) return
+  groupPanel.value.searching = true
+  groupPanel.value.searchResult = null
+  try {
+    const r = await fetch(`/api/users/search/?q=${encodeURIComponent(q)}`)
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '搜索失败'))
+    const users = d.users || []
+    const currentIds = new Set((groupPanel.value.detail?.members || []).map((member) => member.user_id))
+    groupPanel.value.searchResult = users.find((user) => !currentIds.has(user.id)) || null
+    if (!groupPanel.value.searchResult) ElMessage.info('没有可添加的新成员')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.searching = false
+  }
+}
+
+async function addGroupMember(user) {
+  const groupId = selectedGroupId()
+  if (!groupId || !user?.id) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/members/`, { member_ids: [user.id] })
+    groupPanel.value.detail = d.group
+    groupPanel.value.searchInput = ''
+    groupPanel.value.searchResult = null
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('已添加成员')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+function roleLabel(role) {
+  if (role === 'owner') return '群主'
+  if (role === 'admin') return '管理员'
+  return '成员'
+}
+
+function canRemoveGroupMember(member) {
+  if (!canManageCurrentGroup.value || !member || member.is_self || member.role === 'owner') return false
+  const viewerRole = groupPanel.value.detail?.viewer_role || currentSettings.value.group_role
+  return viewerRole === 'owner' || member.role !== 'admin'
+}
+
+async function removeGroupMember(member) {
+  const groupId = selectedGroupId()
+  if (!groupId || !member?.user_id) return
+  try {
+    await ElMessageBox.confirm(`将 ${member.username} 移出群组？`, '移出成员', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/members/${member.user_id}/`, {})
+    groupPanel.value.detail = d.group
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('已移出成员')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function leaveCurrentGroup() {
+  showChatMenu.value = false
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  try {
+    await ElMessageBox.confirm('退出后将不再收到该群组消息，确认退出？', '退出群组', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await apiPost(`/api/messages/groups/${groupId}/leave/`, {})
+    closeGroupInfo()
+    selectedConversationKey.value = null
+    selectedUserId.value = null
+    messages.value = []
+    loadConversations()
+    ElMessage.success('已退出群组')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function dissolveCurrentGroup() {
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  try {
+    await ElMessageBox.confirm('解散后所有成员都无法继续使用该群组，确认解散？', '解散群组', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await apiPost(`/api/messages/groups/${groupId}/dissolve/`, {})
+    closeGroupInfo()
+    selectedConversationKey.value = null
+    selectedUserId.value = null
+    messages.value = []
+    loadConversations()
+    ElMessage.success('已解散群组')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
 async function blockPeer() {
   showChatMenu.value = false
   try {
@@ -2391,6 +2916,7 @@ async function blockPeer() {
     await apiPost('/api/users/block/', { user_id: selectedUserId.value })
     ElMessage.success('已拉黑')
     selectedUserId.value = null
+    selectedConversationKey.value = null
     mobileChatOpen.value = false
     loadConversations()
   } catch (e) {
@@ -2482,6 +3008,10 @@ async function messageCtxAction(action) {
     await copyMessageContent(msg)
     return
   }
+  if (action === 'edit') {
+    await editGroupMessage(msg)
+    return
+  }
   if (action === 'report') {
     reportMessage(msg)
     return
@@ -2496,6 +3026,16 @@ async function messageCtxAction(action) {
 }
 
 function reportMessage(msg) {
+  if (isCurrentGroup.value) {
+    reportTarget.value = {
+      userId: msg.sender_id,
+      username: msg.sender || selectedConversation.value?.username || '',
+      messageId: msg.id,
+      submitUrl: `/api/messages/groups/${selectedGroupId()}/messages/${msg.id}/report/`,
+      snippet: getReadableMessageText(msg).slice(0, 120),
+    }
+    return
+  }
   const targetUserId = msg.is_own ? msg.recipient_id : msg.sender_id
   const targetUsername = msg.is_own
     ? msg.recipient || selectedConversation.value?.username || ''
@@ -2512,6 +3052,33 @@ async function ctxAction(action) {
   const conv = ctxMenu.value.conv
   closeCtxMenu()
   if (!conv) return
+  if (conv.conversation_type === 'group') {
+    try {
+      const groupId = conv.group_id
+      if (action === 'pin') {
+        await apiPost(`/api/messages/groups/${groupId}/settings/pin/`, { value: !conv.is_pinned })
+      } else if (action === 'mute') {
+        await apiPost(`/api/messages/groups/${groupId}/settings/mute/`, { value: !conv.is_muted })
+      } else if (action === 'archive') {
+        await apiPost(`/api/messages/groups/${groupId}/settings/archive/`, { value: !conv.is_archived })
+      } else if (action === 'mark_read_toggle') {
+        const settingAction = conv.unread_count > 0 || conv.force_unread ? 'mark-read' : 'mark-unread'
+        await apiPost(`/api/messages/groups/${groupId}/settings/${settingAction}/`, {})
+      } else if (action === 'clear') {
+        await ElMessageBox.confirm('清空该群组的聊天记录？', '确认', { type: 'warning' })
+        await apiPost(`/api/messages/groups/${groupId}/settings/clear/`, {})
+        if (selectedConversationKey.value === `group:${groupId}`) messages.value = []
+      } else if (action === 'block') {
+        ElMessage.info('群组不能拉黑，会话内可退出群组')
+        return
+      }
+      ElMessage.success('操作成功')
+      loadConversations()
+    } catch (e) {
+      if (e && e.message) ElMessage.error(e.message)
+    }
+    return
+  }
   try {
     if (action === 'pin') {
       await apiPost('/api/messages/conversation/pin/', {
@@ -2543,7 +3110,10 @@ async function ctxAction(action) {
     } else if (action === 'block') {
       await ElMessageBox.confirm(`拉黑 ${conv.username}？`, '确认', { type: 'warning' })
       await apiPost('/api/users/block/', { user_id: conv.user_id })
-      if (selectedUserId.value === conv.user_id) selectedUserId.value = null
+      if (selectedUserId.value === conv.user_id) {
+        selectedUserId.value = null
+        selectedConversationKey.value = null
+      }
     }
     ElMessage.success('操作成功')
     loadConversations()
@@ -2602,7 +3172,7 @@ function handleVisibilityChange() {
   if (scope.value !== 'blocked') {
     loadConversations({ silent: true })
   }
-  if (selectedUserId.value) {
+  if (selectedConversationKey.value) {
     loadMessages({ silent: true })
   }
   touchMessagesPagePresence()
@@ -2634,7 +3204,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
-watch(selectedUserId, (v) => {
+watch(selectedConversationKey, (v) => {
   if (v) {
     nextTick(() => {
       inputRef.value?.focus()
@@ -3685,6 +4255,207 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.group-panel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.group-panel {
+  width: min(520px, 100%);
+  max-height: min(760px, 88vh);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.group-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.group-panel-header h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.group-panel-header p {
+  margin: 3px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.group-panel-state {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+}
+
+.group-edit-row,
+.group-add-box,
+.group-members,
+.group-panel-footer {
+  padding: 14px 18px;
+}
+
+.group-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.group-add-box {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.group-add-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
+.group-input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.group-input:focus {
+  border-color: var(--primary-color, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 14%, transparent);
+}
+
+.group-primary-btn,
+.group-secondary-btn,
+.group-danger-btn,
+.group-icon-btn {
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  padding: 0 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.group-primary-btn {
+  border-color: var(--primary-color, #2563eb);
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+}
+
+.group-secondary-btn {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.group-danger-btn,
+.group-icon-btn.danger {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+.group-primary-btn:disabled,
+.group-secondary-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.group-members {
+  overflow-y: auto;
+  min-height: 180px;
+  max-height: 360px;
+}
+
+.group-member-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.group-member-row.invite {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+
+.group-member-row img {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.group-member-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.group-member-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.group-member-meta span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.group-icon-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
+.group-panel-footer {
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .typing-indicator {

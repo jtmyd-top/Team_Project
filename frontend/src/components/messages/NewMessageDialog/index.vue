@@ -2,10 +2,50 @@
   <div class="dialog-overlay" @click.self="closeDialog">
     <div class="dialog-content">
       <div class="dialog-header">
-        <h3>开始新的对话</h3>
+        <h3>{{ mode === 'group' ? '创建群组' : '开始新的对话' }}</h3>
         <button class="close-btn" @click="closeDialog">
           <i class="fas fa-times"></i>
         </button>
+      </div>
+
+      <div class="mode-tabs">
+        <button class="mode-tab" :class="{ active: mode === 'direct' }" @click="mode = 'direct'">
+          <i class="fas fa-user"></i>
+          私信
+        </button>
+        <button class="mode-tab" :class="{ active: mode === 'group' }" @click="mode = 'group'">
+          <i class="fas fa-users"></i>
+          群组
+        </button>
+      </div>
+
+      <div v-if="mode === 'group'" class="group-policy">
+        <template v-if="groupPolicy">
+          <div class="policy-line" :class="{ ok: groupPolicy.eligible, blocked: !groupPolicy.eligible }">
+            <i :class="groupPolicy.eligible ? 'fas fa-circle-check' : 'fas fa-circle-info'"></i>
+            <span v-if="groupPolicy.enabled && groupPolicy.eligible">你已满足创建群组条件</span>
+            <span v-else-if="groupPolicy.enabled">创建群组需满足以下任一条件</span>
+            <span v-else>管理员已暂时关闭用户创建群组</span>
+          </div>
+          <div class="policy-progress">
+            <span>公开文章 {{ groupPolicy.stats.public_notes }}/{{ groupPolicy.min_public_notes }}</span>
+            <span>关注者 {{ groupPolicy.stats.followers }}/{{ groupPolicy.min_followers }}</span>
+          </div>
+        </template>
+        <div v-else class="policy-line">
+          <i class="fas fa-spinner fa-spin"></i>
+          加载群组策略...
+        </div>
+      </div>
+
+      <div v-if="mode === 'group'" class="group-name-row">
+        <input
+          v-model="groupName"
+          type="text"
+          class="search-input"
+          placeholder="群组名称"
+          maxlength="80"
+        />
       </div>
 
       <!-- 精准搜索区 -->
@@ -39,7 +79,7 @@
             搜索中...
           </div>
 
-          <div v-else-if="searchResult" class="user-item" @click="selectUser(searchResult)">
+          <div v-else-if="searchResult" class="user-item" @click="handleUserClick(searchResult)">
             <img :src="searchResult.avatar" :alt="searchResult.username" class="user-avatar">
             <div class="user-details">
               <h4>
@@ -50,7 +90,7 @@
               </h4>
               <p v-if="searchResult.bio">{{ searchResult.bio }}</p>
             </div>
-            <i class="fas fa-chevron-right"></i>
+            <i :class="mode === 'group' ? 'fas fa-plus' : 'fas fa-chevron-right'"></i>
           </div>
 
           <div v-else class="empty-search">
@@ -66,13 +106,13 @@
             v-for="user in recentUsers"
             :key="user.id"
             class="user-item"
-            @click="selectUser(user)">
+            @click="handleUserClick(user)">
             <img :src="user.avatar" :alt="user.username" class="user-avatar">
             <div class="user-details">
               <h4>{{ user.username }}</h4>
               <p v-if="user.bio">{{ user.bio }}</p>
             </div>
-            <i class="fas fa-chevron-right"></i>
+            <i :class="mode === 'group' ? 'fas fa-plus' : 'fas fa-chevron-right'"></i>
           </div>
 
           <div v-if="!recentUsers.length" class="empty-search">
@@ -81,15 +121,36 @@
           </div>
         </template>
       </div>
+
+      <div v-if="mode === 'group'" class="group-footer">
+        <div class="selected-members">
+          <span v-if="selectedMembers.length === 0" class="selected-empty">至少选择 1 名成员</span>
+          <button
+            v-for="member in selectedMembers"
+            :key="member.id"
+            class="member-chip"
+            @click="removeMember(member.id)"
+          >
+            <span>{{ member.username }}</span>
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <button class="create-group-btn" :disabled="!canCreateGroup || creatingGroup" @click="createGroup">
+          <i :class="creatingGroup ? 'fas fa-spinner fa-spin' : 'fas fa-users'"></i>
+          <span>{{ creatingGroup ? '创建中' : '创建群组' }}</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 
-const emit = defineEmits(['close', 'select'])
+const emit = defineEmits(['close', 'select', 'group-created'])
 
+const mode = ref('direct')
 const searchInput = ref('')
 const isSearching = ref(false)
 const hasSearched = ref(false)
@@ -97,8 +158,18 @@ const searchResult = ref(null)
 const searchError = ref('')
 const recentUsers = ref([])
 const inputRef = ref(null)
+const groupPolicy = ref(null)
+const groupName = ref('')
+const selectedMembers = ref([])
+const creatingGroup = ref(false)
 
 const canSearch = computed(() => searchInput.value.trim().length >= 3)
+const canCreateGroup = computed(() =>
+  !!groupPolicy.value?.enabled &&
+  !!groupPolicy.value?.eligible &&
+  groupName.value.trim().length > 0 &&
+  selectedMembers.value.length > 0
+)
 
 const matchedByLabel = (via) => {
   if (via === 'username') return '用户名'
@@ -138,12 +209,79 @@ const selectUser = (user) => {
   emit('select', user.id)
 }
 
+const handleUserClick = (user) => {
+  if (mode.value === 'group') {
+    addMember(user)
+    return
+  }
+  selectUser(user)
+}
+
+const addMember = (user) => {
+  if (!user?.id || selectedMembers.value.some(member => member.id === user.id)) return
+  selectedMembers.value = [...selectedMembers.value, user]
+}
+
+const removeMember = (userId) => {
+  selectedMembers.value = selectedMembers.value.filter(member => member.id !== userId)
+}
+
+const loadGroupPolicy = async () => {
+  try {
+    const response = await fetch('/api/messages/groups/policy/')
+    if (!response.ok) return
+    const data = await response.json()
+    groupPolicy.value = data.policy || null
+  } catch (error) {
+    console.error('加载群组策略失败:', error)
+  }
+}
+
+const createGroup = async () => {
+  if (!canCreateGroup.value) return
+  creatingGroup.value = true
+  try {
+    const response = await fetch('/api/messages/groups/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCSRFToken(),
+      },
+      body: JSON.stringify({
+        name: groupName.value.trim(),
+        member_ids: selectedMembers.value.map(member => member.id),
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      ElMessage.error(data.error || data.message || '创建群组失败')
+      if (data.policy) groupPolicy.value = data.policy
+      return
+    }
+    ElMessage.success('群组已创建')
+    emit('group-created', data.group)
+    emit('close')
+  } catch (error) {
+    ElMessage.error('网络错误，请重试')
+  } finally {
+    creatingGroup.value = false
+  }
+}
+
+const getCSRFToken = () => {
+  const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
 const loadRecentUsers = async () => {
   try {
     const response = await fetch('/api/messages/conversations/')
     if (response.ok) {
       const data = await response.json()
-      recentUsers.value = (data.conversations || []).slice(0, 5).map(conv => ({
+      recentUsers.value = (data.conversations || [])
+        .filter(conv => conv.conversation_type !== 'group' && conv.user_id)
+        .slice(0, 5)
+        .map(conv => ({
         id: conv.user_id,
         username: conv.username,
         avatar: conv.avatar,
@@ -156,6 +294,7 @@ const loadRecentUsers = async () => {
 }
 
 onMounted(() => {
+  loadGroupPolicy()
   loadRecentUsers()
   nextTick(() => inputRef.value?.focus())
 })
@@ -221,6 +360,74 @@ onMounted(() => {
   font-weight: 600;
   margin: 0;
   color: var(--text-primary);
+}
+
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 16px 0;
+}
+
+.mode-tab {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.mode-tab.active {
+  border-color: var(--primary-color, #2563eb);
+  color: var(--primary-color, #2563eb);
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent);
+}
+
+.group-policy {
+  padding: 12px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.policy-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.policy-line.ok {
+  color: #16a34a;
+}
+
+.policy-line.blocked {
+  color: #d97706;
+}
+
+.policy-progress {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.policy-progress span {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.group-name-row {
+  padding: 12px 16px 0;
 }
 
 .close-btn {
@@ -316,6 +523,60 @@ onMounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+}
+
+.group-footer {
+  border-top: 1px solid var(--border-color);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.selected-members {
+  min-height: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.selected-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.member-chip {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 6px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.create-group-btn {
+  height: 38px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.create-group-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .recent-title {

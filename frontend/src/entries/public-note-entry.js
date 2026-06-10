@@ -162,6 +162,15 @@ document.addEventListener('DOMContentLoaded', async function () {
                   <i class="fas fa-envelope"></i>
                   私信
                 </button>
+                <button
+                  v-if="isAuthenticated && !isOwnNote"
+                  class="pn-message-btn pn-report-btn"
+                  @click="reportNote"
+                  title="举报文章"
+                >
+                  <i class="fas fa-flag"></i>
+                  举报
+                </button>
               </div>
             </div>
 
@@ -281,6 +290,9 @@ document.addEventListener('DOMContentLoaded', async function () {
                           <button v-if="isAuthenticated && !comment.is_owner && comment.author_id !== currentUserId" class="pn-comment-action-btn message" @click="openCommentMessage(comment)">
                             <i class="fas fa-envelope"></i> 私信
                           </button>
+                          <button v-if="isAuthenticated && !comment.is_owner && comment.author_id !== currentUserId" class="pn-comment-action-btn report" @click="reportComment(comment)">
+                            <i class="fas fa-flag"></i> 举报
+                          </button>
                           <button v-if="comment.is_owner" class="pn-comment-action-btn delete" @click="openDeleteConfirm(comment)">
                             <i class="fas fa-trash"></i> 删除
                           </button>
@@ -300,6 +312,9 @@ document.addEventListener('DOMContentLoaded', async function () {
                               <div class="pn-comment-actions">
                                 <button v-if="isAuthenticated && !reply.is_owner && reply.author_id !== currentUserId" class="pn-comment-action-btn message" @click="openCommentMessage(reply)">
                                   <i class="fas fa-envelope"></i> 私信
+                                </button>
+                                <button v-if="isAuthenticated && !reply.is_owner && reply.author_id !== currentUserId" class="pn-comment-action-btn report" @click="reportComment(reply)">
+                                  <i class="fas fa-flag"></i> 举报
                                 </button>
                                 <button v-if="reply.is_owner" class="pn-comment-action-btn delete" @click="openDeleteConfirm(reply, comment)">
                                   <i class="fas fa-trash"></i> 删除
@@ -422,6 +437,63 @@ document.addEventListener('DOMContentLoaded', async function () {
                 <i v-else class="fas fa-spinner fa-spin"></i>
                 {{ isSendingMessage ? '发送中...' : '发送' }}
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="reportDialog.visible" class="pn-message-modal-overlay" @click.self="closeReportDialog">
+        <div class="pn-message-modal pn-report-modal">
+          <div class="pn-modal-header">
+            <div class="pn-modal-title pn-report-modal-title">
+              <div class="pn-report-modal-icon">
+                <i class="fas fa-flag"></i>
+              </div>
+              <span>{{ reportDialog.type === 'note' ? '举报文章' : '举报评论' }}</span>
+            </div>
+            <button class="pn-modal-close" @click="closeReportDialog" :disabled="reportDialog.submitting">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div class="pn-modal-body">
+            <div class="pn-report-target">
+              <span>举报对象：<strong>{{ reportDialog.targetName }}</strong></span>
+              <span v-if="reportDialog.context" class="pn-report-context">{{ reportDialog.context }}</span>
+            </div>
+
+            <label class="pn-report-field-label">请选择举报原因</label>
+            <div class="pn-report-reasons">
+              <label
+                v-for="reason in reportReasons"
+                :key="reason.value"
+                class="pn-report-reason-option"
+                :class="{ active: reportDialog.reason === reason.value }"
+              >
+                <input type="radio" v-model="reportDialog.reason" :value="reason.value">
+                <span class="pn-report-radio-dot"></span>
+                <span>{{ reason.label }}</span>
+              </label>
+            </div>
+
+            <label class="pn-report-field-label">补充说明（可选）</label>
+            <textarea
+              v-model="reportDialog.detail"
+              class="pn-report-detail-input"
+              placeholder="请描述具体情况，将帮助管理员更快处理..."
+              maxlength="500"
+              :disabled="reportDialog.submitting"
+            ></textarea>
+
+            <div class="pn-modal-footer pn-report-modal-footer">
+              <span class="pn-char-count">{{ reportDialog.detail.length }}/500</span>
+              <div class="pn-report-modal-actions">
+                <button class="pn-modal-secondary-btn" @click="closeReportDialog" :disabled="reportDialog.submitting">取消</button>
+                <button class="pn-modal-danger-btn" @click="submitReportDialog" :disabled="reportDialog.submitting">
+                  <i v-if="reportDialog.submitting" class="fas fa-spinner fa-spin"></i>
+                  <i v-else class="fas fa-flag"></i>
+                  {{ reportDialog.submitting ? '提交中...' : '提交举报' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -576,6 +648,25 @@ document.addEventListener('DOMContentLoaded', async function () {
         messageTarget: { userId: null, username: '', avatar: '' },
         messageContext: '',
         messageContextLink: '',
+        reportReasons: [
+          { value: 'spam', label: '垃圾广告' },
+          { value: 'abuse', label: '辱骂骚扰' },
+          { value: 'porn', label: '色情低俗' },
+          { value: 'scam', label: '诈骗欺诈' },
+          { value: 'privacy', label: '侵犯隐私' },
+          { value: 'illegal', label: '违法违规' },
+          { value: 'other', label: '其他' }
+        ],
+        reportDialog: {
+          visible: false,
+          submitting: false,
+          type: 'note',
+          targetId: null,
+          targetName: '',
+          context: '',
+          reason: 'spam',
+          detail: ''
+        },
         deleteConfirm: {
           visible: false,
           deleting: false,
@@ -725,6 +816,83 @@ document.addEventListener('DOMContentLoaded', async function () {
 
       decorateComment(comment) {
         return this._publicNoteComments.decorateComment(comment);
+      },
+
+      async reportNote() {
+        if (!this.isAuthenticated) {
+          window.location.href = '/login/?next=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        if (!this.note || this.isOwnNote) return;
+        this.openReportDialog({
+          type: 'note',
+          targetId: this.note.id,
+          targetName: this.note.title || '这篇文章',
+          context: this.note.author && this.note.author.username ? `作者：${this.note.author.username}` : ''
+        });
+      },
+
+      async reportComment(comment) {
+        if (!this.isAuthenticated) {
+          window.location.href = '/login/?next=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        if (!comment || comment.is_owner || comment.author_id === this.currentUserId) return;
+        this.openReportDialog({
+          type: 'comment',
+          targetId: comment.id,
+          targetName: comment.author ? `${comment.author} 的评论` : '这条评论',
+          context: this.getCommentPreview(comment.content || '')
+        });
+      },
+
+      openReportDialog({ type, targetId, targetName, context = '' }) {
+        this.closeUserCard();
+        this.reportDialog = {
+          visible: true,
+          submitting: false,
+          type,
+          targetId,
+          targetName,
+          context,
+          reason: 'spam',
+          detail: ''
+        };
+      },
+
+      closeReportDialog() {
+        if (this.reportDialog.submitting) return;
+        this.reportDialog.visible = false;
+      },
+
+      async submitReportDialog() {
+        if (this.reportDialog.submitting || !this.reportDialog.targetId) return;
+        const endpoint = this.reportDialog.type === 'note'
+          ? `/api/notes/${this.reportDialog.targetId}/report/`
+          : `/api/comments/${this.reportDialog.targetId}/report/`;
+
+        this.reportDialog.submitting = true;
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+            body: JSON.stringify({
+              reason: this.reportDialog.reason,
+              detail: this.reportDialog.detail.trim()
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            this.showToast(data.message || '举报已提交', 'success');
+            this.reportDialog.visible = false;
+          } else {
+            this.showToast(data.message || data.error || '举报失败', 'error');
+          }
+        } catch (e) {
+          this.showToast('网络错误，请稍后重试', 'error');
+        } finally {
+          this.reportDialog.submitting = false;
+        }
       },
 
       hydrateRuntimeWidgets() {

@@ -33,21 +33,33 @@
           <span class="uc-sanction-exp">
             {{ s.is_permanent ? '永久' : ('至 ' + formatTime(s.expires_at)) }}
           </span>
+          <span v-if="s.pending_appeal" class="uc-appeal">有待处理申诉</span>
           <el-button size="small" text type="primary" @click="$emit('revoke', s.id)">解除</el-button>
         </div>
       </div>
     </div>
 
-    <a :href="`/user/${user.id}/`" target="_blank" class="uc-profile-link">
-      <i class="fas fa-external-link-alt"></i> 在新标签页打开主页
-    </a>
+    <div class="uc-actions">
+      <el-button
+        v-if="!user.active_sanctions || user.active_sanctions.length === 0"
+        size="small"
+        type="warning"
+        plain
+        @click="$emit('sanction', user)"
+      >
+        <i class="fas fa-gavel"></i> 重新处置
+      </el-button>
+      <a :href="`/user/${user.id}/`" target="_blank" class="uc-profile-link">
+        <i class="fas fa-external-link-alt"></i> 在新标签页打开主页
+      </a>
+    </div>
   </div>
   <div v-else class="uc-empty">用户信息缺失</div>
 </template>
 
 <script setup>
 defineProps({ user: { type: Object, default: null } })
-defineEmits(['revoke'])
+defineEmits(['revoke', 'sanction'])
 
 function formatTime(iso) {
   if (!iso) return ''
@@ -187,11 +199,28 @@ function formatDate(iso) {
   font-size: 12px;
 }
 
+.uc-appeal {
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.uc-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .uc-profile-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 12px;
   padding: 7px 9px;
   border-radius: 8px;
   color: #2563eb;

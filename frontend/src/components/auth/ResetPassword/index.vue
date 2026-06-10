@@ -50,6 +50,8 @@
             <el-input
               v-model="resetForm.password"
               type="password"
+              name="new-password"
+              autocomplete="new-password"
               placeholder="请输入新密码（至少8位）"
               size="large"
               show-password
@@ -93,6 +95,8 @@
             <el-input
               v-model="resetForm.confirmPassword"
               type="password"
+              name="confirm-password"
+              autocomplete="new-password"
               placeholder="请再次输入新密码"
               size="large"
               show-password

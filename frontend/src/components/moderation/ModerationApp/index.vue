@@ -37,7 +37,16 @@
             <el-option label="全部类型" value="all" />
             <el-option label="私信举报" value="message" />
             <el-option label="附件举报" value="attachment" />
+            <el-option label="文章举报" value="note" />
+            <el-option label="评论举报" value="comment" />
           </el-select>
+          <el-input v-model="filterQ" size="small" clearable placeholder="搜索原因、内容、用户名" @keyup.enter="reload" @clear="reload" />
+          <div class="mod-filter-grid">
+            <el-input v-model="filterReporter" size="small" clearable placeholder="举报者" @keyup.enter="reload" @clear="reload" />
+            <el-input v-model="filterTarget" size="small" clearable placeholder="被举报者" @keyup.enter="reload" @clear="reload" />
+            <el-input v-model="filterObjectId" size="small" clearable placeholder="对象 ID" @keyup.enter="reload" @clear="reload" />
+            <el-button size="small" @click="reload">筛选</el-button>
+          </div>
         </div>
 
         <div v-if="listLoading" class="mod-state"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>
@@ -50,8 +59,11 @@
             @click="openDetail(t)"
           >
             <div class="mod-ticket-top">
-              <el-tag size="small" :type="t.type === 'message' ? 'primary' : 'warning'">
-                {{ t.type === 'message' ? '私信' : '附件' }}
+              <el-tag size="small" :type="typeTagType(t.type)">
+                {{ typeShortLabel(t.type) }}
+              </el-tag>
+              <el-tag v-if="t.duplicate_count > 1" size="small" type="danger" effect="plain">
+                {{ t.duplicate_count }} 人举报
               </el-tag>
               <span class="mod-reason">{{ t.reason_display }}</span>
               <el-tag size="small" :type="statusTagType(t.status)" effect="plain">{{ t.status_display }}</el-tag>
@@ -83,8 +95,8 @@
           <!-- 工单概要 -->
           <div class="mod-section mod-summary">
             <div class="mod-summary-head">
-              <el-tag :type="detail.type === 'message' ? 'primary' : 'warning'">
-                {{ detail.type === 'message' ? '私信举报' : '附件举报' }} #{{ detail.id }}
+              <el-tag :type="typeTagType(detail.type)">
+                {{ typeLabel(detail.type) }} #{{ detail.id }}
               </el-tag>
               <el-tag :type="statusTagType(detail.status)" effect="plain">{{ detail.status_display }}</el-tag>
               <span class="mod-time">举报于 {{ formatTime(detail.created_at) }}</span>
@@ -97,15 +109,23 @@
             </p>
           </div>
 
+          <div v-if="detail.reporter_risk && detail.reporter_risk.risk_level !== 'low'" class="mod-section mod-risk">
+            <h3><i class="fas fa-triangle-exclamation"></i> 举报者风险提示</h3>
+            <p>
+              近 7 天发起 {{ detail.reporter_risk.filed_7d }} 次举报，驳回 {{ detail.reporter_risk.dismissed_7d }} 次，
+              当前生效处置 {{ detail.reporter_risk.active_sanctions }} 条。
+            </p>
+          </div>
+
           <!-- 双方资料卡 -->
           <div class="mod-cards">
             <div class="mod-card">
               <h3><i class="fas fa-flag"></i> 举报者</h3>
-              <user-card :user="detail.reporter" @revoke="revokeSanction" />
+              <user-card :user="detail.reporter" @revoke="revokeSanction" @sanction="openManualSanction" />
             </div>
             <div class="mod-card">
               <h3><i class="fas fa-user-slash"></i> 被举报者</h3>
-              <user-card :user="detail.reported" @revoke="revokeSanction" />
+              <user-card :user="detail.reported" @revoke="revokeSanction" @sanction="openManualSanction" />
             </div>
           </div>
 
@@ -129,11 +149,45 @@
             </div>
           </div>
 
+          <div v-if="detail.note" class="mod-section mod-evidence-section">
+            <h3><i class="fas fa-file-alt"></i> 被举报文章</h3>
+            <div class="mod-msg">
+              <div class="mod-msg-head">
+                <b>{{ detail.note.title }}</b>
+                <el-tag size="small" :type="detail.note.is_public ? 'success' : 'info'" effect="plain">
+                  {{ detail.note.is_public ? '公开中' : '已下架' }}
+                </el-tag>
+                <a v-if="detail.note.public_url" :href="detail.note.public_url" target="_blank" class="mod-file-link">打开文章</a>
+              </div>
+              <div v-if="detail.note.content_preview" class="mod-msg-content">{{ detail.note.content_preview }}</div>
+            </div>
+          </div>
+
+          <div v-if="detail.comment" class="mod-section mod-evidence-section">
+            <h3><i class="fas fa-comment-dots"></i> 被举报评论</h3>
+            <div class="mod-msg highlight">
+              <div class="mod-msg-head">
+                <b>{{ detail.comment.author }}</b>
+                <span class="mod-msg-time">{{ formatTime(detail.comment.created_at) }}</span>
+              </div>
+              <div class="mod-msg-content">{{ detail.comment.content || '（无文本）' }}</div>
+            </div>
+          </div>
+
+          <div v-if="hasEvidenceSnapshot" class="mod-section mod-evidence-section">
+            <h3><i class="fas fa-camera-retro"></i> 举报时证据快照</h3>
+            <dl class="mod-snapshot">
+              <template v-for="item in evidenceSnapshotEntries" :key="item.key">
+                <dt>{{ item.label }}</dt>
+                <dd>{{ item.value }}</dd>
+              </template>
+            </dl>
+          </div>
+
           <!-- 关联消息上下文 -->
-          <div class="mod-section mod-context-section">
+          <div v-if="detail.message_context && detail.message_context.length" class="mod-section mod-context-section">
             <h3><i class="fas fa-comments"></i> 关联消息上下文</h3>
-            <div v-if="detail.message_context.length === 0" class="mod-muted">无关联消息或消息已被清理</div>
-            <div v-else class="mod-context">
+            <div class="mod-context">
               <div
                 v-for="m in detail.message_context"
                 :key="m.id"
@@ -179,6 +233,17 @@
             </div>
           </div>
 
+          <div v-if="detail.related_reports && detail.related_reports.length > 1" class="mod-section mod-related-section">
+            <h3><i class="fas fa-layer-group"></i> 同对象举报</h3>
+            <ul class="mod-related">
+              <li v-for="r in detail.related_reports" :key="r.id">
+                <b>{{ r.reporter.username }}</b>
+                <span>{{ r.reason_display }}</span>
+                <em>{{ formatTime(r.created_at) }}</em>
+              </li>
+            </ul>
+          </div>
+
           <!-- 处置历史 -->
           <div v-if="detail.logs && detail.logs.length" class="mod-section mod-logs-section">
             <h3><i class="fas fa-history"></i> 处置历史</h3>
@@ -202,15 +267,19 @@
               </el-radio-group>
             </div>
 
+            <div v-if="templates.length" class="mod-field">
+              <label>处置模板</label>
+              <el-select v-model="form.templateId" placeholder="选择模板填充备注" clearable class="mod-template-select" @change="applyTemplate">
+                <el-option v-for="t in templates" :key="t.id" :label="t.title" :value="t.id" />
+              </el-select>
+            </div>
+
             <div v-if="form.decision === 'uphold'" class="mod-field">
               <label>对被举报者的处置</label>
               <div class="mod-action-row">
                 <el-select v-model="reportedAction" placeholder="不处置" clearable class="mod-action-select">
-                  <el-option-group label="禁言私信">
-                    <el-option v-for="d in durations" :key="'m'+d.v" :label="'禁言私信 · ' + d.l" :value="'mute_messages:' + d.v" />
-                  </el-option-group>
-                  <el-option-group label="封禁登录">
-                    <el-option v-for="d in durations" :key="'b'+d.v" :label="'封禁登录 · ' + d.l" :value="'ban_login:' + d.v" />
+                  <el-option-group v-for="g in sanctionGroupsForSelected" :key="'reported-'+g.value" :label="g.label">
+                    <el-option v-for="d in durations" :key="'reported-'+g.value+d.v" :label="g.label + ' · ' + d.l" :value="g.value + ':' + d.v" />
                   </el-option-group>
                 </el-select>
               </div>
@@ -220,11 +289,8 @@
               <label>对举报者的惩戒（恶意举报时）</label>
               <div class="mod-action-row">
                 <el-select v-model="reporterAction" placeholder="不处置" clearable class="mod-action-select">
-                  <el-option-group label="禁言私信">
-                    <el-option v-for="d in durations" :key="'rm'+d.v" :label="'禁言私信 · ' + d.l" :value="'mute_messages:' + d.v" />
-                  </el-option-group>
-                  <el-option-group label="封禁登录">
-                    <el-option v-for="d in durations" :key="'rb'+d.v" :label="'封禁登录 · ' + d.l" :value="'ban_login:' + d.v" />
+                  <el-option-group v-for="g in sanctionGroupsForSelected" :key="'reporter-'+g.value" :label="g.label">
+                    <el-option v-for="d in durations" :key="'reporter-'+g.value+d.v" :label="g.label + ' · ' + d.l" :value="g.value + ':' + d.v" />
                   </el-option-group>
                 </el-select>
               </div>
@@ -232,7 +298,13 @@
 
             <div v-if="form.decision === 'uphold'" class="mod-field">
               <el-checkbox v-model="form.removeContent">
-                删除违规内容（{{ detail.type === 'attachment' ? '删除该附件文件' : '撤回该消息' }}）
+                内容处置（{{ removeContentLabel(detail.type) }}）
+              </el-checkbox>
+            </div>
+
+            <div v-if="detail.duplicate_count > 1" class="mod-field">
+              <el-checkbox v-model="form.resolveRelated">
+                同步结案同对象的其他 {{ detail.duplicate_count - 1 }} 条待处理举报
               </el-checkbox>
             </div>
 
@@ -248,11 +320,41 @@
           </div>
           <div v-else class="mod-section mod-resolved-notice">
             <h3><i class="fas fa-check-circle"></i> 举报已结案</h3>
-            <p>该举报已完成处置，不再重复提交处置。若需要提前解除用户当前生效的制裁，可在上方用户资料卡中点击“解除”。</p>
+            <p>该举报已完成处置，不再重复提交原工单。若用户解除制裁后继续违规，可在上方用户资料卡中点击“重新处置”，无需等待新的举报。</p>
           </div>
         </div>
       </section>
     </div>
+
+    <el-dialog v-model="manualSanction.visible" title="重新处置用户" width="420px">
+      <div v-if="manualSanction.user" class="mod-manual-target">
+        <i class="fas fa-user-shield"></i>
+        <span>{{ manualSanction.user.username }}</span>
+      </div>
+      <div class="mod-field">
+        <label>处置类型</label>
+        <el-select v-model="manualSanction.action" placeholder="请选择处置" class="mod-action-select">
+          <el-option-group v-for="g in sanctionGroupsForSelected" :key="'manual-'+g.value" :label="g.label">
+            <el-option v-for="d in durations" :key="'manual-'+g.value+d.v" :label="g.label + ' · ' + d.l" :value="g.value + ':' + d.v" />
+          </el-option-group>
+        </el-select>
+      </div>
+      <div class="mod-field">
+        <label>处置备注</label>
+        <el-input
+          v-model="manualSanction.note"
+          type="textarea"
+          :rows="3"
+          maxlength="2000"
+          show-word-limit
+          placeholder="记录本次重新处置依据"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="manualSanction.visible = false">取消</el-button>
+        <el-button type="primary" :loading="manualSubmitting" @click="submitManualSanction">提交处置</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -271,8 +373,31 @@ const durations = [
   { v: 'permanent', l: '永久' },
 ]
 
+const sanctionGroupsByReportType = {
+  message: [
+    { value: 'mute_messages', label: '禁言私信' },
+    { value: 'ban_login', label: '封禁登录' },
+  ],
+  attachment: [
+    { value: 'mute_messages', label: '禁言私信' },
+    { value: 'ban_login', label: '封禁登录' },
+  ],
+  note: [
+    { value: 'ban_public_notes', label: '禁止发布公开文章' },
+    { value: 'ban_login', label: '封禁登录' },
+  ],
+  comment: [
+    { value: 'ban_comments', label: '禁止评论' },
+    { value: 'ban_login', label: '封禁登录' },
+  ],
+}
+
 const filterStatus = ref('pending')
 const filterType = ref('all')
+const filterQ = ref('')
+const filterReporter = ref('')
+const filterTarget = ref('')
+const filterObjectId = ref('')
 const reports = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -287,8 +412,38 @@ const detailLoading = ref(false)
 const reportedAction = ref('')
 const reporterAction = ref('')
 const submitting = ref(false)
-const form = reactive({ decision: 'uphold', removeContent: false, note: '' })
+const manualSubmitting = ref(false)
+const templates = ref([])
+const form = reactive({ decision: 'uphold', removeContent: false, resolveRelated: true, templateId: '', note: '' })
+const manualSanction = reactive({
+  visible: false,
+  user: null,
+  action: '',
+  note: '',
+})
 const canResolveSelected = computed(() => detail.value?.status === 'pending')
+const sanctionGroupsForSelected = computed(() => (
+  sanctionGroupsByReportType[detail.value?.type || selected.value?.type] || []
+))
+const hasEvidenceSnapshot = computed(() => Object.keys(detail.value?.evidence_snapshot || {}).length > 0)
+const evidenceSnapshotEntries = computed(() => {
+  const labels = {
+    title: '标题',
+    content_preview: '内容片段',
+    comment_content: '评论内容',
+    message_preview: '消息片段',
+    name: '文件名',
+    mime_type: '文件类型',
+    author_username: '作者',
+    sender_username: '发送者',
+    uploader_username: '上传者',
+    reported_url: '举报入口',
+  }
+  return Object.entries(detail.value?.evidence_snapshot || {})
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .slice(0, 12)
+    .map(([key, value]) => ({ key, label: labels[key] || key, value: String(value) }))
+})
 
 async function apiGet(url) {
   const r = await fetch(url, { credentials: 'same-origin' })
@@ -313,7 +468,16 @@ async function loadList(reset = true) {
   listLoading.value = true
   try {
     if (reset) { page.value = 1 }
-    const d = await apiGet(`/api/moderation/reports/?status=${filterStatus.value}&type=${filterType.value}&page=${page.value}`)
+    const params = new URLSearchParams({
+      status: filterStatus.value,
+      type: filterType.value,
+      page: String(page.value),
+    })
+    if (filterQ.value) params.set('q', filterQ.value)
+    if (filterReporter.value) params.set('reporter', filterReporter.value)
+    if (filterTarget.value) params.set('target', filterTarget.value)
+    if (filterObjectId.value) params.set('object_id', filterObjectId.value)
+    const d = await apiGet(`/api/moderation/reports/?${params.toString()}`)
     reports.value = reset ? d.results : reports.value.concat(d.results)
     total.value = d.total
     hasMore.value = d.has_more
@@ -336,6 +500,7 @@ async function openDetail(t) {
   try {
     const d = await apiGet(`/api/moderation/reports/${t.type}/${t.id}/`)
     detail.value = d.report
+    await loadTemplates()
   } catch (e) {
     ElMessage.error(e.message || '加载详情失败')
   } finally {
@@ -346,12 +511,22 @@ async function openDetail(t) {
 function resetForm() {
   form.decision = 'uphold'
   form.removeContent = false
+  form.resolveRelated = true
+  form.templateId = ''
   form.note = ''
   reportedAction.value = ''
   reporterAction.value = ''
 }
 
+function isSanctionActionAllowed(action) {
+  if (!action) return true
+  const [type] = action.split(':')
+  return sanctionGroupsForSelected.value.some(group => group.value === type)
+}
+
 function onDecisionChange(value) {
+  form.templateId = ''
+  loadTemplates()
   if (value === 'uphold') {
     reporterAction.value = ''
     return
@@ -360,7 +535,25 @@ function onDecisionChange(value) {
   form.removeContent = false
 }
 
+async function loadTemplates() {
+  if (!selected.value) return
+  try {
+    const params = new URLSearchParams({ type: selected.value.type, decision: form.decision })
+    const d = await apiGet(`/api/moderation/templates/?${params.toString()}`)
+    templates.value = d.templates || []
+  } catch {
+    templates.value = []
+  }
+}
+
+function applyTemplate(templateId) {
+  const item = templates.value.find(t => t.id === templateId)
+  if (item) form.note = item.content
+}
+
 function buildSanctions() {
+  if (!isSanctionActionAllowed(reportedAction.value)) reportedAction.value = ''
+  if (!isSanctionActionAllowed(reporterAction.value)) reporterAction.value = ''
   const list = []
   if (reportedAction.value) {
     const [type, duration] = reportedAction.value.split(':')
@@ -389,6 +582,7 @@ async function submit() {
       decision: form.decision,
       sanctions,
       remove_content: form.removeContent,
+      resolve_related: form.resolveRelated,
       note: form.note,
     })
     ElMessage.success('处置已提交')
@@ -414,10 +608,66 @@ async function revokeSanction(sanctionId) {
   }
 }
 
+function openManualSanction(user) {
+  if (!user) return
+  manualSanction.user = user
+  manualSanction.action = isSanctionActionAllowed(manualSanction.action) ? manualSanction.action : ''
+  manualSanction.note = ''
+  manualSanction.visible = true
+}
+
+async function submitManualSanction() {
+  if (!manualSanction.user) return
+  if (!manualSanction.action) {
+    ElMessage.warning('请选择处置类型')
+    return
+  }
+  const [type, duration] = manualSanction.action.split(':')
+  try {
+    if (duration === 'permanent') {
+      await ElMessageBox.confirm('本次处置包含「永久」制裁，确认执行？', '确认处置', { type: 'warning' })
+    }
+  } catch { return }
+
+  manualSubmitting.value = true
+  try {
+    await apiPost(`/api/moderation/users/${manualSanction.user.id}/sanction/`, {
+      type,
+      duration,
+      note: manualSanction.note,
+      source_report_type: selected.value?.type || '',
+      source_report_id: selected.value?.id || null,
+    })
+    ElMessage.success('用户已重新处置')
+    manualSanction.visible = false
+    if (selected.value) await openDetail(selected.value)
+  } catch (e) {
+    ElMessage.error(e.message || '重新处置失败')
+  } finally {
+    manualSubmitting.value = false
+  }
+}
+
 function statusTagType(s) {
   if (s === 'pending') return 'danger'
   if (s === 'dismissed') return 'info'
   return 'success'
+}
+
+function typeShortLabel(t) {
+  return ({ message: '私信', attachment: '附件', note: '文章', comment: '评论' }[t]) || t
+}
+
+function typeLabel(t) {
+  return ({ message: '私信举报', attachment: '附件举报', note: '文章举报', comment: '评论举报' }[t]) || t
+}
+
+function typeTagType(t) {
+  return ({ message: 'primary', attachment: 'warning', note: 'success', comment: 'info' }[t]) || 'info'
+}
+
+function removeContentLabel(t) {
+  return ({ attachment: '删除该附件文件', note: '下架该文章', comment: '删除该评论' }[t]) || '撤回该消息'
 }
 
 function mergedForwardOf(message) {
@@ -434,8 +684,11 @@ function actionLabel(a) {
     no_action: '无惩罚结案', dismiss: '驳回', remove_content: '删除违规内容',
   }
   if (map[a]) return map[a]
+  if (a.startsWith('manual:')) return '人工处置 · ' + actionLabel(a.slice(7))
   if (a.startsWith('penalize_reporter:')) return '惩戒举报者 · ' + actionLabel(a.split(':')[1])
   if (a.startsWith('mute_')) return '禁言私信 · ' + durationLabel(a.slice(5))
+  if (a.startsWith('ban_comments_')) return '禁止评论 · ' + durationLabel(a.slice(13))
+  if (a.startsWith('ban_public_notes_')) return '禁止发布公开文章 · ' + durationLabel(a.slice(17))
   if (a.startsWith('ban_login_')) return '封禁登录 · ' + durationLabel(a.slice(10))
   if (a.startsWith('revoke:')) return '解除制裁'
   return a
@@ -708,6 +961,7 @@ onMounted(() => loadList(true))
 .mod-resolved-notice p { margin: 0; color: #475569; line-height: 1.8; font-size: 14px; }
 .mod-field { margin-bottom: 16px; }
 .mod-field > label { display: block; font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 8px; }
+.mod-manual-target { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 8px 10px; border: 1px solid #fed7aa; border-radius: 8px; background: #fff7ed; color: #9a3412; font-size: 13px; font-weight: 700; }
 .mod-action-row { display: flex; align-items: center; gap: 10px; }
 .mod-action-select { width: 240px; max-width: 100%; }
 .mod-submit { text-align: right; padding-top: 2px; }
@@ -1152,5 +1406,80 @@ onMounted(() => loadList(true))
   .mod-cards {
     grid-template-columns: 1fr;
   }
+}
+
+.mod-filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mod-template-select {
+  width: 320px;
+  max-width: 100%;
+}
+
+.mod-risk {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.mod-risk h3,
+.mod-risk h3 i,
+.mod-risk p {
+  color: #9a3412;
+}
+
+.mod-risk p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.mod-snapshot {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.mod-snapshot dt {
+  color: var(--mod-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mod-snapshot dd {
+  margin: 0;
+  color: var(--mod-text);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.mod-related {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.mod-related li {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--mod-border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.mod-related em {
+  color: var(--mod-muted);
+  font-style: normal;
+  font-size: 12px;
 }
 </style>
