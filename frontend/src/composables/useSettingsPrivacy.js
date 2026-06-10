@@ -1,4 +1,4 @@
-import { ref, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 
 export function useSettingsPrivacy() {
@@ -7,7 +7,13 @@ export function useSettingsPrivacy() {
   const loading = ref(false)
   const saving = ref(false)
   const groupPolicy = ref(null)
+  const groupPolicySaving = ref(false)
   const loadingGroupPolicy = ref(false)
+  const groupPolicyForm = reactive({
+    enabled: true,
+    min_public_notes: 10,
+    min_followers: 50
+  })
 
   // 私信偏好
   const privacy = ref({
@@ -41,12 +47,50 @@ export function useSettingsPrivacy() {
         const data = await res.json()
         if (data.status === 'success') {
           groupPolicy.value = data.policy || null
+          if (groupPolicy.value) {
+            groupPolicyForm.enabled = !!groupPolicy.value.enabled
+            groupPolicyForm.min_public_notes = groupPolicy.value.min_public_notes
+            groupPolicyForm.min_followers = groupPolicy.value.min_followers
+          }
         }
       }
     } catch (e) {
       console.error('加载群组创建策略失败:', e)
     } finally {
       loadingGroupPolicy.value = false
+    }
+  }
+
+  const saveGroupPolicy = async () => {
+    if (!groupPolicy.value?.can_manage) return
+    groupPolicySaving.value = true
+    try {
+      const res = await fetch('/api/messages/groups/policy/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+          enabled: !!groupPolicyForm.enabled,
+          min_public_notes: Number(groupPolicyForm.min_public_notes) || 0,
+          min_followers: Number(groupPolicyForm.min_followers) || 0
+        })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.status === 'success') {
+        groupPolicy.value = data.policy
+        groupPolicyForm.enabled = !!data.policy.enabled
+        groupPolicyForm.min_public_notes = data.policy.min_public_notes
+        groupPolicyForm.min_followers = data.policy.min_followers
+        ElMessage.success('群组创建条件已更新')
+      } else {
+        ElMessage.error(data.message || data.error || '保存群组创建条件失败')
+      }
+    } catch (e) {
+      ElMessage.error('保存群组创建条件失败，请重试')
+    } finally {
+      groupPolicySaving.value = false
     }
   }
 
@@ -266,6 +310,8 @@ export function useSettingsPrivacy() {
     loading,
     saving,
     groupPolicy,
+    groupPolicyForm,
+    groupPolicySaving,
     loadingGroupPolicy,
     privacy,
     discoverability,
@@ -273,6 +319,7 @@ export function useSettingsPrivacy() {
     blockedUsers,
     loadingBlocked,
     savePreference,
+    saveGroupPolicy,
     saveDiscoverability,
     regenerateSearchCode,
     copySearchCode,

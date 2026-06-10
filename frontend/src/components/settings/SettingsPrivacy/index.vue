@@ -44,6 +44,43 @@
               <strong>{{ groupPolicy.stats?.followers || 0 }}/{{ groupPolicy.min_followers }}</strong>
             </div>
           </div>
+
+          <el-form
+            v-if="groupPolicy.can_manage"
+            class="group-policy-admin-form"
+            label-position="top"
+          >
+            <el-form-item label="允许用户创建群组">
+              <el-switch v-model="groupPolicyForm.enabled" />
+            </el-form-item>
+            <div class="group-policy-admin-grid">
+              <el-form-item label="公开文章门槛">
+                <el-input-number
+                  v-model="groupPolicyForm.min_public_notes"
+                  :min="0"
+                  :max="9999"
+                  controls-position="right"
+                />
+              </el-form-item>
+              <el-form-item label="关注者门槛">
+                <el-input-number
+                  v-model="groupPolicyForm.min_followers"
+                  :min="0"
+                  :max="999999"
+                  controls-position="right"
+                />
+              </el-form-item>
+            </div>
+            <div class="group-policy-admin-actions">
+              <el-button
+                type="primary"
+                :loading="groupPolicySaving"
+                @click="saveGroupPolicy"
+              >
+                保存群组创建条件
+              </el-button>
+            </div>
+          </el-form>
         </template>
         <div v-else class="form-hint">群组创建条件加载失败，请稍后刷新设置页。</div>
       </div>
@@ -234,6 +271,8 @@ import '@/assets/styles/components/settings-privacy.css'
 const {
   loading,
   groupPolicy,
+  groupPolicyForm,
+  groupPolicySaving,
   loadingGroupPolicy,
   privacy,
   discoverability,
@@ -241,6 +280,7 @@ const {
   blockedUsers,
   loadingBlocked,
   savePreference,
+  saveGroupPolicy,
   saveDiscoverability,
   regenerateSearchCode,
   copySearchCode,

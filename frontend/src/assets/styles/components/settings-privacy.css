@@ -95,6 +95,23 @@
   color: #67c23a;
 }
 
+.group-policy-admin-form {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #ebeef5;
+}
+
+.group-policy-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.group-policy-admin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .empty-blocked {
   display: flex;
   align-items: center;
@@ -166,6 +183,10 @@
   }
 
   .group-policy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .group-policy-admin-grid {
     grid-template-columns: 1fr;
   }
 }

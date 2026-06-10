@@ -262,6 +262,31 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(policy['min_followers'], 50)
         self.assertFalse(policy['eligible'])
 
+    def test_non_admin_cannot_update_group_policy(self):
+        user = make_user('grp_policy_non_admin')
+        login(self.client, user)
+        response = post_json(self.client, reverse('get_group_policy_api'), {
+            'enabled': False,
+            'min_public_notes': 1,
+            'min_followers': 1,
+        })
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_update_group_policy(self):
+        admin = make_user('grp_policy_admin', is_staff=True)
+        login(self.client, admin)
+        response = post_json(self.client, reverse('get_group_policy_api'), {
+            'enabled': False,
+            'min_public_notes': 3,
+            'min_followers': 7,
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        policy = parse(response)['policy']
+        self.assertFalse(policy['enabled'])
+        self.assertEqual(policy['min_public_notes'], 3)
+        self.assertEqual(policy['min_followers'], 7)
+        self.assertTrue(policy['can_manage'])
+
     def test_ineligible_user_cannot_create_group(self):
         owner = make_user('grp_ineligible_owner')
         member = make_user('grp_ineligible_member')

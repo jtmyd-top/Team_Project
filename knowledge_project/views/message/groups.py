@@ -33,6 +33,7 @@ def _policy_payload(policy, user):
         'min_followers': policy.min_followers,
         'stats': stats,
         'eligible': eligible,
+        'can_manage': user.is_staff or user.is_superuser,
         'reasons': {
             'public_notes': stats['public_notes'] >= policy.min_public_notes,
             'followers': stats['followers'] >= policy.min_followers,
@@ -148,11 +149,34 @@ def _visible_group_messages_qs(group, membership):
     return qs.order_by('created_at')
 
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 @login_required
 def get_group_policy_api(request):
     from ...models import MessageGroupPolicy
     policy = MessageGroupPolicy.get_current()
+
+    if request.method == 'POST':
+        if not (request.user.is_staff or request.user.is_superuser):
+            return JsonResponse({'error': '只有管理员可以调整群组创建条件'}, status=403)
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': '请求格式错误'}, status=400)
+
+        try:
+            min_public_notes = int(data.get('min_public_notes', policy.min_public_notes))
+            min_followers = int(data.get('min_followers', policy.min_followers))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': '门槛值必须是数字'}, status=400)
+
+        if min_public_notes < 0 or min_followers < 0:
+            return JsonResponse({'error': '门槛值不能小于 0'}, status=400)
+
+        policy.enabled = bool(data.get('enabled', policy.enabled))
+        policy.min_public_notes = min_public_notes
+        policy.min_followers = min_followers
+        policy.save(update_fields=['enabled', 'min_public_notes', 'min_followers', 'updated_at'])
+
     return JsonResponse({'status': 'success', 'policy': _policy_payload(policy, request.user)})
 
 
