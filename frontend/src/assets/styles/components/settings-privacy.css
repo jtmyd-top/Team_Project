@@ -29,6 +29,72 @@
   margin-top: 4px;
 }
 
+.group-policy-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+}
+
+.group-policy-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.group-policy-head strong {
+  display: block;
+  font-size: 15px;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.group-policy-head p {
+  margin: 0;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.group-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.group-policy-item {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f7fa;
+  color: #606266;
+}
+
+.group-policy-item i {
+  color: #909399;
+}
+
+.group-policy-item strong {
+  color: #303133;
+  font-variant-numeric: tabular-nums;
+}
+
+.group-policy-item.ok {
+  background: #f0f9eb;
+  color: #529b2e;
+}
+
+.group-policy-item.ok i,
+.group-policy-item.ok strong {
+  color: #67c23a;
+}
+
 .empty-blocked {
   display: flex;
   align-items: center;
@@ -92,4 +158,14 @@
 .blocked-date {
   font-size: 12px;
   color: #909399;
+}
+
+@media (max-width: 640px) {
+  .group-policy-head {
+    flex-direction: column;
+  }
+
+  .group-policy-grid {
+    grid-template-columns: 1fr;
+  }
 }

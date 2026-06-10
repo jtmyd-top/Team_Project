@@ -452,6 +452,7 @@ export function useKnowledgeList() {
             cancelButtonText: '取消',
             type: 'error',
             confirmButtonClass: 'el-button--danger',
+            appendTo: 'body',
             customClass: 'delete-confirm-box'
           }
         )
@@ -478,6 +479,7 @@ export function useKnowledgeList() {
           cancelButtonText: '取消',
           type: 'error',
           confirmButtonClass: 'el-button--danger',
+          appendTo: 'body',
           customClass: 'delete-confirm-box'
         }
       )

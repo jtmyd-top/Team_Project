@@ -108,6 +108,36 @@
   transform: translateY(-1px);
 }
 
+/* Element Plus message boxes are created outside the Vue app. Keep the
+   delete confirmation modal above the note workspace and outside editor flow. */
+body > .el-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 3000 !important;
+}
+
+body > .el-overlay .el-overlay-message-box {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px !important;
+}
+
+body > .el-overlay .delete-confirm-box.el-message-box {
+  width: min(420px, calc(100vw - 32px)) !important;
+  max-width: calc(100vw - 32px) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22) !important;
+}
+
+body > .el-overlay .delete-confirm-box .el-message-box__btns {
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+}
+
 .divider {
   width: 1px;
   height: 20px;

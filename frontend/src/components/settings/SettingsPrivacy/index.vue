@@ -11,6 +11,48 @@
 
     <div class="privacy-section">
       <h3 class="section-title">
+        <i class="fas fa-users"></i> 群组创建资格
+      </h3>
+      <div v-loading="loadingGroupPolicy" class="group-policy-card">
+        <template v-if="groupPolicy">
+          <div class="group-policy-head">
+            <div>
+              <strong>{{ groupPolicy.eligible ? '已满足创建群组条件' : '暂未满足创建群组条件' }}</strong>
+              <p v-if="groupPolicy.enabled">满足下列任一条件即可创建私信群组。</p>
+              <p v-else>管理员已暂时关闭用户创建群组。</p>
+            </div>
+            <el-tag :type="groupPolicy.eligible ? 'success' : 'warning'" effect="plain">
+              {{ groupPolicy.eligible ? '可创建' : '不可创建' }}
+            </el-tag>
+          </div>
+
+          <div class="group-policy-grid">
+            <div
+              class="group-policy-item"
+              :class="{ ok: groupPolicy.reasons?.public_notes }"
+            >
+              <i :class="groupPolicy.reasons?.public_notes ? 'fas fa-circle-check' : 'fas fa-file-lines'"></i>
+              <span>公开文章</span>
+              <strong>{{ groupPolicy.stats?.public_notes || 0 }}/{{ groupPolicy.min_public_notes }}</strong>
+            </div>
+            <div
+              class="group-policy-item"
+              :class="{ ok: groupPolicy.reasons?.followers }"
+            >
+              <i :class="groupPolicy.reasons?.followers ? 'fas fa-circle-check' : 'fas fa-user-plus'"></i>
+              <span>关注者</span>
+              <strong>{{ groupPolicy.stats?.followers || 0 }}/{{ groupPolicy.min_followers }}</strong>
+            </div>
+          </div>
+        </template>
+        <div v-else class="form-hint">群组创建条件加载失败，请稍后刷新设置页。</div>
+      </div>
+    </div>
+
+    <el-divider />
+
+    <div class="privacy-section">
+      <h3 class="section-title">
         <i class="fas fa-envelope"></i> 私信设置
       </h3>
       <el-form label-position="left" label-width="180px">
@@ -191,6 +233,8 @@ import '@/assets/styles/components/settings-privacy.css'
 
 const {
   loading,
+  groupPolicy,
+  loadingGroupPolicy,
   privacy,
   discoverability,
   regeneratingCode,

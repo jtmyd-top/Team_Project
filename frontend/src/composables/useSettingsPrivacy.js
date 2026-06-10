@@ -6,6 +6,8 @@ export function useSettingsPrivacy() {
 
   const loading = ref(false)
   const saving = ref(false)
+  const groupPolicy = ref(null)
+  const loadingGroupPolicy = ref(false)
 
   // 私信偏好
   const privacy = ref({
@@ -27,6 +29,26 @@ export function useSettingsPrivacy() {
   // 屏蔽列表
   const blockedUsers = ref([])
   const loadingBlocked = ref(false)
+
+  const loadGroupPolicy = async () => {
+    loadingGroupPolicy.value = true
+    try {
+      const res = await fetch('/api/messages/groups/policy/', {
+        headers: { 'X-CSRFToken': csrfToken },
+        cache: 'no-store'
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.status === 'success') {
+          groupPolicy.value = data.policy || null
+        }
+      }
+    } catch (e) {
+      console.error('加载群组创建策略失败:', e)
+    } finally {
+      loadingGroupPolicy.value = false
+    }
+  }
 
   /**
    * 加载私信偏好设置
@@ -237,11 +259,14 @@ export function useSettingsPrivacy() {
     loadPreference()
     loadBlockedUsers()
     loadDiscoverability()
+    loadGroupPolicy()
   })
 
   return {
     loading,
     saving,
+    groupPolicy,
+    loadingGroupPolicy,
     privacy,
     discoverability,
     regeneratingCode,
