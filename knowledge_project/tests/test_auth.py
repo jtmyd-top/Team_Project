@@ -20,6 +20,7 @@ import hashlib
 import time
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.cache import cache
@@ -128,6 +129,9 @@ class LoginApiTests(_AuthTestBase):
             'turnstile_token': 'dummy',
         })
         self.assertEqual(response.status_code, 200)
+        session_cookie = response.cookies.get(settings.SESSION_COOKIE_NAME)
+        self.assertIsNotNone(session_cookie)
+        self.assertEqual(int(session_cookie['max-age']), settings.SESSION_COOKIE_AGE)
 
     def test_login_wrong_password_returns_400(self):
         user = make_user('login02')

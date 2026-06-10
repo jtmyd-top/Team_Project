@@ -428,7 +428,7 @@ def verify_2fa_login(request):
 
 
     # 2FA验证成功，完成登录
-    login(request, user)
+    login_with_persistent_session(request, user)
 
     # 发送登录通知（使用CustomLoginView的静态方法）
     CustomLoginView().send_login_notification(request, user, login_method=login_method_detail)

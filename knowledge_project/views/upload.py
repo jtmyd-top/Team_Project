@@ -10,6 +10,7 @@ import threading
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.db.models import Q
 from django.http import (
     Http404,
     HttpResponse,
@@ -18,7 +19,8 @@ from django.http import (
 )
 from django.views.decorators.http import require_http_methods
 
-from ..models import Asset, NoteAsset
+from ..models import Asset, NoteAsset, Profile
+from ..utils.accelerated_media import media_file_response
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +162,23 @@ def protected_media_view(request, file_path):
             return HttpResponse(f.read(), content_type=content_type or 'application/octet-stream')
     except FileNotFoundError:
         raise Http404
+
+
+def public_profile_media_view(request, file_path):
+    """
+    Serve public profile media under MEDIA_URL without exposing arbitrary uploads.
+
+    In production DEBUG=False, Django does not add the automatic MEDIA_URL route.
+    Avatars and profile banners are intentionally public, but regular uploaded
+    note/message files must keep using their permission-checked endpoints.
+    """
+    normalized_file_path = str(file_path or '').replace('\\', '/').lstrip('/')
+    if not Profile.objects.filter(
+        Q(avatar=normalized_file_path) | Q(banner_image=normalized_file_path)
+    ).exists():
+        raise Http404
+
+    return media_file_response(normalized_file_path)
 
 
 @login_required

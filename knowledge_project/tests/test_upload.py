@@ -213,3 +213,39 @@ class ProtectedMediaViewTests(_UploadTestBase):
         login(self.client, author)
         response = self.client.get(reverse('protected_media_view', args=['../etc/passwd']))
         self.assertEqual(response.status_code, 404)
+
+
+class PublicProfileMediaViewTests(_UploadTestBase):
+    def setUp(self):
+        super().setUp()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._override = override_settings(MEDIA_ROOT=self._tmpdir.name, MEDIA_URL='/uploads/')
+        self._override.enable()
+
+    def tearDown(self):
+        self._override.disable()
+        self._tmpdir.cleanup()
+        super().tearDown()
+
+    def test_avatar_file_can_be_served_publicly(self):
+        user = make_user('av01')
+        user.profile.avatar.save(
+            'avatar.png',
+            SimpleUploadedFile('avatar.png', PNG_BYTES, content_type='image/png'),
+            save=True,
+        )
+
+        response = self.client.get(f'/uploads/{user.profile.avatar.name}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'image/png')
+
+    def test_unregistered_upload_file_is_not_public(self):
+        private_path = os.path.join(self._tmpdir.name, 'user_999', 'private.png')
+        os.makedirs(os.path.dirname(private_path), exist_ok=True)
+        with open(private_path, 'wb') as private_file:
+            private_file.write(PNG_BYTES)
+
+        response = self.client.get('/uploads/user_999/private.png')
+
+        self.assertEqual(response.status_code, 404)

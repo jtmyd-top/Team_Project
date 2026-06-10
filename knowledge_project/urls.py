@@ -63,6 +63,7 @@ urlpatterns = [
     # ==================== 私信功能 API ====================
     path('messages/', views.messages_view, name='messages'),
     path('uploads/messages/<path:path>', views.blocked_message_attachment_media_api, name='blocked_message_attachment_media_api'),
+    re_path(r'^uploads/(?P<file_path>.*)$', views.public_profile_media_view, name='public_profile_media_view'),
     path('api/messages/send/', views.send_message_api, name='send_message_api'),
     path('api/messages/forward/', views.forward_message_api, name='forward_message_api'),
     path('api/messages/attachments/upload/', views.upload_message_attachment_api, name='upload_message_attachment_api'),

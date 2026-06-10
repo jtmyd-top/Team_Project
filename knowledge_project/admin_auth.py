@@ -370,6 +370,7 @@ class SecureAdminSite(AdminSite):
         """完成登录"""
         self._clear_2fa_session(request)
         login(request, user)
+        request.session.set_expiry(settings.SESSION_COOKIE_AGE)
         logger.info(f"Admin 登录成功: {user.username}, IP: {self._get_client_ip(request)}")
 
         # 重定向到 Admin 首页

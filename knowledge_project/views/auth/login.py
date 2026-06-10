@@ -129,7 +129,7 @@ class CustomLoginView(View):
                 })
             else:
             # 没有启用2FA，直接登录
-                login(request, user)
+                login_with_persistent_session(request, user)
 
                 # 发送登录通知
                 self.send_login_notification(request, user, login_method="标准密码登录")
@@ -583,7 +583,7 @@ def login_api(request):
                 device = TrustedDevice.get_by_token(trust_token)
                 if device and device.user_id == user.id:
                     # 信任设备有效，跳过2FA，直接登录
-                    login(request, user)
+                    login_with_persistent_session(request, user)
 
                     # 获取当前IP并续期
                     ip_address = get_client_ip(request)
@@ -683,7 +683,7 @@ def login_api(request):
             })
 
         # 没有2FA，直接登录
-        login(request, user)
+        login_with_persistent_session(request, user)
 
         # 发送登录通知
         CustomLoginView().send_login_notification(request, user, login_method="API密码登录")

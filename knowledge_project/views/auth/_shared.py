@@ -69,6 +69,12 @@ from bs4 import BeautifulSoup
 USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
 
 
+def login_with_persistent_session(request, user):
+    """Log in and write the configured session lifetime immediately."""
+    login(request, user)
+    request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+
+
 class CustomUserCreationForm(UserCreationForm):
     email = forms.EmailField(required=True, help_text='必填项。')
 

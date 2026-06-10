@@ -93,8 +93,7 @@ class SignUpView(View):
             del request.session['registration_verification']
 
             # 注册成功后自动登录 (可选，但极大提升用户体验)
-            from django.contrib.auth import login
-            login(request, user)
+            login_with_persistent_session(request, user)
 
             # 返回成功响应，跳转到知识库
             return JsonResponse({
