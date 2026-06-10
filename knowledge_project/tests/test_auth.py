@@ -27,7 +27,7 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import PasswordResetAttempt
+from knowledge_project.models import PasswordResetAttempt, UserSanction
 from knowledge_project.views.auth.rate_limit import (
     check_rate_limit,
     get_client_fingerprint,
@@ -154,6 +154,38 @@ class LoginApiTests(_AuthTestBase):
             'turnstile_token': 'dummy',
         })
         self.assertEqual(response.status_code, 400)
+
+    @patch('knowledge_project.views.auth.login.verify_captcha_unified', return_value=(True, None))
+    def test_login_inactive_permanent_ban_returns_ban_reason(self, _mocked):
+        user = make_user('login06')
+        UserSanction.objects.create(user=user, sanction_type='ban_login')
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+
+        response = post_json(self.client, reverse('login_api'), {
+            'username': user.username,
+            'password': 'pass-word-123!',
+            'turnstile_token': 'dummy',
+        })
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('永久封禁登录', parse(response).get('error', ''))
+
+    @patch('knowledge_project.views.auth.login.verify_captcha_unified', return_value=(True, None))
+    def test_login_inactive_banned_wrong_password_hides_reason(self, _mocked):
+        user = make_user('login07')
+        UserSanction.objects.create(user=user, sanction_type='ban_login')
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+
+        response = post_json(self.client, reverse('login_api'), {
+            'username': user.username,
+            'password': 'WRONG',
+            'turnstile_token': 'dummy',
+        })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(parse(response).get('error'), '用户名或密码错误')
 
     def test_login_requires_captcha(self):
         # 不传 turnstile_token,即使其它字段对也应被验证码挡下

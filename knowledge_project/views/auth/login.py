@@ -23,6 +23,21 @@ def store_login_2fa_email_code(request, email_code):
     request.session['2fa_email_timestamp'] = time.time()
 
 
+def _login_ban_response(user):
+    from ...models import UserSanction
+
+    login_ban = UserSanction.is_login_banned(user)
+    if login_ban is None:
+        return None
+
+    if login_ban.expires_at is None:
+        msg = '账户已被永久封禁登录，请联系管理员'
+    else:
+        expire_str = timezone.localtime(login_ban.expires_at).strftime('%Y-%m-%d %H:%M')
+        msg = f'账户登录已被封禁，解除时间：{expire_str}'
+    return JsonResponse({'error': msg}, status=403)
+
+
 class CustomLoginView(View):
     """
     支持两因素认证的自定义登录视图。
@@ -531,6 +546,23 @@ def login_api(request):
         if not captcha_valid:
             return JsonResponse({'error': captcha_error}, status=400)
 
+        # Permanent login sanctions also deactivate the user. Django's
+        # ModelBackend rejects inactive users before this view can report the
+        # sanction, so first verify the submitted password without logging in.
+        candidate_user = None
+        try:
+            candidate_user = User._default_manager.get_by_natural_key(username)
+        except User.DoesNotExist:
+            candidate_user = None
+
+        if candidate_user is not None and candidate_user.check_password(password):
+            ban_response = _login_ban_response(candidate_user)
+            if ban_response is not None:
+                return ban_response
+
+            if not candidate_user.is_active:
+                return JsonResponse({'error': '账户已被禁用'}, status=400)
+
         # 验证用户名和密码
         user = authenticate(request, username=username, password=password)
 
@@ -542,15 +574,9 @@ def login_api(request):
             return JsonResponse({'error': '账户已被禁用'}, status=400)
 
         # === 检查登录封禁处置（限时/永久） ===
-        from ...models import UserSanction
-        login_ban = UserSanction.is_login_banned(user)
-        if login_ban is not None:
-            if login_ban.expires_at is None:
-                msg = '账户已被永久封禁登录，请联系管理员'
-            else:
-                expire_str = timezone.localtime(login_ban.expires_at).strftime('%Y-%m-%d %H:%M')
-                msg = f'账户登录已被封禁，解除时间：{expire_str}'
-            return JsonResponse({'error': msg}, status=403)
+        ban_response = _login_ban_response(user)
+        if ban_response is not None:
+            return ban_response
 
         # === 检查账户是否被冻结 ===
         user_lock_key = f'vault_user_lock:{user.id}'
