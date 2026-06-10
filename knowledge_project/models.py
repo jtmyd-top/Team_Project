@@ -521,7 +521,8 @@ class Profile(models.Model):
     @staticmethod
     def escape_markup(text):
         """转义纯文本中的HTML标记"""
-        return mark_safe(text).replace('<', '&lt;').replace('>', '&gt;')
+        from django.utils.html import escape
+        return mark_safe(escape(text))
 
     def save(self, *args, **kwargs):
         self.bio = self.clean_bio()

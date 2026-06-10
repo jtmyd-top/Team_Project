@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=www-data
+Group=www-data
 WorkingDirectory=/opt/Team_Project
 EnvironmentFile=/opt/Team_Project/.env
 ExecStart=/opt/Team_Project/.venv/bin/daphne -b 0.0.0.0 -p 8000 Team_Project.asgi:application

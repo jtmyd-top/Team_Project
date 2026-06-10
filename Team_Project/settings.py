@@ -25,19 +25,21 @@ def env_list(name, default=''):
 DJANGO_ENV = os.getenv('DJANGO_ENV', 'development').strip().lower()
 IS_PRODUCTION = DJANGO_ENV in {'prod', 'production'}
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-for-dev')
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        'SECRET_KEY must be set in .env or environment variables. '
+        'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
 DEBUG = env_bool('DEBUG', not IS_PRODUCTION)
 
 _allowed_hosts = env_list('ALLOWED_HOSTS')
 if _allowed_hosts:
     ALLOWED_HOSTS = _allowed_hosts
 elif DEBUG:
-    ALLOWED_HOSTS = ['*']
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 else:
     raise ImproperlyConfigured('ALLOWED_HOSTS must be set in production.')
-
-if IS_PRODUCTION and SECRET_KEY == 'django-insecure-fallback-key-for-dev':
-    raise ImproperlyConfigured('SECRET_KEY must be set in production.')
 
 CSRF_TRUSTED_ORIGINS = env_list(
     'CSRF_TRUSTED_ORIGINS',
