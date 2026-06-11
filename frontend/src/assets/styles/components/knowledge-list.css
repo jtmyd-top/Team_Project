@@ -136,18 +136,26 @@ body > .el-overlay .delete-confirm-box.el-message-box {
 }
 
 body > .el-overlay .delete-confirm-box .el-message-box__header {
-  padding: 22px 24px 0 !important;
+  position: relative !important;
+  min-height: 32px !important;
+  padding: 22px 58px 0 24px !important;
 }
 
 body > .el-overlay .delete-confirm-box .el-message-box__headerbtn {
+  position: absolute !important;
   top: 16px !important;
   right: 16px !important;
   width: 32px !important;
   height: 32px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
   border-radius: 8px !important;
+  background: transparent !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
+  line-height: 1 !important;
   color: #98a2b3 !important;
   transition: background 0.2s ease, color 0.2s ease !important;
 }
@@ -165,13 +173,21 @@ body > .el-overlay .delete-confirm-box .el-message-box__close svg {
 }
 
 body > .el-overlay .delete-confirm-box .el-message-box__title {
-  display: flex !important;
+  display: inline-flex !important;
   align-items: center !important;
+  flex-wrap: nowrap !important;
   gap: 10px !important;
+  width: auto !important;
+  max-width: 100% !important;
   color: #b42318 !important;
   font-size: 18px !important;
   font-weight: 700 !important;
   line-height: 1.35 !important;
+  white-space: nowrap !important;
+}
+
+body > .el-overlay .delete-confirm-box .el-message-box__title span {
+  display: inline-block !important;
 }
 
 body > .el-overlay .delete-confirm-box .el-message-box__title::before {
@@ -179,6 +195,7 @@ body > .el-overlay .delete-confirm-box .el-message-box__title::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
   flex: 0 0 auto;
   width: 32px;
   height: 32px;
