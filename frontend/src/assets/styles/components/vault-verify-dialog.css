@@ -1,29 +1,60 @@
 /* VaultVerifyDialog 样式 */
 
 /* 对话框背景模糊 */
-:deep(.el-overlay) {
+body > .vault-verify-overlay.el-overlay,
+body > .el-overlay.vault-verify-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 3000 !important;
   backdrop-filter: blur(6px);
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(15, 23, 42, 0.42);
 }
 
-:deep(.vault-verify-dialog) {
-  border-radius: 20px;
-  overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+body > .vault-verify-overlay .el-overlay-dialog {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px !important;
+  overflow: auto !important;
 }
 
-:deep(.vault-verify-dialog .el-dialog__header) {
-  display: none;
+body > .vault-verify-overlay .vault-verify-dialog.el-dialog {
+  width: min(450px, calc(100vw - 32px)) !important;
+  max-width: calc(100vw - 32px) !important;
+  max-height: calc(100vh - 32px) !important;
+  margin: 0 !important;
+  border-radius: 20px !important;
+  overflow: hidden !important;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.38) !important;
 }
 
-:deep(.vault-verify-dialog .el-dialog__body) {
-  padding: 0;
+body > .vault-verify-overlay .vault-verify-dialog .el-dialog__header {
+  display: none !important;
 }
 
-:deep(.vault-verify-dialog .el-dialog__footer) {
-  padding: 20px 32px 28px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
+body > .vault-verify-overlay .vault-verify-dialog .el-dialog__body {
+  padding: 0 !important;
+}
+
+body > .vault-verify-overlay .vault-verify-dialog .el-dialog__footer {
+  padding: 20px 32px 28px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+
+body > .vault-verify-overlay .vault-verify-dialog .el-icon,
+body > .vault-verify-overlay .vault-verify-dialog .el-icon svg {
+  width: 1em !important;
+  height: 1em !important;
+  display: inline-flex !important;
+}
+
+body > .vault-verify-overlay .vault-verify-dialog .el-select__caret {
+  width: 14px !important;
+  height: 14px !important;
+  font-size: 14px !important;
 }
 
 .vault-verify-content {
@@ -222,11 +253,11 @@
   margin: 0 auto;
 }
 
-.duration-select :deep(.el-input) {
+.duration-select .el-input {
   border-radius: 10px;
 }
 
-.duration-select :deep(.el-input__wrapper) {
+.duration-select .el-input__wrapper {
   border-color: #dcdfe6;
 }
 
@@ -314,7 +345,7 @@
   margin-top: 8px;
 }
 
-.backup-toggle :deep(.el-checkbox__label) {
+.backup-toggle .el-checkbox__label {
   color: #909399;
   font-size: 13px;
 }
@@ -336,6 +367,13 @@
   align-items: center;
   gap: 8px;
   transition: all 0.3s ease;
+}
+
+.dialog-footer .el-button i,
+.cancel-btn i,
+.verify-btn i {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .cancel-btn {
@@ -426,8 +464,8 @@
     border-color: #667eea;
   }
 
-  :deep(.vault-verify-dialog .el-dialog__footer) {
-    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  body > .vault-verify-overlay .vault-verify-dialog .el-dialog__footer {
+    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%) !important;
   }
 
   .cancel-btn {

@@ -15,7 +15,7 @@
 <!-- Vite 构建提取的组件样式 -->
 {% is_vite_dev as vite_dev %}
 {% if not vite_dev %}
-<link href="{% static 'dist/assets/knowledge.css' %}?v={{ timestamp|default:'20260612-delete-dialog-header-align' }}" rel="stylesheet">
+<link href="{% static 'dist/assets/knowledge.css' %}?v={{ timestamp|default:'20260612-vault-dialog-overlay-fix' }}" rel="stylesheet">
 {% endif %}
 
 <style>
@@ -50,6 +50,6 @@
 <script type="module" src="http://localhost:5173/src/entries/knowledge-list.js"></script>
 {% else %}
 <!-- 生产模式：从构建目录加载 -->
-<script type="module" src="{% static 'dist/knowledge-list.js' %}?v={{ timestamp|default:'20260612-delete-dialog-icon-fix' }}"></script>
+<script type="module" src="{% static 'dist/knowledge-list.js' %}?v={{ timestamp|default:'20260612-vault-dialog-overlay-fix' }}"></script>
 {% endif %}
 {% endblock %}

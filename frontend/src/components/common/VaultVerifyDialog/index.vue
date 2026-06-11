@@ -5,6 +5,8 @@
     width="450px"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
+    modal-class="vault-verify-overlay"
+    align-center
     @close="handleClose"
     class="vault-verify-dialog"
   >
