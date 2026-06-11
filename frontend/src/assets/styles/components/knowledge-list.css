@@ -139,6 +139,31 @@ body > .el-overlay .delete-confirm-box .el-message-box__header {
   padding: 22px 24px 0 !important;
 }
 
+body > .el-overlay .delete-confirm-box .el-message-box__headerbtn {
+  top: 16px !important;
+  right: 16px !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #98a2b3 !important;
+  transition: background 0.2s ease, color 0.2s ease !important;
+}
+
+body > .el-overlay .delete-confirm-box .el-message-box__headerbtn:hover {
+  background: #f2f4f7 !important;
+  color: #344054 !important;
+}
+
+body > .el-overlay .delete-confirm-box .el-message-box__close,
+body > .el-overlay .delete-confirm-box .el-message-box__close svg {
+  width: 18px !important;
+  height: 18px !important;
+  display: block !important;
+}
+
 body > .el-overlay .delete-confirm-box .el-message-box__title {
   display: flex !important;
   align-items: center !important;
@@ -150,7 +175,7 @@ body > .el-overlay .delete-confirm-box .el-message-box__title {
 }
 
 body > .el-overlay .delete-confirm-box .el-message-box__title::before {
-  content: "\f071";
+  content: "!";
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -160,9 +185,10 @@ body > .el-overlay .delete-confirm-box .el-message-box__title::before {
   border-radius: 50%;
   background: #fef3f2;
   color: #d92d20;
-  font-family: "Font Awesome 6 Free";
-  font-size: 14px;
-  font-weight: 900;
+  font-family: Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 body > .el-overlay .delete-confirm-box .el-message-box__content {
