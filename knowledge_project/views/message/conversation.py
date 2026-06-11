@@ -14,6 +14,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
+from ...moderation_utils import notify_user
 from ._constants import NEW_CONV_DAILY_LIMIT, RECALL_WINDOW_SECONDS
 from ._helpers import (
     _apply_disappearing,
@@ -120,6 +121,18 @@ def send_message_api(request):
             transaction.on_commit(
                 lambda: _maybe_send_new_message_email(request.user, recipient, preview_for_email)
             )
+            if recipient != request.user:
+                transaction.on_commit(
+                    lambda: notify_user(
+                        recipient,
+                        'new_message',
+                        f'{request.user.username} 给你发来新消息',
+                        preview_for_email,
+                        sender_id=request.user.id,
+                        sender_username=request.user.username,
+                        message_id=message.id,
+                    )
+                )
             transaction.on_commit(lambda: _push_new_message_events(message))
 
         # 发送动作也触发一次阅后即焚清理（若发送者或对方有超 TTL 的旧已读消息）

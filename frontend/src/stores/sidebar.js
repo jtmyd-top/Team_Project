@@ -856,6 +856,33 @@ export const useSidebarStore = defineStore('sidebar', () => {
   /**
    * 收藏/取消收藏笔记
    */
+  async function copyNoteToFolder(noteId, folderId) {
+    try {
+      const response = await folderApi.copyNote(noteId, folderId)
+
+      window.dispatchEvent(new CustomEvent('note-copied', {
+        detail: { sourceNoteId: noteId, noteId: response.note_id, folderId }
+      }))
+
+      if (activeModule.value === 'my-space') {
+        if (secondaryView.value === 'folders') {
+          await loadFolders()
+        } else if (secondaryView.value === 'notes') {
+          const data = await folderApi.fetchNotes(currentFolderId.value)
+          currentNotes.value = data.notes || []
+          currentSubfolders.value = data.subfolders || []
+        }
+      } else {
+        await loadModuleData()
+      }
+
+      return response
+    } catch (e) {
+      error.value = e.message
+      throw e
+    }
+  }
+
   async function toggleNoteFavorite(noteId) {
     try {
       const response = await fetch(`/api/notes/${noteId}/favorite/`, {
@@ -1010,6 +1037,7 @@ export const useSidebarStore = defineStore('sidebar', () => {
     renameNote,
     deleteFolder,
     moveNoteToFolder,
+    copyNoteToFolder,
     toggleNoteFavorite,
     trashNote,
     restoreNote,

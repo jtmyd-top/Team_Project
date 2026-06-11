@@ -7,6 +7,7 @@ import logging
 import os
 import re
 
+from django.contrib.staticfiles import finders
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import IntegrityError
@@ -14,11 +15,37 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
-from ..models import MessagePreference, Note, Profile, ProfileLike
+from ..models import MessagePreference, Note, Profile, ProfileLike, ProfileVisit
+from ..utils.request_utils import get_client_ip
 from .upload import _delayed_delete_file
 
 logger = logging.getLogger(__name__)
 USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
+
+
+def _static_asset_version(*paths):
+    mtimes = []
+    for path in paths:
+        found = finders.find(path)
+        candidates = found if isinstance(found, (list, tuple)) else [found]
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                mtimes.append(os.path.getmtime(candidate))
+    return str(int(max(mtimes))) if mtimes else "20260611-group-policy-fix2"
+
+
+def _record_profile_visit(request, profile):
+    if request.user.is_authenticated and request.user.id == profile.user_id:
+        return
+    if not request.session.session_key:
+        request.session.save()
+    ProfileVisit.objects.create(
+        profile=profile,
+        viewer=request.user if request.user.is_authenticated else None,
+        session_key=request.session.session_key or '',
+        ip_address=get_client_ip(request),
+        user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:255],
+    )
 
 
 @login_required
@@ -49,11 +76,12 @@ def settings_view(request):
         "bio": profile.bio if profile.bio else "",
         "likes_count": profile.likes_count,
         "notes_count": notes_count,
-        "views_count": 0,  # 暂时默认为0，后续可以添加访问统计功能
+        "views_count": ProfileVisit.objects.filter(profile=profile).count(),
         "is_liked": is_liked,
         # ✅ 添加 2FA 状态 - 现在 profile 一定存在
         "two_fa_enabled": profile.two_fa_enabled,
         "two_fa_method": profile.two_fa_method or 'totp',
+        "timestamp": _static_asset_version("dist/settings.js", "dist/assets/settings.css"),
     }
 
     # 添加调试日志
@@ -569,13 +597,15 @@ def theme_test_view(request):
 @require_http_methods(["GET"])
 def user_public_profile_view(request, user_id):
     """用户公开主页：展示用户的公开笔记、统计与简介"""
-    from django.db.models import Sum, Count
+    from django.db.models import Count
     from django.shortcuts import get_object_or_404
     from ..models import UserFollow, UserBlocklist
     from .message import _get_avatar_url
 
     target = get_object_or_404(User, id=user_id)
     profile = target.profile
+    is_self = request.user.is_authenticated and request.user.id == target.id
+    _record_profile_visit(request, profile)
 
     public_notes_qs = Note.objects.filter(
         author=target, is_public=True
@@ -584,12 +614,11 @@ def user_public_profile_view(request, user_id):
     ).order_by('-updated_at')
 
     notes_count = public_notes_qs.count()
-    views_count = public_notes_qs.aggregate(total=Sum('views'))['total'] or 0
+    views_count = ProfileVisit.objects.filter(profile=profile).count()
     likes_count = ProfileLike.objects.filter(profile=profile).count()
     followers_count = UserFollow.objects.filter(following=target).count()
     following_count = UserFollow.objects.filter(follower=target).count()
 
-    is_self = request.user.is_authenticated and request.user.id == target.id
     is_following = False
     is_blocked = False
     blocked_me = False

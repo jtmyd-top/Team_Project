@@ -323,6 +323,58 @@ def move_note_api(request, note_id):
 
 
 @login_required
+@require_http_methods(["POST"])
+def copy_note_api(request, note_id):
+    """Copy the current user's note into inbox or a target folder."""
+    user = request.user
+    source = get_object_or_404(Note, id=note_id, author=user, is_trashed=False)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    folder_id = data.get('folder_id')
+    target_folder = None
+    if folder_id is not None:
+        target_folder = get_object_or_404(Folder, id=folder_id, owner=user, is_trashed=False)
+
+    copied = Note.objects.create(
+        title=source.title,
+        content=source.content,
+        author=user,
+        folder=target_folder,
+        last_modified_by=user,
+        is_public=False,
+        is_favorited=False,
+        is_secret=source.is_secret,
+    )
+    copied.tags.set(source.tags.all())
+    copied.save()
+
+    cache.delete(get_sidebar_cache_key(user.id))
+    log_action(user, copied, 1, f'Copied note from #{source.id}')
+
+    return JsonResponse({
+        'status': 'success',
+        'note_id': copied.id,
+        'source_note_id': source.id,
+        'folder_id': copied.folder_id,
+        'note': {
+            'id': copied.id,
+            'title': copied.title,
+            'updated_at': copied.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'is_favorited': copied.is_favorited,
+            'is_secret': copied.is_secret,
+            'folder': {
+                'id': copied.folder.id,
+                'name': copied.folder.name,
+            } if copied.folder else None,
+        }
+    }, status=201)
+
+
+@login_required
 @require_http_methods(["GET"])
 def all_notes_flat_api(request):
     """获取所有笔记的扁平列表（用于全部笔记视图）"""

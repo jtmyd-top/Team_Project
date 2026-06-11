@@ -118,8 +118,8 @@ export function useMoveToDialog(props, emit) {
         await sidebarStore.moveNoteToFolder(props.note.id, selectedFolderId.value)
         ElMessage.success(`已移动到「${selectedFolderName.value}」`)
       } else {
-        // 复制功能 TODO: 实现复制 API
-        ElMessage.info('复制功能开发中...')
+        await sidebarStore.copyNoteToFolder(props.note.id, selectedFolderId.value)
+        ElMessage.success(`已复制到「${selectedFolderName.value}」`)
       }
 
       emit('confirm', {

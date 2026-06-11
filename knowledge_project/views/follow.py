@@ -9,6 +9,8 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
+from ..moderation_utils import notify_user
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,15 @@ def follow_user_api(request):
         _, created = UserFollow.objects.get_or_create(
             follower=request.user, following=target
         )
+        if created:
+            notify_user(
+                target,
+                'new_follower',
+                f'{request.user.username} 关注了你',
+                '',
+                follower_id=request.user.id,
+                follower_username=request.user.username,
+            )
         followers_count = UserFollow.objects.filter(following=target).count()
         return JsonResponse({
             'status': 'success',

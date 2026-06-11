@@ -23,6 +23,7 @@ from .dashboard import *  # noqa: F401, F403
 from .follow import *  # noqa: F401, F403
 from .message import *  # noqa: F401, F403
 from .note import *  # noqa: F401, F403
+from .notifications import *  # noqa: F401, F403
 from .profile import *  # noqa: F401, F403
 from .stats import *  # noqa: F401, F403
 from .upload import *  # noqa: F401, F403

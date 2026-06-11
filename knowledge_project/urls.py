@@ -58,6 +58,9 @@ urlpatterns = [
 
     # ==================== 通知偏好设置 API ====================
     path('api/notification-preferences/', views.notification_preferences, name='notification_preferences'),
+    path('api/notifications/', views.notifications_list_api, name='notifications_list_api'),
+    path('api/notifications/unread-count/', views.notifications_unread_count_api, name='notifications_unread_count_api'),
+    path('api/notifications/mark-read/', views.notifications_mark_read_api, name='notifications_mark_read_api'),
 
     # ==================== 主题设置 API ====================
     path('api/theme-settings/', views.theme_settings, name='theme_settings'),
@@ -155,6 +158,7 @@ urlpatterns = [
     path('api/notes/favorited/', folder_views.favorited_notes_api, name='favorited_notes_api'),
     path('api/notes/trashed/', folder_views.trashed_notes_api, name='trashed_notes_api'),
     path('api/notes/<int:note_id>/move/', folder_views.move_note_api, name='move_note_api'),
+    path('api/notes/<int:note_id>/copy/', folder_views.copy_note_api, name='copy_note_api'),
     path('api/notes/<int:note_id>/favorite/', folder_views.toggle_note_favorite_api, name='toggle_note_favorite_api'),
     path('api/notes/<int:note_id>/trash/', folder_views.trash_note_api, name='trash_note_api'),
     path('api/notes/<int:note_id>/restore/', folder_views.restore_note_api, name='restore_note_api'),

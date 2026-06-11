@@ -580,6 +580,29 @@ class Profile(models.Model):
 
 
 # ---------------- 点赞记录模型 ----------------
+class ProfileVisit(models.Model):
+    """A visit to a user's public profile page."""
+    profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='profile_visits')
+    viewer = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='profile_visits_made')
+    session_key = models.CharField(max_length=40, blank=True, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Profile visit"
+        verbose_name_plural = "Profile visits"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['profile', '-created_at'], name='profilevisit_profile_idx'),
+            models.Index(fields=['viewer', '-created_at'], name='profilevisit_viewer_idx'),
+        ]
+
+    def __str__(self):
+        viewer = self.viewer.username if self.viewer_id else self.session_key or 'anonymous'
+        return f"{viewer} visited {self.profile.user.username}"
+
+
 class ProfileLike(models.Model):
     """
     记录用户之间的点赞关系
@@ -2010,6 +2033,12 @@ class UserNotification(models.Model):
         ('sanction_revoked', '处置解除'),
         ('appeal_submitted', '申诉已提交'),
         ('appeal_resolved', '申诉已处理'),
+        ('new_comment', 'New comment'),
+        ('comment_reply', 'Comment reply'),
+        ('profile_liked', 'Profile liked'),
+        ('new_follower', 'New follower'),
+        ('new_message', 'New message'),
+        ('note_copied', 'Note copied'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name="接收用户")

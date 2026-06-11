@@ -266,6 +266,18 @@ const apiService = {
   updateNotificationPreferences(preferences) {
     return postRequest('/api/notification-preferences/', preferences);
   },
+
+  listNotifications(params = {}) {
+    return getRequest('/api/notifications/', params);
+  },
+
+  getUnreadNotificationCount() {
+    return getRequest('/api/notifications/unread-count/');
+  },
+
+  markNotificationsRead(payload = {}) {
+    return postRequest('/api/notifications/mark-read/', payload);
+  },
   
   // ==================== 主题设置相关 ====================
   

@@ -177,6 +177,73 @@ class MoveNoteApiTests(_FolderTestBase):
         self.assertIsNone(note.folder_id)
 
 
+class CopyNoteApiTests(_FolderTestBase):
+    def test_copy_to_folder_preserves_content_and_tags(self):
+        user = make_user('cp01')
+        folder = Folder.objects.create(name='Box', owner=user)
+        source = Note.objects.create(
+            author=user,
+            title='source',
+            content='<p>Hello</p>',
+            is_public=True,
+            views=12,
+        )
+        source.tags.create(name='copy-tag')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('copy_note_api', args=[source.id]), {
+            'folder_id': folder.id,
+        })
+
+        self.assertEqual(response.status_code, 201)
+        copied = Note.objects.get(id=parse(response)['note_id'])
+        source.refresh_from_db()
+        self.assertEqual(copied.author, user)
+        self.assertEqual(copied.folder_id, folder.id)
+        self.assertEqual(copied.title, source.title)
+        self.assertEqual(copied.content, source.content)
+        self.assertFalse(copied.is_public)
+        self.assertEqual(copied.views, 0)
+        self.assertEqual(list(copied.tags.values_list('name', flat=True)), ['copy-tag'])
+        self.assertIsNone(source.folder_id)
+        self.assertTrue(source.is_public)
+
+    def test_copy_to_inbox(self):
+        user = make_user('cp02')
+        folder = Folder.objects.create(name='Box', owner=user)
+        source = Note.objects.create(author=user, title='n', content='', folder=folder)
+        login(self.client, user)
+        response = post_json(self.client, reverse('copy_note_api', args=[source.id]), {
+            'folder_id': None,
+        })
+        self.assertEqual(response.status_code, 201)
+        copied = Note.objects.get(id=parse(response)['note_id'])
+        self.assertIsNone(copied.folder_id)
+        source.refresh_from_db()
+        self.assertEqual(source.folder_id, folder.id)
+
+    def test_copy_rejects_other_users_note(self):
+        owner = make_user('cp03_o')
+        intruder = make_user('cp03_i')
+        source = Note.objects.create(author=owner, title='n', content='')
+        login(self.client, intruder)
+        response = post_json(self.client, reverse('copy_note_api', args=[source.id]), {
+            'folder_id': None,
+        })
+        self.assertEqual(response.status_code, 404)
+
+    def test_copy_rejects_other_users_folder(self):
+        user_a = make_user('cp04_a')
+        user_b = make_user('cp04_b')
+        foreign_folder = Folder.objects.create(name='B-box', owner=user_b)
+        source = Note.objects.create(author=user_a, title='n', content='')
+        login(self.client, user_a)
+        response = post_json(self.client, reverse('copy_note_api', args=[source.id]), {
+            'folder_id': foreign_folder.id,
+        })
+        self.assertEqual(response.status_code, 404)
+
+
 # =========================================================================
 # trash_note_api / restore_note_api
 # =========================================================================

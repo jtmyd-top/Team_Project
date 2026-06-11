@@ -61,6 +61,54 @@
     <el-divider />
 
     <div class="notification-section">
+      <div class="notification-center-header">
+        <h3 class="section-title">
+          <i class="fas fa-inbox"></i> 站内通知
+          <el-badge v-if="unreadCount" :value="unreadCount" class="notification-badge" />
+        </h3>
+        <el-button
+          size="small"
+          :disabled="!unreadCount"
+          @click="markAllNotificationsRead"
+        >
+          全部标记已读
+        </el-button>
+      </div>
+
+      <el-skeleton v-if="notificationsLoading" :rows="3" animated />
+      <el-empty v-else-if="!notificationItems.length" description="暂无站内通知" />
+      <div v-else class="notification-center-list">
+        <div
+          v-for="item in notificationItems"
+          :key="item.id"
+          class="notification-center-item"
+          :class="{ unread: !item.is_read }"
+        >
+          <div class="notification-center-main">
+            <div class="notification-center-title">
+              <span>{{ item.title }}</span>
+              <el-tag v-if="!item.is_read" size="small" type="danger">未读</el-tag>
+            </div>
+            <div v-if="item.body" class="notification-center-body">{{ item.body }}</div>
+            <div class="notification-center-time">
+              {{ new Date(item.created_at).toLocaleString() }}
+            </div>
+          </div>
+          <el-button
+            v-if="!item.is_read"
+            text
+            type="primary"
+            @click="markNotificationRead(item.id)"
+          >
+            标记已读
+          </el-button>
+        </div>
+      </div>
+    </div>
+
+    <el-divider />
+
+    <div class="notification-section">
       <h3 class="section-title">
         <i class="fas fa-bell"></i> 浏览器通知
       </h3>
@@ -93,7 +141,12 @@ import '@/assets/styles/components/settings-notifications.css';
 
 const {
   notifications,
+  notificationItems,
+  unreadCount,
+  notificationsLoading,
   browserNotificationSupported,
+  markNotificationRead,
+  markAllNotificationsRead,
   saveNotifications,
   handleBrowserNotificationToggle
 } = useSettingsNotifications();

@@ -133,6 +133,15 @@ export const folderApi = {
     return await response.json()
   },
 
+  async copyNote(noteId, folderId, csrfToken) {
+    const response = await fetchWrapper(`/api/notes/${noteId}/copy/`, {
+      method: 'POST',
+      csrfToken,
+      body: JSON.stringify({ folder_id: folderId })
+    })
+    return await response.json()
+  },
+
   /**
    * 获取文件夹面包屑路径
    * @param {string|number} folderId - 文件夹 ID

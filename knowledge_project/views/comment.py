@@ -266,6 +266,28 @@ def note_comment_create_api(request, note_id):
             parent=parent
         )
 
+        if parent and parent.author_id != request.user.id:
+            notify_user(
+                parent.author,
+                'comment_reply',
+                f'{request.user.username} 回复了你的评论',
+                content,
+                note_id=note.id,
+                public_id=str(note.public_id),
+                comment_id=comment.id,
+                parent_comment_id=parent.id,
+            )
+        if note.author_id != request.user.id and (not parent or parent.author_id != note.author_id):
+            notify_user(
+                note.author,
+                'new_comment',
+                f'{request.user.username} 评论了你的笔记',
+                content,
+                note_id=note.id,
+                public_id=str(note.public_id),
+                comment_id=comment.id,
+            )
+
         def get_avatar(user):
             try:
                 if user.profile.avatar:

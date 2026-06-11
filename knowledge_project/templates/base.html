@@ -47,8 +47,8 @@
 
       /* 全站 Live2D 看板娘 */
       #waifu {
-        right: 20px !important;
-        left: auto !important;
+        left: 20px !important;
+        right: auto !important;
         bottom: 0 !important;
         z-index: 999 !important;
       }
@@ -73,9 +73,10 @@
 
       @media (max-width: 768px) {
         #waifu {
-          right: 8px !important;
+          left: 8px !important;
+          right: auto !important;
           transform: scale(0.82);
-          transform-origin: bottom right;
+          transform-origin: bottom left;
         }
 
         #waifu-tips {

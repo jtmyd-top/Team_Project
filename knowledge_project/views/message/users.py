@@ -6,7 +6,6 @@ import time
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.db import models
 from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -14,7 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from urllib.parse import quote
 
-from ...models import Note, ProfileLike
+from ...models import Note, ProfileLike, ProfileVisit
 from ...utils.session_activity import mark_messages_page_activity
 from ._constants import MESSAGES_PAGE_ACTIVE_AT_KEY
 from ._helpers import _get_avatar_url, _server_error_response
@@ -26,9 +25,7 @@ def get_user_public_profile_api(request, user_id):
         user = get_object_or_404(User, id=user_id)
         profile = user.profile
         notes_count = Note.objects.filter(author=user, is_public=True).count()
-        views_count = Note.objects.filter(author=user, is_public=True).aggregate(
-            total_views=models.Sum('views')
-        )['total_views'] or 0
+        views_count = ProfileVisit.objects.filter(profile=profile).count()
         likes_count = ProfileLike.objects.filter(profile=profile).count()
         banner_url = profile.banner_image.url if profile.banner_image else ''
         banner_is_video = bool(banner_url.lower().split('?', 1)[0].endswith(('.mp4', '.webm', '.ogg')))

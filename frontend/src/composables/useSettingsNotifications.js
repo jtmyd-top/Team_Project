@@ -1,4 +1,4 @@
-import { reactive, onMounted } from 'vue';
+import { reactive, ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { apiService } from '../services/apiService.js';
 
@@ -15,6 +15,9 @@ export function useSettingsNotifications() {
 
   const browserNotificationSupported =
     typeof window !== 'undefined' && 'Notification' in window;
+  const notificationItems = ref([]);
+  const unreadCount = ref(0);
+  const notificationsLoading = ref(false);
 
   const loadNotifications = async () => {
     try {
@@ -63,14 +66,53 @@ export function useSettingsNotifications() {
     await saveNotifications();
   };
 
+  const loadNotificationCenter = async () => {
+    notificationsLoading.value = true;
+    try {
+      const data = await apiService.listNotifications({ page_size: 10 });
+      notificationItems.value = data.notifications || [];
+      unreadCount.value = data.unread_count || 0;
+    } catch (error) {
+      console.error('加载站内通知失败:', error);
+      ElMessage.error('加载站内通知失败');
+    } finally {
+      notificationsLoading.value = false;
+    }
+  };
+
+  const markNotificationRead = async (id) => {
+    try {
+      await apiService.markNotificationsRead({ notification_ids: [id] });
+      await loadNotificationCenter();
+    } catch (error) {
+      ElMessage.error(error.message || '标记已读失败');
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    try {
+      await apiService.markNotificationsRead({ all: true });
+      await loadNotificationCenter();
+    } catch (error) {
+      ElMessage.error(error.message || '标记已读失败');
+    }
+  };
+
   onMounted(() => {
     loadNotifications();
+    loadNotificationCenter();
   });
 
   return {
     notifications,
+    notificationItems,
+    unreadCount,
+    notificationsLoading,
     browserNotificationSupported,
     loadNotifications,
+    loadNotificationCenter,
+    markNotificationRead,
+    markAllNotificationsRead,
     saveNotifications,
     handleBrowserNotificationToggle
   };

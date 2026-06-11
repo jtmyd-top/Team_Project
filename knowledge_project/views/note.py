@@ -29,6 +29,7 @@ from ..models import (
     UserSanction,
     auto_generate_tags_for_note,
 )
+from ..moderation_utils import notify_user
 from ..utils.misc import get_sidebar_cache_key, log_action
 
 logger = logging.getLogger(__name__)
@@ -502,6 +503,17 @@ def toggle_note_like(request):
                 liker=request.user,
                 profile=author_profile
             )
+            if request.user != note.author:
+                notify_user(
+                    note.author,
+                    'profile_liked',
+                    f'{request.user.username} 点赞了你的主页',
+                    note.title,
+                    note_id=note.id,
+                    public_id=str(note.public_id),
+                    liker_id=request.user.id,
+                    liker_username=request.user.username,
+                )
             action = 'liked'
             user_has_liked = True
 

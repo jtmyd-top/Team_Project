@@ -7,8 +7,8 @@
     "file": "chunks/apiError-BVbL-ZBU.js",
     "name": "apiError"
   },
-  "_apiService-BjtJ2a3q.js": {
-    "file": "chunks/apiService-BjtJ2a3q.js",
+  "_apiService-BILECL38.js": {
+    "file": "chunks/apiService-BILECL38.js",
     "name": "apiService",
     "imports": [
       "src/utils/csrf.js",
@@ -193,7 +193,7 @@
     "imports": [
       "_vue-vendor-DVZPkndV.js",
       "_element-plus-s9JgEXBK.js",
-      "_apiService-BjtJ2a3q.js",
+      "_apiService-BILECL38.js",
       "_index-ysFTJ8Bk.js",
       "_apiError-BVbL-ZBU.js",
       "_vendor-DChtZB4n.js",
@@ -292,7 +292,7 @@
     "isEntry": true,
     "imports": [
       "_vue-vendor-DVZPkndV.js",
-      "_apiService-BjtJ2a3q.js",
+      "_apiService-BILECL38.js",
       "_user-D5icAmv_.js",
       "_index-ysFTJ8Bk.js",
       "_apiError-BVbL-ZBU.js",
@@ -314,7 +314,7 @@
     "imports": [
       "_vue-vendor-DVZPkndV.js",
       "_element-plus-s9JgEXBK.js",
-      "_apiService-BjtJ2a3q.js",
+      "_apiService-BILECL38.js",
       "_index-ysFTJ8Bk.js",
       "_usePasswordStrength-Btr31DuL.js",
       "_apiError-BVbL-ZBU.js",

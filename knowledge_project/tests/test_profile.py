@@ -21,8 +21,10 @@ from knowledge_project.models import (
     Note,
     Profile,
     ProfileLike,
+    ProfileVisit,
     UserBlocklist,
     UserFollow,
+    UserNotification,
 )
 
 from ._helpers import login, make_user, parse, post_json
@@ -396,6 +398,22 @@ class UserPublicProfileViewTests(_ProfileTestBase):
         response = self.client.get(reverse('user_public_profile', args=[target.id]))
         self.assertEqual(response.context['followers_count'], 2)
 
+    def test_view_records_non_self_visit(self):
+        target = make_user('pv07_target')
+        viewer = make_user('pv07_viewer')
+        login(self.client, viewer)
+        response = self.client.get(reverse('user_public_profile', args=[target.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ProfileVisit.objects.filter(profile=target.profile, viewer=viewer).count(), 1)
+        self.assertEqual(response.context['views_count'], 1)
+
+    def test_view_does_not_record_self_visit(self):
+        user = make_user('pv08')
+        login(self.client, user)
+        response = self.client.get(reverse('user_public_profile', args=[user.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ProfileVisit.objects.filter(profile=user.profile).count(), 0)
+
 
 # =========================================================================
 # settings_view
@@ -413,3 +431,56 @@ class SettingsViewTests(_ProfileTestBase):
         ctx = response.context
         self.assertEqual(ctx['nickname'], user.username)
         self.assertEqual(ctx['email'], user.email)
+
+    def test_view_shows_profile_visit_count(self):
+        user = make_user('sv02')
+        viewer = make_user('sv02_viewer')
+        ProfileVisit.objects.create(profile=user.profile, viewer=viewer, session_key='s')
+        login(self.client, user)
+        response = self.client.get(reverse('settings'))
+        self.assertEqual(response.context['views_count'], 1)
+
+
+class NotificationCenterApiTests(_ProfileTestBase):
+    def test_list_notifications_and_unread_count(self):
+        user = make_user('nc01')
+        UserNotification.objects.create(user=user, kind='new_comment', title='A', body='body')
+        UserNotification.objects.create(user=user, kind='new_message', title='B', is_read=True)
+        login(self.client, user)
+
+        body = parse(self.client.get(reverse('notifications_list_api')))
+
+        self.assertEqual(body['status'], 'success')
+        self.assertEqual(len(body['notifications']), 2)
+        self.assertEqual(body['unread_count'], 1)
+
+        count_body = parse(self.client.get(reverse('notifications_unread_count_api')))
+        self.assertEqual(count_body['unread_count'], 1)
+
+    def test_mark_selected_notification_read(self):
+        user = make_user('nc02')
+        first = UserNotification.objects.create(user=user, kind='new_comment', title='A')
+        second = UserNotification.objects.create(user=user, kind='new_message', title='B')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('notifications_mark_read_api'), {
+            'notification_ids': [first.id],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertTrue(first.is_read)
+        self.assertFalse(second.is_read)
+        self.assertEqual(parse(response)['unread_count'], 1)
+
+    def test_mark_all_notifications_read(self):
+        user = make_user('nc03')
+        UserNotification.objects.create(user=user, kind='new_comment', title='A')
+        UserNotification.objects.create(user=user, kind='new_message', title='B')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('notifications_mark_read_api'), {'all': True})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(UserNotification.objects.filter(user=user, is_read=False).count(), 0)
