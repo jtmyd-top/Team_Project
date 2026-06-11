@@ -85,9 +85,12 @@ export function useNoteShadowViewer(props) {
     }
 
     if (!vaultStore.isUnlocked) {
-      console.error('[Vault] Vault is locked, cannot decrypt')
-      decryptError.value = '缺少加密密钥，请重新验证'
-      return
+      const recovered = await vaultStore.recoverKey()
+      if (!recovered || !vaultStore.isUnlocked) {
+        console.error('[Vault] Vault is locked, cannot decrypt')
+        decryptError.value = '缺少加密密钥，请重新验证'
+        return
+      }
     }
 
     const requestId = ++latestDecryptRequestId

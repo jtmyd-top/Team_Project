@@ -140,8 +140,11 @@ export function useNoteViewer(props) {
     }
 
     if (!vaultStore.isUnlocked) {
-      decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
-      return
+      const recovered = await vaultStore.recoverKey()
+      if (!recovered || !vaultStore.isUnlocked) {
+        decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
+        return
+      }
     }
 
     const requestId = ++latestDecryptRequestId

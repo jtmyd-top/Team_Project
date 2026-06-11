@@ -278,17 +278,20 @@ export function useSecondaryPanel(props, emit) {
   }
 
   // 【新增】回收站混合列表点击处理
-  function handleTrashItemClick(item) {
+  async function handleTrashItemClick(item) {
     if (item.type === 'folder') {
       sidebarStore.enterTrashedFolder(item.id)
     } else {
       // 【关键修复】如果是加密笔记且未解锁，先触发解锁流程
       if (item.is_secret && !vaultStore.isUnlocked) {
-        console.log('[SecondaryPanel] Encrypted note in trash clicked without DEK, triggering unlock')
-        window.dispatchEvent(new CustomEvent('request-vault-unlock', {
-          detail: { fromTrash: true, noteId: item.id }
-        }))
-        return
+        console.log('[SecondaryPanel] Encrypted note in trash clicked without DEK, attempting recovery')
+        const recovered = await vaultStore.recoverKey()
+        if (!recovered || !vaultStore.isUnlocked) {
+          window.dispatchEvent(new CustomEvent('request-vault-unlock', {
+            detail: { fromTrash: true, noteId: item.id }
+          }))
+          return
+        }
       }
       emit('note-select', item.id)
     }
@@ -775,6 +778,10 @@ export function useSecondaryPanel(props, emit) {
    * 包含两个分支的智能逻辑
    */
   async function executeEncryptAndSave(note, sourceSnapshot = null) {
+    if (!vaultStore.isUnlocked) {
+      await tryRecoverKeyFromSession()
+    }
+
     if (vaultStore.isUnlocked) {
       // ========== 分支 A: Smart Pass（已解锁）==========
       console.log('[Vault] Branch A: Smart Pass - Vault already unlocked')

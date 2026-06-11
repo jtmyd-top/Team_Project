@@ -64,7 +64,10 @@
       "PowerShell(Get-ChildItem -Recurse -File | Where-Object { $_.Name -match 'moderation' -or \\(Select-String -Path $_.FullName -Pattern 'moderation' -Quiet -ErrorAction SilentlyContinue\\) } | Select-Object -First 50 -ExpandProperty FullName)",
       "PowerShell(Get-ChildItem static\\\\dist -Recurse -File | Where-Object { $_.Name -match 'moderation|reports|css|js' } | Select-Object FullName,Length)",
       "Bash(gh repo *)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "PowerShell(python -c \"from django.core.management.utils import get_random_secret_key; print\\(get_random_secret_key\\(\\)\\)\")",
+      "PowerShell(if \\(-not \\(Test-Path \"static\"\\)\\) { throw \"static directory not found\" }; if \\(-not \\(Test-Path \".static_duplicate_backup\"\\)\\) { New-Item -ItemType Directory -Path \".static_duplicate_backup\" | Out-Null }; if \\(Test-Path \"static\\\\admin\"\\) { if \\(Test-Path \".static_duplicate_backup\\\\admin\"\\) { Remove-Item \".static_duplicate_backup\\\\admin\" -Recurse -Force -Confirm:$false }; Move-Item \"static\\\\admin\" \".static_duplicate_backup\\\\admin\" }; if \\(Test-Path \"static\\\\django_ckeditor_5\"\\) { if \\(Test-Path \".static_duplicate_backup\\\\django_ckeditor_5\"\\) { Remove-Item \".static_duplicate_backup\\\\django_ckeditor_5\" -Recurse -Force -Confirm:$false }; Move-Item \"static\\\\django_ckeditor_5\" \".static_duplicate_backup\\\\django_ckeditor_5\" }; \"Moved duplicate static directories to .static_duplicate_backup\")",
+      "PowerShell(python manage.py findstatic admin/css/base.css --verbosity 2; python manage.py findstatic django_ckeditor_5/dist/bundle.js --verbosity 2)"
     ],
     "deny": [],
     "ask": []

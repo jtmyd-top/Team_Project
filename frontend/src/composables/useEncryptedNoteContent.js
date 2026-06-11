@@ -11,6 +11,11 @@ export function useEncryptedNoteContent(props) {
   const decryptError = ref('')
   const showVerifyPrompt = ref(false)
 
+  async function ensureVaultKey() {
+    if (vaultStore.isUnlocked) return true
+    return await vaultStore.recoverKey()
+  }
+
   // 监听 vault 解锁状态
   watch(
     () => vaultStore.isUnlocked,
@@ -30,7 +35,7 @@ export function useEncryptedNoteContent(props) {
       return
     }
 
-    if (vaultStore.isUnlocked) {
+    if (await ensureVaultKey()) {
       await decryptContent()
     } else {
       showVerifyPrompt.value = true
@@ -46,8 +51,11 @@ export function useEncryptedNoteContent(props) {
       return
     }
     if (!vaultStore.isUnlocked) {
-      showVerifyPrompt.value = true
-      return
+      const recovered = await ensureVaultKey()
+      if (!recovered || !vaultStore.isUnlocked) {
+        showVerifyPrompt.value = true
+        return
+      }
     }
 
     const requestId = ++latestRequestId

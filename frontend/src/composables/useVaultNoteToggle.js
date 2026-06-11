@@ -115,6 +115,10 @@ export function useVaultNoteToggle({ sidebarStore, vaultStore, decryptContent, e
   }
 
   async function executeEncryptAndSave(note, sourceSnapshot = null) {
+    if (!vaultStore.isUnlocked) {
+      await tryRecoverKeyFromSession()
+    }
+
     if (vaultStore.isUnlocked) {
       try {
         await performEncryption(note, sourceSnapshot)

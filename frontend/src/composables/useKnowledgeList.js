@@ -92,9 +92,12 @@ export function useKnowledgeList() {
     }
 
     if (!vaultStore.isUnlocked) {
-      console.log('[KnowledgeList] decryptNoteTitle: Vault locked')
-      decryptedTitle.value = ''
-      return
+      console.log('[KnowledgeList] decryptNoteTitle: Vault locked, attempting session recovery')
+      const recovered = await tryRecoverKeyFromSession()
+      if (!recovered || !vaultStore.isUnlocked) {
+        decryptedTitle.value = ''
+        return
+      }
     }
 
     try {

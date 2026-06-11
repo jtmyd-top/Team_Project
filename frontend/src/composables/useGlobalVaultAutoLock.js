@@ -4,7 +4,6 @@
  * 职责：
  * - 监听用户活动（mousemove/keydown/click/scroll/touchstart），节流到 30s 重置一次倒计时
  * - 主倒计时到 keyExpireTime 时触发 clearDEK，全局锁定
- * - visibilitychange 隐藏时启动 60s 短倒计时；回到可见取消
  * - beforeunload 强制清 DEK
  *
  * 用法：在顶层组件（KnowledgeList/index.vue 等各入口根组件）onMounted 里调用一次。
@@ -14,20 +13,17 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { useVaultStore } from '@/stores/vault'
 
 const ACTIVITY_THROTTLE_MS = 30 * 1000
-const HIDDEN_LOCK_DELAY_MS = 60 * 1000
 
 export function useGlobalVaultAutoLock() {
   const vaultStore = useVaultStore()
 
   let mainCountdownTimer = null
-  let hiddenTimer = null
   let lastActivityReset = 0
 
   const ACTIVITY_EVENTS = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart']
 
   function clearTimers() {
     if (mainCountdownTimer) { clearTimeout(mainCountdownTimer); mainCountdownTimer = null }
-    if (hiddenTimer) { clearTimeout(hiddenTimer); hiddenTimer = null }
   }
 
   function armCountdown() {
@@ -56,25 +52,7 @@ export function useGlobalVaultAutoLock() {
     const now = Date.now()
     if (now - lastActivityReset < ACTIVITY_THROTTLE_MS) return
     lastActivityReset = now
-    // 本地延展 30 分钟（与后端默认 window 一致）。下次拿密钥时后端 TTL 会重新对齐。
-    vaultStore.extendExpire(30 * 60)
     armCountdown()
-  }
-
-  function onVisibilityChange() {
-    if (!vaultStore.isUnlocked) {
-      if (hiddenTimer) { clearTimeout(hiddenTimer); hiddenTimer = null }
-      return
-    }
-    if (document.hidden) {
-      if (hiddenTimer) clearTimeout(hiddenTimer)
-      hiddenTimer = setTimeout(() => {
-        lock()
-      }, HIDDEN_LOCK_DELAY_MS)
-    } else if (hiddenTimer) {
-      clearTimeout(hiddenTimer)
-      hiddenTimer = null
-    }
   }
 
   function onBeforeUnload() {
@@ -89,7 +67,6 @@ export function useGlobalVaultAutoLock() {
     ACTIVITY_EVENTS.forEach(ev =>
       window.addEventListener(ev, resetOnActivity, { passive: true })
     )
-    document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('beforeunload', onBeforeUnload)
 
     stopWatch = watch(
@@ -109,7 +86,6 @@ export function useGlobalVaultAutoLock() {
     ACTIVITY_EVENTS.forEach(ev =>
       window.removeEventListener(ev, resetOnActivity)
     )
-    document.removeEventListener('visibilitychange', onVisibilityChange)
     window.removeEventListener('beforeunload', onBeforeUnload)
     clearTimers()
     if (stopWatch) stopWatch()

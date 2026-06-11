@@ -63,8 +63,11 @@ export function useNoteListItem(props, emit) {
     }
 
     if (!vaultStore.isUnlocked) {
-      decryptedTitle.value = ''
-      return
+      const recovered = await vaultStore.recoverKey()
+      if (!recovered || !vaultStore.isUnlocked) {
+        decryptedTitle.value = ''
+        return
+      }
     }
 
     const requestId = ++latestDecryptId

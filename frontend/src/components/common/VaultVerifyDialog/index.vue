@@ -5,6 +5,7 @@
     width="450px"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
+    append-to-body
     modal-class="vault-verify-overlay"
     align-center
     @close="handleClose"
@@ -76,6 +77,7 @@
           <el-select
             v-model="durationMinutes"
             class="duration-select"
+            popper-class="vault-duration-select-popper"
             placeholder="选择解锁时长"
             :disabled="isVerifying"
           >

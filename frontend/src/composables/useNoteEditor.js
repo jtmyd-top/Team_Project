@@ -142,8 +142,11 @@ export function useNoteEditor(props, emit, editorElRef) {
     }
 
     if (!vaultStore.isUnlocked) {
-      decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
-      return
+      const recovered = await tryRecoverKeyFromSession()
+      if (!recovered || !vaultStore.isUnlocked) {
+        decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
+        return
+      }
     }
 
     const requestId = ++latestEditorDecryptId

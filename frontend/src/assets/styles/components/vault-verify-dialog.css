@@ -1,8 +1,8 @@
 /* VaultVerifyDialog 样式 */
 
 /* 对话框背景模糊 */
-body > .vault-verify-overlay.el-overlay,
-body > .el-overlay.vault-verify-overlay {
+.vault-verify-overlay.el-overlay,
+.el-overlay.vault-verify-overlay {
   position: fixed !important;
   inset: 0 !important;
   z-index: 3000 !important;
@@ -10,7 +10,7 @@ body > .el-overlay.vault-verify-overlay {
   background-color: rgba(15, 23, 42, 0.42);
 }
 
-body > .vault-verify-overlay .el-overlay-dialog {
+.vault-verify-overlay .el-overlay-dialog {
   position: fixed !important;
   inset: 0 !important;
   display: flex !important;
@@ -20,7 +20,7 @@ body > .vault-verify-overlay .el-overlay-dialog {
   overflow: auto !important;
 }
 
-body > .vault-verify-overlay .vault-verify-dialog.el-dialog {
+.vault-verify-overlay .vault-verify-dialog.el-dialog {
   width: min(450px, calc(100vw - 32px)) !important;
   max-width: calc(100vw - 32px) !important;
   max-height: calc(100vh - 32px) !important;
@@ -30,28 +30,28 @@ body > .vault-verify-overlay .vault-verify-dialog.el-dialog {
   box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.38) !important;
 }
 
-body > .vault-verify-overlay .vault-verify-dialog .el-dialog__header {
+.vault-verify-overlay .vault-verify-dialog .el-dialog__header {
   display: none !important;
 }
 
-body > .vault-verify-overlay .vault-verify-dialog .el-dialog__body {
+.vault-verify-overlay .vault-verify-dialog .el-dialog__body {
   padding: 0 !important;
 }
 
-body > .vault-verify-overlay .vault-verify-dialog .el-dialog__footer {
+.vault-verify-overlay .vault-verify-dialog .el-dialog__footer {
   padding: 20px 32px 28px !important;
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
   border-top: 1px solid rgba(0, 0, 0, 0.05) !important;
 }
 
-body > .vault-verify-overlay .vault-verify-dialog .el-icon,
-body > .vault-verify-overlay .vault-verify-dialog .el-icon svg {
+.vault-verify-overlay .vault-verify-dialog .el-icon,
+.vault-verify-overlay .vault-verify-dialog .el-icon svg {
   width: 1em !important;
   height: 1em !important;
   display: inline-flex !important;
 }
 
-body > .vault-verify-overlay .vault-verify-dialog .el-select__caret {
+.vault-verify-overlay .vault-verify-dialog .el-select__caret {
   width: 14px !important;
   height: 14px !important;
   font-size: 14px !important;
@@ -249,7 +249,8 @@ body > .vault-verify-overlay .vault-verify-dialog .el-select__caret {
 }
 
 .duration-select {
-  width: 140px !important;
+  width: 190px !important;
+  max-width: 100%;
   margin: 0 auto;
 }
 
@@ -259,6 +260,14 @@ body > .vault-verify-overlay .vault-verify-dialog .el-select__caret {
 
 .duration-select .el-input__wrapper {
   border-color: #dcdfe6;
+}
+
+.vault-duration-select-popper.el-popper {
+  z-index: 3010 !important;
+}
+
+.vault-duration-select-popper .el-select-dropdown__item {
+  min-width: 190px;
 }
 
 /* 错误消息 */
@@ -464,7 +473,7 @@ body > .vault-verify-overlay .vault-verify-dialog .el-select__caret {
     border-color: #667eea;
   }
 
-  body > .vault-verify-overlay .vault-verify-dialog .el-dialog__footer {
+  .vault-verify-overlay .vault-verify-dialog .el-dialog__footer {
     background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%) !important;
   }
 

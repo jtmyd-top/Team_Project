@@ -71,6 +71,7 @@ export default defineConfig({
         'public-notes-list': path.resolve(__dirname, 'src/entries/public-notes-list.js'),
         // 知识笔记列表页面
         'knowledge-list': path.resolve(__dirname, 'src/entries/knowledge-list.js'),
+        'knowledge-element': path.resolve(__dirname, 'src/entries/knowledge-element.js'),
         // 主题管理器
         'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
         // 战情室大屏
@@ -88,7 +89,11 @@ export default defineConfig({
         assetFileNames: (assetInfo) => {
           if (assetInfo.name?.endsWith('.css')) {
             // CSS 文件使用固定名称，只按 entry 分组
-            const name = assetInfo.name.replace(/-[\w\d]+\.css$/, '.css')
+            const legacyNames = {
+              'element-plus.css': 'element.css',
+              'knowledge-list.css': 'knowledge.css',
+            }
+            const name = legacyNames[assetInfo.name] || assetInfo.name.replace(/-[\w\d_-]{8,}\.css$/, '.css')
             return `assets/${name}`
           }
           return 'assets/[name]-[hash][extname]'
@@ -98,10 +103,6 @@ export default defineConfig({
         manualChunks(id) {
           // 将 node_modules 中的依赖分离到 vendor chunk
           if (id.includes('node_modules')) {
-            // Element Plus 单独打包
-            if (id.includes('element-plus')) {
-              return 'element-plus';
-            }
             // ECharts 单独打包
             if (id.includes('echarts') || id.includes('zrender')) {
               return 'echarts-vendor';

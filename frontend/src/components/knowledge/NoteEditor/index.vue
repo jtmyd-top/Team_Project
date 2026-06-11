@@ -73,7 +73,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
-import { ElTag, ElIcon } from 'element-plus'
+import { ElAlert, ElTag, ElIcon } from 'element-plus'
 import { useNoteEditor } from '@composables/useNoteEditor'
 import '@/assets/styles/components/note-editor.css'
 

@@ -27,13 +27,14 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
   const isVerificationSuccess = ref(false)
 
   // 解锁时长选择
-  const durationMinutes = ref(30)
+  const DEFAULT_DURATION_MINUTES = 30
+  const durationMinutes = ref(DEFAULT_DURATION_MINUTES)
   const durationOptions = [
-    { label: '15 分钟', value: 15 },
     { label: '30 分钟 (默认)', value: 30 },
     { label: '1 小时', value: 60 },
-    { label: '4 小时', value: 240 },
-    { label: '直到浏览器关闭', value: 0 }
+    { label: '3 小时', value: 180 },
+    { label: '6 小时', value: 360 },
+    { label: '直到关闭浏览器为止', value: 0 }
   ]
 
   // CAPTCHA 参数
@@ -113,12 +114,8 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
     hasError.value = false
     errorMessage.value = ''
 
-    const targetLength = useBackup.value ? 8 : 6
-    if (code.value.length === targetLength && !isVerifying.value && !isLocked.value) {
-      if (!requireCaptcha.value || canVerify.value) {
-        handleVerify()
-      }
-    }
+    // Keep the duration selector effective by submitting only from the
+    // verify button or Enter, instead of racing as soon as the code is complete.
   }
 
   const handleBackupToggle = () => {
@@ -324,7 +321,7 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
     isShaking.value = false
     requireCaptcha.value = false
     captchaLoadError.value = false
-    durationMinutes.value = 30
+    durationMinutes.value = DEFAULT_DURATION_MINUTES
     captchaParams.value = {
       captcha_type: 'turnstile',
       turnstile_token: '',

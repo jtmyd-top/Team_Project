@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { ElLoading, ElMessage } from 'element-plus'
+import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import '@static/css/folder-layout.css' // 引入新的文件夹布局样式
 import KnowledgeList from '@components/knowledge/KnowledgeList/index.vue'
@@ -14,8 +14,7 @@ const pinia = createPinia()
 app.use(pinia)
 
 // 注册Element Plus组件
-app.use(ElLoading)
-app.use(ElMessage)
+app.use(ElementPlus)
 
 // 全局错误处理
 setupGlobalErrorHandler(app)
