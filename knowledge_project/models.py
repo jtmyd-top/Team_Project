@@ -1,5 +1,6 @@
 import random as pyrandom
 import logging
+import secrets
 import threading
 
 from bs4 import BeautifulSoup
@@ -17,6 +18,7 @@ from urllib.parse import unquote, urlparse
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.core.validators import MaxLengthValidator
 from io import BytesIO
@@ -1711,7 +1713,23 @@ class MessageGroupPolicy(models.Model):
 
 class MessageGroup(models.Model):
     """私信群组。群组不支持阅后即焚，消息可撤回、可举报。"""
+    MUTE_MODE_NONE = 'none'
+    MUTE_MODE_ADMINS_ONLY = 'admins_only'
+    MUTE_MODE_CHOICES = [
+        (MUTE_MODE_NONE, '不限制发言'),
+        (MUTE_MODE_ADMINS_ONLY, '仅群主/管理员可发言'),
+    ]
+
     name = models.CharField(max_length=80, verbose_name="群组名称")
+    avatar = models.ImageField(upload_to='group_avatars/', null=True, blank=True, verbose_name="群头像")
+    description = models.TextField(blank=True, default='', verbose_name="群简介")
+    announcement = models.TextField(blank=True, default='', verbose_name="群公告")
+    mute_mode = models.CharField(
+        max_length=32,
+        choices=MUTE_MODE_CHOICES,
+        default=MUTE_MODE_NONE,
+        verbose_name="发言模式",
+    )
     owner = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='owned_message_groups', verbose_name="群主"
     )
@@ -1755,6 +1773,7 @@ class MessageGroupMember(models.Model):
     is_pinned = models.BooleanField(default=False, verbose_name="置顶")
     pinned_at = models.DateTimeField(null=True, blank=True, verbose_name="置顶时间")
     is_muted = models.BooleanField(default=False, verbose_name="消息免打扰")
+    muted_until = models.DateTimeField(null=True, blank=True, verbose_name="群内禁言到期时间")
     is_archived = models.BooleanField(default=False, verbose_name="已归档")
     archived_at = models.DateTimeField(null=True, blank=True, verbose_name="归档时间")
     force_unread = models.BooleanField(default=False, verbose_name="手动标记未读")
@@ -1775,6 +1794,50 @@ class MessageGroupMember(models.Model):
     @property
     def is_active(self):
         return self.left_at is None and self.group.is_active
+
+
+def generate_group_invite_token():
+    return secrets.token_urlsafe(24)
+
+
+class MessageGroupInviteLink(models.Model):
+    """群组邀请链接。可撤销，可设置过期时间和使用次数上限。"""
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='invite_links', verbose_name="群组"
+    )
+    token = models.CharField(
+        max_length=64, unique=True, default=generate_group_invite_token, verbose_name="邀请令牌"
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name='+', verbose_name="创建者"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    expires_at = models.DateTimeField(null=True, blank=True, verbose_name="过期时间")
+    max_uses = models.PositiveIntegerField(null=True, blank=True, verbose_name="最大使用次数")
+    uses_count = models.PositiveIntegerField(default=0, verbose_name="已使用次数")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="撤销时间")
+
+    class Meta:
+        verbose_name = "群组邀请链接"
+        verbose_name_plural = "群组邀请链接"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', 'revoked_at'], name='knowledge_p_group_i_6012d6_idx'),
+            models.Index(fields=['token'], name='knowledge_p_token_cf0d54_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.group.name} invite"
+
+    def is_valid(self, now=None):
+        now = now or timezone.now()
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at and self.expires_at <= now:
+            return False
+        if self.max_uses is not None and self.uses_count >= self.max_uses:
+            return False
+        return self.group.is_active
 
 
 class GroupMessage(models.Model):
@@ -1823,6 +1886,101 @@ class GroupMessageDeletion(models.Model):
         indexes = [
             models.Index(fields=['user', 'message']),
         ]
+
+
+class MessageGroupBan(models.Model):
+    """群组封禁记录。有效封禁会阻止用户通过邀请链接或管理员添加重新入群。"""
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='bans', verbose_name="群组"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='message_group_bans', verbose_name="被封禁用户"
+    )
+    banned_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='issued_message_group_bans', verbose_name="封禁操作者"
+    )
+    reason = models.TextField(blank=True, default='', verbose_name="封禁原因")
+    expires_at = models.DateTimeField(null=True, blank=True, verbose_name="过期时间")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="封禁时间")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="解封时间")
+    revoked_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='revoked_message_group_bans', verbose_name="解封操作者"
+    )
+
+    class Meta:
+        verbose_name = "群组封禁记录"
+        verbose_name_plural = "群组封禁记录"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', 'user']),
+            models.Index(fields=['expires_at']),
+            models.Index(fields=['revoked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} banned from {self.group.name}"
+
+    def is_active(self, now=None):
+        now = now or timezone.now()
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at and self.expires_at <= now:
+            return False
+        return True
+
+
+class MessageGroupAuditLog(models.Model):
+    """群组管理审计日志。"""
+    ACTION_CHOICES = [
+        ('group_create', '创建群组'),
+        ('group_update_profile', '更新群资料'),
+        ('group_rename', '修改群名'),
+        ('group_announcement_update', '更新群公告'),
+        ('member_add', '添加成员'),
+        ('member_remove', '移除成员'),
+        ('member_role_change', '修改成员角色'),
+        ('member_mute', '禁言成员'),
+        ('member_unmute', '解除成员禁言'),
+        ('group_mute_change', '修改全员禁言'),
+        ('ownership_transfer', '转让群主'),
+        ('invite_link_create', '创建邀请链接'),
+        ('invite_link_revoke', '撤销邀请链接'),
+        ('member_ban', '封禁成员'),
+        ('member_unban', '解除封禁'),
+        ('group_dissolve', '解散群组'),
+        ('group_leave', '退出群组'),
+    ]
+
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='audit_logs', verbose_name="群组"
+    )
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='message_group_audit_actions', verbose_name="操作者"
+    )
+    target_user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='message_group_audit_targets', verbose_name="目标用户"
+    )
+    action = models.CharField(max_length=64, choices=ACTION_CHOICES, verbose_name="动作")
+    metadata = models.JSONField(default=dict, blank=True, verbose_name="元数据")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "群组审计日志"
+        verbose_name_plural = "群组审计日志"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['actor']),
+            models.Index(fields=['target_user']),
+            models.Index(fields=['action']),
+        ]
+
+    def __str__(self):
+        return f"{self.group.name} {self.action}"
 
 
 class MessageReport(models.Model):

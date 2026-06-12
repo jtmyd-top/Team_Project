@@ -31,6 +31,8 @@
 
 <script setup>
 import { ElAlert, ElSkeleton } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import 'element-plus/es/components/skeleton/style/css'
 import { useNoteViewer } from '@/composables/useNoteViewer'
 import '@/assets/styles/components/note-viewer.css'
 

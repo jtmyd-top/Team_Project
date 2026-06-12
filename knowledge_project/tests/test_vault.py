@@ -33,8 +33,10 @@ from knowledge_project.decorators import (
     check_vault_locked,
     grant_vault_access,
     increment_vault_fail_count,
+    is_vault_access_session_scoped,
     reset_vault_fail_count,
     revoke_vault_access,
+    verify_vault_2fa,
 )
 from knowledge_project.models import Note
 from Team_Project.middleware import VaultLockMiddleware
@@ -302,3 +304,24 @@ class VaultFailureCountAndLockTests(_VaultTestBase):
         self.assertTrue(check_vault_access(request))
         revoke_vault_access(request)
         self.assertFalse(check_vault_access(request))
+
+    def test_session_scoped_grant_keeps_access_flag(self):
+        user = make_user('vfc05')
+        request = self._make_request(user)
+        grant_vault_access(request, window_seconds=300, session_scoped=True)
+        self.assertTrue(check_vault_access(request))
+        self.assertTrue(is_vault_access_session_scoped(request))
+
+    @patch('knowledge_project.decorators.verify_2fa_for_request', return_value=(True, ''))
+    def test_verify_duration_zero_marks_session_scoped(self, _verify):
+        user = make_user('vfc06')
+        user.profile.two_fa_enabled = True
+        user.profile.two_fa_method = 'totp'
+        user.profile.save(update_fields=['two_fa_enabled', 'two_fa_method'])
+        request = self._make_request(user)
+
+        result = verify_vault_2fa(request, '123456', duration_minutes=0)
+
+        self.assertTrue(result['success'])
+        self.assertTrue(result['session_scoped'])
+        self.assertTrue(is_vault_access_session_scoped(request))

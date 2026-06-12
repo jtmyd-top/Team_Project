@@ -50,6 +50,8 @@
 
 <script setup>
 import { ElDialog, ElButton } from 'element-plus'
+import 'element-plus/es/components/dialog/style/css'
+import 'element-plus/es/components/button/style/css'
 import { useVaultSetupDialog } from '@/composables/useVaultSetupDialog'
 import '@/assets/styles/components/vault-setup-dialog.css'
 

@@ -66,8 +66,8 @@ export function useVaultEncryption() {
       }
 
       if (data.server_pub && data.iv && data.ct) {
-        const ttl = data.remaining_seconds || data.expire_time
-        if (ttl) {
+        const ttl = data.session_scoped ? 0 : (data.remaining_seconds ?? data.expire_time)
+        if (data.session_scoped || ttl > 0) {
           await vaultStore.completeHandshake({
             serverPubB64: data.server_pub,
             ivB64: data.iv,

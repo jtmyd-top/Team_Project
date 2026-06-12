@@ -476,7 +476,7 @@ def get_message_conversations_api(request):
                 'group_id': group.id,
                 'user_id': None,
                 'username': group.name,
-                'avatar': '/static/img/default-avatar.png',
+                'avatar': group.avatar.url if getattr(group, 'avatar', None) else '/static/img/default-avatar.png',
                 'last_message': last_group_message.content if last_group_message else '群组已创建',
                 'last_message_time': (last_group_message.created_at if last_group_message else group.updated_at).isoformat(),
                 'last_sender_id': last_group_message.sender_id if last_group_message else None,

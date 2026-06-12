@@ -244,8 +244,8 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
         // 方案 C：用握手响应解包 DEK 并导入非导出 CryptoKey
         // 注意：用 remaining_seconds（TTL 秒数），expire_time 是 Unix 时间戳，直接当 TTL 会让
         // setTimeout 收到 1e15 级别的延时被浏览器钳为 1ms，立刻触发自动锁定
-        const ttl = data.remaining_seconds || data.expire_time
-        if (data.server_pub && data.iv && data.ct && ttl) {
+        const ttl = data.session_scoped ? 0 : (data.remaining_seconds ?? data.expire_time)
+        if (data.server_pub && data.iv && data.ct && (data.session_scoped || ttl > 0)) {
           try {
             await vaultStore.completeHandshake({
               serverPubB64: data.server_pub,
@@ -260,13 +260,15 @@ export function useVaultVerifyDialog(props, emit, captchaWidgetRef) {
 
         emit('verified', {
           expireTime: data.expire_time,
-          remainingSeconds: data.remaining_seconds
+          remainingSeconds: data.remaining_seconds,
+          sessionScoped: data.session_scoped
         })
 
         // 通知事件订阅者：vault 已解锁（不再广播原始 DEK）
         window.dispatchEvent(new CustomEvent('vault-verification-success', {
           detail: {
-            expireTime: data.expire_time
+            expireTime: data.expire_time,
+            sessionScoped: data.session_scoped
           }
         }))
 

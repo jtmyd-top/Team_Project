@@ -37,6 +37,9 @@ from knowledge_project.models import (
     Message,
     MessageAttachment,
     MessageGroup,
+    MessageGroupAuditLog,
+    MessageGroupBan,
+    MessageGroupInviteLink,
     MessageGroupMember,
     MessageGroupPolicy,
     NoteComment,
@@ -413,6 +416,98 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(response.status_code, 403, response.content)
         self.assertFalse(MessageGroupMember.objects.filter(group=group, user=newcomer).exists())
 
+    def test_group_owner_can_promote_admin_and_admin_cannot_promote(self):
+        owner = make_user('grp_role_owner')
+        member = make_user('grp_role_member')
+        admin_target = make_user('grp_role_admin_target')
+        group = self._create_group_directly(owner, [member, admin_target])
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('set_group_member_role_api', args=[group.id, member.id]), {
+            'role': 'admin',
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(MessageGroupMember.objects.get(group=group, user=member).role, 'admin')
+
+        self.client.logout()
+        login(self.client, member)
+        response = post_json(self.client, reverse('set_group_member_role_api', args=[group.id, admin_target.id]), {
+            'role': 'admin',
+        })
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(MessageGroupMember.objects.get(group=group, user=admin_target).role, 'member')
+
+    def test_group_manager_can_mute_member_and_unmute(self):
+        owner = make_user('grp_mute_owner')
+        member = make_user('grp_mute_member')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('mute_group_member_api', args=[group.id, member.id]), {
+            'duration_minutes': 60,
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        membership = MessageGroupMember.objects.get(group=group, user=member)
+        self.assertIsNotNone(membership.muted_until)
+
+        self.client.logout()
+        login(self.client, member)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'muted hello',
+        })
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(GroupMessage.objects.filter(group=group, sender=member, content='muted hello').exists())
+
+        self.client.logout()
+        login(self.client, owner)
+        response = post_json(self.client, reverse('mute_group_member_api', args=[group.id, member.id]), {
+            'action': 'unmute',
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        membership.refresh_from_db()
+        self.assertIsNone(membership.muted_until)
+
+        self.client.logout()
+        login(self.client, member)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'unmuted hello',
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_group_invite_link_join_and_revoke(self):
+        owner = make_user('grp_invite_owner')
+        member = make_user('grp_invite_member')
+        outsider = make_user('grp_invite_outsider')
+        late_user = make_user('grp_invite_late')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('group_invite_links_api', args=[group.id]), {})
+        self.assertEqual(response.status_code, 201, response.content)
+        invite = MessageGroupInviteLink.objects.get(group=group)
+        self.assertIn('group_invite=', parse(response)['invite']['url'])
+
+        self.client.logout()
+        login(self.client, outsider)
+        response = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(MessageGroupMember.objects.filter(group=group, user=outsider, left_at__isnull=True).exists())
+        invite.refresh_from_db()
+        self.assertEqual(invite.uses_count, 1)
+
+        self.client.logout()
+        login(self.client, owner)
+        response = post_json(self.client, reverse('revoke_group_invite_link_api', args=[group.id, invite.id]), {})
+        self.assertEqual(response.status_code, 200, response.content)
+        invite.refresh_from_db()
+        self.assertIsNotNone(invite.revoked_at)
+
+        self.client.logout()
+        login(self.client, late_user)
+        response = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(MessageGroupMember.objects.filter(group=group, user=late_user, left_at__isnull=True).exists())
+
     def test_group_message_sender_can_edit_sent_message(self):
         owner = make_user('grp_edit_owner')
         member = make_user('grp_edit_member')
@@ -473,6 +568,113 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(response.status_code, 200, response.content)
         group.refresh_from_db()
         self.assertFalse(group.is_active)
+
+    def test_group_profile_transfer_mute_mode_and_audit_logs(self):
+        owner = make_user('grp_ext_owner')
+        member = make_user('grp_ext_member')
+        admin_user = make_user('grp_ext_admin')
+        group = self._create_group_directly(owner, [member, admin_user])
+        MessageGroupMember.objects.filter(group=group, user=admin_user).update(role='admin')
+        login(self.client, owner)
+
+        profile_response = post_json(self.client, reverse('update_group_profile_api', args=[group.id]), {
+            'name': 'advanced group',
+            'description': 'group description',
+            'announcement': 'group announcement',
+        })
+        self.assertEqual(profile_response.status_code, 200, profile_response.content)
+        group.refresh_from_db()
+        self.assertEqual(group.name, 'advanced group')
+        self.assertEqual(group.description, 'group description')
+        self.assertEqual(group.announcement, 'group announcement')
+
+        mute_response = post_json(self.client, reverse('set_group_mute_mode_api', args=[group.id]), {
+            'mute_mode': 'admins_only',
+        })
+        self.assertEqual(mute_response.status_code, 200, mute_response.content)
+        group.refresh_from_db()
+        self.assertEqual(group.mute_mode, 'admins_only')
+
+        self.client.logout()
+        login(self.client, member)
+        blocked_send = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'member blocked by group mute',
+        })
+        self.assertEqual(blocked_send.status_code, 403, blocked_send.content)
+
+        self.client.logout()
+        login(self.client, admin_user)
+        allowed_send = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'admin can speak',
+        })
+        self.assertEqual(allowed_send.status_code, 201, allowed_send.content)
+
+        self.client.logout()
+        login(self.client, owner)
+        transfer_response = post_json(self.client, reverse('transfer_group_ownership_api', args=[group.id]), {
+            'user_id': member.id,
+        })
+        self.assertEqual(transfer_response.status_code, 200, transfer_response.content)
+        group.refresh_from_db()
+        self.assertEqual(group.owner, member)
+        self.assertEqual(MessageGroupMember.objects.get(group=group, user=member).role, 'owner')
+        self.assertEqual(MessageGroupMember.objects.get(group=group, user=owner).role, 'admin')
+        self.assertTrue(MessageGroupAuditLog.objects.filter(group=group, action='ownership_transfer').exists())
+
+    def test_group_ban_blocks_invite_join_and_unban_allows_rejoin(self):
+        owner = make_user('grp_ban_owner')
+        member = make_user('grp_ban_member')
+        outsider = make_user('grp_ban_outsider')
+        group = self._create_group_directly(owner, [member])
+        invite = MessageGroupInviteLink.objects.create(group=group, created_by=owner)
+        login(self.client, owner)
+
+        ban_response = post_json(self.client, reverse('group_bans_api', args=[group.id]), {
+            'user_id': outsider.id,
+            'reason': 'spam',
+        })
+        self.assertEqual(ban_response.status_code, 201, ban_response.content)
+        ban = MessageGroupBan.objects.get(group=group, user=outsider)
+        self.assertTrue(ban.is_active())
+
+        self.client.logout()
+        login(self.client, outsider)
+        preview = parse(self.client.get(reverse('preview_group_invite_api', args=[invite.token])))
+        self.assertFalse(preview['viewer']['can_join'])
+        self.assertTrue(preview['viewer']['is_banned'])
+        join_response = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})
+        self.assertEqual(join_response.status_code, 403, join_response.content)
+
+        self.client.logout()
+        login(self.client, owner)
+        unban_response = post_json(self.client, reverse('revoke_group_ban_api', args=[group.id, ban.id]), {})
+        self.assertEqual(unban_response.status_code, 200, unban_response.content)
+        ban.refresh_from_db()
+        self.assertIsNotNone(ban.revoked_at)
+
+        self.client.logout()
+        login(self.client, outsider)
+        join_response = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})
+        self.assertEqual(join_response.status_code, 200, join_response.content)
+        self.assertTrue(MessageGroupMember.objects.filter(group=group, user=outsider, left_at__isnull=True).exists())
+
+    def test_group_audit_logs_are_manager_only(self):
+        owner = make_user('grp_audit_owner')
+        member = make_user('grp_audit_member')
+        group = self._create_group_directly(owner, [member])
+        MessageGroupAuditLog.objects.create(group=group, actor=owner, action='group_update_profile')
+
+        login(self.client, member)
+        forbidden = self.client.get(reverse('group_audit_logs_api', args=[group.id]))
+        self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
+        self.client.logout()
+        login(self.client, owner)
+        response = self.client.get(reverse('group_audit_logs_api', args=[group.id]))
+        self.assertEqual(response.status_code, 200, response.content)
+        body = parse(response)
+        self.assertEqual(body['count'], 1)
+        self.assertEqual(body['results'][0]['action'], 'group_update_profile')
 
 
 # =========================================================================

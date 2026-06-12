@@ -1,7 +1,15 @@
 ﻿<template>
   <div class="messages-container" :class="{ 'mobile-chat-open': mobileChatOpen }">
+    <!-- Group Invite Preview (full screen overlay) -->
+    <GroupInvitePreview
+      v-if="showGroupInvitePreview"
+      :token="groupInviteToken"
+      @close="closeGroupInvitePreview"
+      @joined="handleGroupJoined"
+    />
+
     <!-- 左侧：对话列表 -->
-    <aside class="conversations-sidebar">
+    <aside v-show="!showGroupInvitePreview" class="conversations-sidebar">
       <div class="sidebar-header">
         <h2>私信</h2>
         <button class="new-message-btn" @click="openNewMessageDialog" title="新建私信">
@@ -309,6 +317,10 @@
           <i class="fas fa-ban"></i>
           你已屏蔽此用户。          <button class="link-btn" @click="unblockPeer">解除屏蔽</button>
         </div>
+        <div v-else-if="isGroupComposerBlocked" class="blocked-tip">
+          <i class="fas fa-microphone-slash"></i>
+          当前群已开启全员禁言，仅群主或管理员可以发言
+        </div>
         <div v-else class="message-input-area">
           <div v-if="replyDraft" class="reply-draft-bar">
             <span class="reply-label">
@@ -596,6 +608,49 @@
             </button>
           </div>
 
+          <div v-if="canManageCurrentGroup" class="group-invite-box">
+            <div class="group-section-title">
+              <span>邀请链接</span>
+              <button
+                class="group-secondary-btn small"
+                :disabled="groupPanel.inviteBusy"
+                @click="createGroupInviteLink"
+              >
+                <i :class="groupPanel.inviteBusy ? 'fas fa-spinner fa-spin' : 'fas fa-link'"></i>
+                新建
+              </button>
+            </div>
+            <div v-if="groupPanel.inviteLoading" class="group-inline-state">
+              <i class="fas fa-spinner fa-spin"></i>
+              加载中...
+            </div>
+            <div v-else-if="!groupPanel.inviteLinks.length" class="group-inline-state">暂无邀请链接</div>
+            <div v-else class="group-invite-list">
+              <div
+                v-for="invite in groupPanel.inviteLinks"
+                :key="invite.id"
+                class="group-invite-row"
+                :class="{ disabled: !invite.is_active }"
+              >
+                <div class="group-invite-meta">
+                  <strong>{{ invite.is_active ? '可用链接' : '已失效链接' }}</strong>
+                  <span>已使用 {{ invite.uses_count || 0 }} 次</span>
+                </div>
+                <button class="group-icon-btn" title="复制邀请链接" @click="copyGroupInviteLink(invite)">
+                  <i class="fas fa-copy"></i>
+                </button>
+                <button
+                  v-if="invite.is_active"
+                  class="group-icon-btn danger"
+                  title="撤销邀请链接"
+                  @click="revokeGroupInviteLink(invite)"
+                >
+                  <i class="fas fa-ban"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div class="group-members">
             <div
               v-for="member in groupPanel.detail.members"
@@ -605,10 +660,38 @@
               <img :src="member.avatar" :alt="member.username" />
               <div class="group-member-meta">
                 <strong>{{ member.username }}</strong>
-                <span>{{ roleLabel(member.role) }}<template v-if="member.is_self"> · 我</template></span>
+                <span>
+                  {{ roleLabel(member.role) }}<template v-if="member.is_self"> · 我</template>
+                  <template v-if="member.is_group_muted"> · 禁言至 {{ formatMutedUntil(member.muted_until) }}</template>
+                </span>
+              </div>
+              <div v-if="canManageGroupMember(member)" class="group-member-actions">
+                <button
+                  v-if="canChangeGroupRole(member)"
+                  class="group-icon-btn"
+                  :title="member.role === 'admin' ? '取消管理员' : '设为管理员'"
+                  @click="setGroupMemberRole(member, member.role === 'admin' ? 'member' : 'admin')"
+                >
+                  <i :class="member.role === 'admin' ? 'fas fa-user' : 'fas fa-user-shield'"></i>
+                </button>
+                <button
+                  class="group-icon-btn"
+                  :title="member.is_group_muted ? '解除禁言' : '禁言 1 小时'"
+                  @click="member.is_group_muted ? unmuteGroupMember(member) : muteGroupMember(member, 60)"
+                >
+                  <i :class="member.is_group_muted ? 'fas fa-microphone' : 'fas fa-microphone-slash'"></i>
+                </button>
+                <button
+                  v-if="canRemoveGroupMember(member)"
+                  class="group-icon-btn danger"
+                  title="移出群组"
+                  @click="removeGroupMember(member)"
+                >
+                  <i class="fas fa-user-minus"></i>
+                </button>
               </div>
               <button
-                v-if="canRemoveGroupMember(member)"
+                v-else-if="canRemoveGroupMember(member)"
                 class="group-icon-btn danger"
                 title="移出群组"
                 @click="removeGroupMember(member)"
@@ -757,6 +840,7 @@ import ChatSearchDrawer from '@components/messages/ChatSearchDrawer/index.vue'
 import ReportUserDialog from '@components/messages/ReportUserDialog/index.vue'
 import DisappearingSettingDialog from '@components/messages/DisappearingSettingDialog/index.vue'
 import MergedForwardDialog from '@components/messages/MergedForwardDialog/index.vue'
+import GroupInvitePreview from '@components/messages/GroupInvitePreview/index.vue'
 import Turnstile from '@components/common/Turnstile/index.vue'
 import {
   encodeMergedForward,
@@ -766,10 +850,10 @@ import {
   parseMergedForward,
 } from '@/utils/mergedForward'
 
-// ==== 甯搁噺 ====
+// ==== 常量 ====
 const recallWindowSeconds = 120
 
-// ==== 鐘舵€?====
+// ==== 状态 ====
 const currentUserId = ref(0)
 const csrfToken = ref('')
 const scope = ref('all')
@@ -779,6 +863,10 @@ const selectedUserId = ref(null)
 const selectedConversationKey = ref(null)
 const messages = ref([])
 const loadingMessages = ref(false)
+
+// Group invite preview
+const showGroupInvitePreview = ref(false)
+const groupInviteToken = ref('')
 const currentSettings = ref({
   is_pinned: false,
   is_muted: false,
@@ -809,6 +897,9 @@ const groupPanel = ref({
   searchInput: '',
   searchResult: null,
   searching: false,
+  inviteLoading: false,
+  inviteBusy: false,
+  inviteLinks: [],
 })
 const ctxMenu = ref({ visible: false, x: 0, y: 0, conv: null })
 const messageCtxMenu = ref({ visible: false, x: 0, y: 0, msg: null })
@@ -891,6 +982,19 @@ const isCurrentGroup = computed(() => selectedConversation.value?.conversation_t
 const canManageCurrentGroup = computed(() =>
   ['owner', 'admin'].includes(groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '')
 )
+
+const isCurrentGroupOwner = computed(() =>
+  (groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '') === 'owner'
+)
+
+const isGroupComposerBlocked = computed(() => {
+  if (!isCurrentGroup.value) return false
+  const conv = selectedConversation.value
+  const muteMode = conv?.mute_mode || groupPanel.value.detail?.mute_mode
+  if (muteMode !== 'admins_only') return false
+  const role = groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || ''
+  return !['owner', 'admin'].includes(role)
+})
 
 const peerBlockedByMe = computed(() => !!selectedConversation.value?.is_blocked)
 
@@ -1441,6 +1545,14 @@ async function loadMessages({ silent = false } = {}) {
       messages.value = (d.messages || []).map(normalizeIncomingMessage)
       if (d.settings) {
         currentSettings.value = { ...currentSettings.value, ...d.settings }
+      }
+      if (d.group) {
+        const conv = findConversationByKey(selectedConversationKey.value)
+        if (conv) {
+          conv.mute_mode = d.group.mute_mode
+          conv.description = d.group.description
+          conv.announcement = d.group.announcement
+        }
       }
       scrollToBottomSoon()
     }
@@ -2764,6 +2876,7 @@ async function openGroupInfo() {
     groupPanel.value.detail = d.group
     groupPanel.value.nameDraft = d.group?.name || ''
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
+    if (canManageCurrentGroup.value) loadGroupInviteLinks()
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -2775,6 +2888,7 @@ function closeGroupInfo() {
   groupPanel.value.visible = false
   groupPanel.value.searchInput = ''
   groupPanel.value.searchResult = null
+  groupPanel.value.inviteLinks = []
 }
 
 async function saveGroupName() {
@@ -2834,10 +2948,129 @@ function roleLabel(role) {
   return '成员'
 }
 
+function canManageGroupMember(member) {
+  if (!canManageCurrentGroup.value || !member || member.is_self || member.role === 'owner') return false
+  const viewerRole = groupPanel.value.detail?.viewer_role || currentSettings.value.group_role
+  return viewerRole === 'owner' || member.role === 'member'
+}
+
+function canChangeGroupRole(member) {
+  return (groupPanel.value.detail?.viewer_role || currentSettings.value.group_role) === 'owner' && member?.role !== 'owner'
+}
+
 function canRemoveGroupMember(member) {
   if (!canManageCurrentGroup.value || !member || member.is_self || member.role === 'owner') return false
   const viewerRole = groupPanel.value.detail?.viewer_role || currentSettings.value.group_role
   return viewerRole === 'owner' || member.role !== 'admin'
+}
+
+function formatMutedUntil(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+async function setGroupMemberRole(member, role) {
+  const groupId = selectedGroupId()
+  if (!groupId || !member?.user_id || !role) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/members/${member.user_id}/role/`, { role })
+    groupPanel.value.detail = d.group
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success(role === 'admin' ? '已设为管理员' : '已取消管理员')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function muteGroupMember(member, durationMinutes = 60) {
+  const groupId = selectedGroupId()
+  if (!groupId || !member?.user_id) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/members/${member.user_id}/mute/`, {
+      duration_minutes: durationMinutes,
+    })
+    groupPanel.value.detail = d.group
+    ElMessage.success('已禁言')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function unmuteGroupMember(member) {
+  const groupId = selectedGroupId()
+  if (!groupId || !member?.user_id) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/members/${member.user_id}/mute/`, {
+      action: 'unmute',
+    })
+    groupPanel.value.detail = d.group
+    ElMessage.success('已解除禁言')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function loadGroupInviteLinks() {
+  const groupId = selectedGroupId()
+  if (!groupId || !canManageCurrentGroup.value) return
+  groupPanel.value.inviteLoading = true
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/invites/`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载邀请链接失败'))
+    groupPanel.value.inviteLinks = d.invites || []
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.inviteLoading = false
+  }
+}
+
+async function createGroupInviteLink() {
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  groupPanel.value.inviteBusy = true
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/invites/`, {})
+    groupPanel.value.inviteLinks = [d.invite, ...groupPanel.value.inviteLinks]
+    await copyGroupInviteLink(d.invite, { silent: true })
+    ElMessage.success('邀请链接已创建并复制')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.inviteBusy = false
+  }
+}
+
+async function copyGroupInviteLink(invite, options = {}) {
+  if (!invite?.url) return
+  try {
+    await navigator.clipboard.writeText(invite.url)
+    if (!options.silent) ElMessage.success('邀请链接已复制')
+  } catch {
+    ElMessage.error('复制失败，请检查浏览器权限')
+  }
+}
+
+async function revokeGroupInviteLink(invite) {
+  const groupId = selectedGroupId()
+  if (!groupId || !invite?.id) return
+  try {
+    await ElMessageBox.confirm('撤销后该邀请链接将无法再加入群组，确认撤销？', '撤销邀请链接', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/invites/${invite.id}/revoke/`, {})
+    groupPanel.value.inviteLinks = groupPanel.value.inviteLinks.map((item) =>
+      item.id === invite.id ? d.invite : item
+    )
+    ElMessage.success('已撤销邀请链接')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 async function removeGroupMember(member) {
@@ -3178,6 +3411,39 @@ function handleVisibilityChange() {
   touchMessagesPagePresence()
 }
 
+async function handleGroupInviteFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get('group_invite')
+  if (!token) return
+
+  // Show preview instead of auto-joining
+  groupInviteToken.value = token
+  showGroupInvitePreview.value = true
+
+  // Remove the parameter from URL
+  const url = new URL(window.location.href)
+  url.searchParams.delete('group_invite')
+  window.history.replaceState({}, '', url.toString())
+}
+
+function closeGroupInvitePreview() {
+  showGroupInvitePreview.value = false
+  groupInviteToken.value = ''
+}
+
+async function handleGroupJoined(groupId) {
+  showGroupInvitePreview.value = false
+  groupInviteToken.value = ''
+
+  // Reload conversations and select the group
+  await loadConversations({ silent: true })
+  const key = `group:${groupId}`
+  const conv = findConversationByKey(key)
+  if (conv) {
+    selectConversation(conv)
+  }
+}
+
 // ==== 生命周期 ====
 onMounted(() => {
   currentUserId.value = getUserId()
@@ -3185,6 +3451,7 @@ onMounted(() => {
   loadDraftsFromStorage()
   loadNotificationPreferences()
   loadConversations()
+  handleGroupInviteFromUrl()
   initRealtimeMessages()
   startPolling()
   startMessagesPageTouch()
@@ -4312,6 +4579,7 @@ watch(
 
 .group-edit-row,
 .group-add-box,
+.group-invite-box,
 .group-members,
 .group-panel-footer {
   padding: 14px 18px;
@@ -4326,6 +4594,22 @@ watch(
 
 .group-add-box {
   border-bottom: 1px solid var(--border-color);
+}
+
+.group-invite-box {
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.group-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .group-add-search {
@@ -4378,6 +4662,12 @@ watch(
   color: var(--text-primary);
 }
 
+.group-secondary-btn.small {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .group-danger-btn,
 .group-icon-btn.danger {
   border-color: #fecaca;
@@ -4395,6 +4685,53 @@ watch(
   overflow-y: auto;
   min-height: 180px;
   max-height: 360px;
+}
+
+.group-inline-state {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.group-invite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group-invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px 34px;
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.group-invite-row.disabled {
+  opacity: 0.62;
+}
+
+.group-invite-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.group-invite-meta strong {
+  font-size: 12px;
+}
+
+.group-invite-meta span {
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .group-member-row {
@@ -4442,6 +4779,13 @@ watch(
 .group-member-meta span {
   color: var(--text-tertiary);
   font-size: 12px;
+}
+
+.group-member-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .group-icon-btn {

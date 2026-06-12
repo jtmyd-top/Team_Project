@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 from ..decorators import (
     check_vault_access,
     get_vault_access_remaining,
-    grant_vault_access,
+    is_vault_access_session_scoped,
     revoke_vault_access,
     send_operation_2fa_email,
     verify_vault_2fa,
@@ -104,8 +104,6 @@ def vault_verify(request):
     if result['success']:
         # ==================== 加密集成 ====================
         # 1. 【修改】使用用户选择的时长来授予访问权限
-        grant_vault_access(request, window_seconds=result['window_seconds'])
-
         # 2. 尝试用 ECDH 握手包装 DEK 返回给前端
         try:
             from knowledge_project.utils.vault_crypto import VaultEncryption
@@ -137,7 +135,8 @@ def vault_verify(request):
                     'message': '验证成功',
                     **wrapped,
                     'expire_time': result['expire_time'],
-                    'remaining_seconds': result['remaining_seconds']
+                    'remaining_seconds': result['remaining_seconds'],
+                    'session_scoped': result.get('session_scoped', False)
                 })
         except VaultHandshakeError as e:
             logger.warning(f"Vault handshake failed during verify: {e}")
@@ -153,7 +152,8 @@ def vault_verify(request):
             'status': 'success',
             'message': '验证成功',
             'expire_time': result['expire_time'],
-            'remaining_seconds': result['remaining_seconds']
+            'remaining_seconds': result['remaining_seconds'],
+            'session_scoped': result.get('session_scoped', False)
         })
 
     # 根据状态返回不同的响应
@@ -407,7 +407,9 @@ def vault_get_key(request):
             return JsonResponse({
                 'status': 'success',
                 **wrapped,
-                'expire_time': remaining_seconds
+                'expire_time': remaining_seconds,
+                'remaining_seconds': remaining_seconds,
+                'session_scoped': is_vault_access_session_scoped(request)
             })
 
         except VaultHandshakeError as e:

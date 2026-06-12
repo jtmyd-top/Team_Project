@@ -2,7 +2,7 @@
 """私信群组：创建资格 / 创建群组 / 群消息读取发送撤回举报。"""
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -42,7 +42,85 @@ def _policy_payload(policy, user):
 
 
 def _group_avatar_url(group):
+    if getattr(group, 'avatar', None):
+        try:
+            return group.avatar.url
+        except Exception:
+            logger.debug('无法获取群头像 URL', exc_info=True)
     return '/static/img/default-avatar.png'
+
+
+def _user_payload(user):
+    if user is None:
+        return None
+    return {
+        'id': user.id,
+        'username': user.username,
+        'avatar': _get_avatar_url(user),
+    }
+
+
+def _get_active_group_ban(group, user):
+    from ...models import MessageGroupBan
+    now = timezone.now()
+    return (
+        MessageGroupBan.objects
+        .filter(group=group, user=user, revoked_at__isnull=True)
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .select_related('banned_by')
+        .first()
+    )
+
+
+def _active_group_ban_payload(ban):
+    if ban is None:
+        return None
+    return {
+        'id': ban.id,
+        'user': _user_payload(ban.user),
+        'reason': ban.reason,
+        'expires_at': ban.expires_at.isoformat() if ban.expires_at else None,
+        'created_at': ban.created_at.isoformat() if ban.created_at else None,
+        'banned_by': _user_payload(ban.banned_by),
+    }
+
+
+def _create_group_audit_log(group, actor, action, target_user=None, metadata=None):
+    try:
+        from ...models import MessageGroupAuditLog
+        MessageGroupAuditLog.objects.create(
+            group=group,
+            actor=actor if getattr(actor, 'is_authenticated', False) else None,
+            target_user=target_user,
+            action=action,
+            metadata=metadata or {},
+        )
+    except Exception:
+        logger.warning('写入群组审计日志失败: group=%s action=%s', getattr(group, 'id', None), action, exc_info=True)
+
+
+def _parse_expires_at(value):
+    if value in (None, '', False):
+        return None
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+    return None
+
+
+def _can_send_group_message(group, membership):
+    if _is_member_muted(membership):
+        return JsonResponse({
+            'error': '你已被群内禁言',
+            'muted_until': membership.muted_until.isoformat() if membership.muted_until else None,
+        }, status=403)
+    if _get_active_group_ban(group, membership.user):
+        return JsonResponse({'error': '你已被该群组封禁，无法发言'}, status=403)
+    if getattr(group, 'mute_mode', 'none') == 'admins_only' and membership.role not in ('owner', 'admin'):
+        return JsonResponse({'error': '当前群已开启全员禁言，仅群主或管理员可以发言'}, status=403)
+    return None
 
 
 def _get_active_membership(group, user):
@@ -65,6 +143,69 @@ def _require_group_manager(membership):
     if not _is_group_manager(membership):
         return JsonResponse({'error': '只有群主或管理员可以执行该操作'}, status=403)
     return None
+
+
+def _require_group_owner(membership):
+    if membership is None or membership.role != 'owner':
+        return JsonResponse({'error': '只有群主可以执行该操作'}, status=403)
+    return None
+
+
+def _can_manage_target(actor_membership, target_membership):
+    if actor_membership is None or target_membership is None:
+        return False
+    if target_membership.role == 'owner':
+        return False
+    if actor_membership.role == 'owner':
+        return actor_membership.user_id != target_membership.user_id
+    if actor_membership.role == 'admin':
+        return target_membership.role == 'member'
+    return False
+
+
+def _parse_mute_until(data):
+    value = data.get('duration') if isinstance(data, dict) else None
+    if value in ('none', 'off', 'unmute', False):
+        return None
+    if value in ('forever', 'permanent', 0, '0'):
+        return timezone.now() + timedelta(days=3650)
+
+    minutes = data.get('duration_minutes') if isinstance(data, dict) else None
+    if minutes is None:
+        minutes = value
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        minutes = 60
+    minutes = max(1, min(minutes, 60 * 24 * 30))
+    return timezone.now() + timedelta(minutes=minutes)
+
+
+def _is_member_muted(membership):
+    if not membership or not membership.muted_until:
+        return False
+    now = timezone.now()
+    if membership.muted_until <= now:
+        membership.muted_until = None
+        membership.save(update_fields=['muted_until'])
+        return False
+    return True
+
+
+def _invite_link_payload(link, request=None):
+    path = f"/messages/?group_invite={link.token}"
+    return {
+        'id': link.id,
+        'token': link.token,
+        'url': request.build_absolute_uri(path) if request else path,
+        'created_by': link.created_by.username if link.created_by else None,
+        'created_at': link.created_at.isoformat() if link.created_at else None,
+        'expires_at': link.expires_at.isoformat() if link.expires_at else None,
+        'max_uses': link.max_uses,
+        'uses_count': link.uses_count,
+        'revoked_at': link.revoked_at.isoformat() if link.revoked_at else None,
+        'is_active': link.is_valid(),
+    }
 
 
 def _group_settings_payload(membership):
@@ -106,12 +247,15 @@ def _group_message_payload(message, viewer=None):
 
 def _member_payload(membership):
     user = membership.user
+    muted = _is_member_muted(membership)
     return {
         'user_id': user.id,
         'username': user.username,
         'avatar': _get_avatar_url(user),
         'role': membership.role,
         'joined_at': membership.joined_at.isoformat() if membership.joined_at else None,
+        'muted_until': membership.muted_until.isoformat() if membership.muted_until else None,
+        'is_group_muted': muted,
         'is_self': False,
     }
 
@@ -131,6 +275,9 @@ def _group_detail_payload(group, viewer_membership=None):
         'id': group.id,
         'name': group.name,
         'avatar': _group_avatar_url(group),
+        'description': group.description,
+        'announcement': group.announcement,
+        'mute_mode': group.mute_mode,
         'owner_id': group.owner_id,
         'member_count': len(members),
         'created_at': group.created_at.isoformat() if group.created_at else None,
@@ -228,6 +375,7 @@ def create_message_group_api(request):
                 MessageGroupMember(group=group, user=user, role='member')
                 for user in users
             ])
+            _create_group_audit_log(group, request.user, 'group_create', metadata={'member_count': len(users) + 1})
 
         return JsonResponse({
             'status': 'success',
@@ -272,6 +420,7 @@ def message_group_detail_api(request, group_id):
         group.name = name
         group.updated_at = timezone.now()
         group.save(update_fields=['name', 'updated_at'])
+        _create_group_audit_log(group, request.user, 'group_rename', metadata={'name': name})
         return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
@@ -279,6 +428,150 @@ def message_group_detail_api(request, group_id):
         raise
     except Exception as e:
         return _server_error_response('更新群组错误', e)
+
+
+@require_http_methods(["POST", "PATCH"])
+@login_required
+def update_group_profile_api(request, group_id):
+    try:
+        from ...models import MessageGroup
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+
+        if request.content_type and request.content_type.startswith('multipart/form-data'):
+            data = request.POST
+            avatar = request.FILES.get('avatar')
+        else:
+            data = json.loads(request.body or '{}')
+            avatar = None
+
+        changed_fields = []
+        metadata = {}
+        if 'name' in data:
+            name = _body_string(data, 'name')[:80]
+            if not name:
+                return JsonResponse({'error': '请输入群组名称'}, status=400)
+            if group.name != name:
+                metadata['old_name'] = group.name
+                metadata['name'] = name
+                group.name = name
+                changed_fields.append('name')
+        if 'description' in data:
+            group.description = _body_string(data, 'description')[:1000]
+            changed_fields.append('description')
+        if 'announcement' in data:
+            group.announcement = _body_string(data, 'announcement')[:2000]
+            changed_fields.append('announcement')
+        if avatar is not None:
+            group.avatar = avatar
+            changed_fields.append('avatar')
+
+        if changed_fields:
+            changed_fields.append('updated_at')
+            group.updated_at = timezone.now()
+            group.save(update_fields=list(dict.fromkeys(changed_fields)))
+            action = 'group_announcement_update' if changed_fields == ['announcement', 'updated_at'] else 'group_update_profile'
+            _create_group_audit_log(group, request.user, action, metadata=metadata or {'fields': changed_fields})
+
+        return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('更新群资料错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def transfer_group_ownership_api(request, group_id):
+    try:
+        from ...models import MessageGroup, MessageGroupMember
+        data = json.loads(request.body or '{}')
+        target_user_id = int(data.get('user_id'))
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        owner_error = _require_group_owner(membership)
+        if owner_error is not None:
+            return owner_error
+
+        with transaction.atomic():
+            current_owner = MessageGroupMember.objects.select_for_update().get(
+                group=group, user=request.user, left_at__isnull=True
+            )
+            target = get_object_or_404(
+                MessageGroupMember.objects.select_for_update().select_related('user'),
+                group=group,
+                user_id=target_user_id,
+                left_at__isnull=True,
+            )
+            if target.user_id == request.user.id:
+                return JsonResponse({'error': '不能转让给自己'}, status=400)
+            current_owner.role = 'admin'
+            target.role = 'owner'
+            current_owner.save(update_fields=['role'])
+            target.save(update_fields=['role'])
+            group.owner = target.user
+            group.updated_at = timezone.now()
+            group.save(update_fields=['owner', 'updated_at'])
+            _create_group_audit_log(
+                group,
+                request.user,
+                'ownership_transfer',
+                target_user=target.user,
+                metadata={'old_owner_id': request.user.id, 'new_owner_id': target.user_id},
+            )
+        return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, target)})
+    except (TypeError, ValueError):
+        return JsonResponse({'error': '请选择新的群主'}, status=400)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('转让群主错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def set_group_mute_mode_api(request, group_id):
+    try:
+        from ...models import MessageGroup
+        data = json.loads(request.body or '{}')
+        mute_mode = data.get('mute_mode')
+        if mute_mode not in ('none', 'admins_only'):
+            return JsonResponse({'error': '不支持的发言模式'}, status=400)
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+        old_mode = group.mute_mode
+        group.mute_mode = mute_mode
+        group.updated_at = timezone.now()
+        group.save(update_fields=['mute_mode', 'updated_at'])
+        _create_group_audit_log(
+            group,
+            request.user,
+            'group_mute_change',
+            metadata={'old_mode': old_mode, 'mute_mode': mute_mode},
+        )
+        return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('设置群发言模式错误', e)
 
 
 @require_http_methods(["POST"])
@@ -313,6 +606,9 @@ def add_group_members_api(request, group_id):
         users = list(User.objects.filter(id__in=member_ids, is_active=True))
         if len(users) != len(member_ids):
             return JsonResponse({'error': '部分用户不存在或不可用'}, status=400)
+        banned_users = [user.username for user in users if _get_active_group_ban(group, user)]
+        if banned_users:
+            return JsonResponse({'error': f"以下用户已被本群封禁，无法加入：{', '.join(banned_users)}"}, status=403)
 
         with transaction.atomic():
             for user in users:
@@ -326,6 +622,7 @@ def add_group_members_api(request, group_id):
                     member.role = 'member'
                     member.joined_at = timezone.now()
                     member.save(update_fields=['left_at', 'role', 'joined_at'])
+                _create_group_audit_log(group, request.user, 'member_add', target_user=user)
             group.updated_at = timezone.now()
             group.save(update_fields=['updated_at'])
 
@@ -359,6 +656,7 @@ def remove_group_member_api(request, group_id, user_id):
 
         target.left_at = timezone.now()
         target.save(update_fields=['left_at'])
+        _create_group_audit_log(group, request.user, 'member_remove', target_user=target.user)
         group.updated_at = timezone.now()
         group.save(update_fields=['updated_at'])
         return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
@@ -366,6 +664,444 @@ def remove_group_member_api(request, group_id, user_id):
         raise
     except Exception as e:
         return _server_error_response('移除群成员错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def set_group_member_role_api(request, group_id, user_id):
+    try:
+        from ...models import MessageGroup, MessageGroupMember
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        owner_error = _require_group_owner(membership)
+        if owner_error is not None:
+            return owner_error
+
+        data = json.loads(request.body or '{}')
+        role = data.get('role')
+        if role not in ('admin', 'member'):
+            return JsonResponse({'error': '角色只能设置为管理员或成员'}, status=400)
+
+        target = get_object_or_404(MessageGroupMember, group=group, user_id=user_id, left_at__isnull=True)
+        if target.role == 'owner':
+            return JsonResponse({'error': '不能修改群主角色'}, status=400)
+        old_role = target.role
+        target.role = role
+        target.save(update_fields=['role'])
+        _create_group_audit_log(
+            group,
+            request.user,
+            'member_role_change',
+            target_user=target.user,
+            metadata={'old_role': old_role, 'role': role},
+        )
+        group.updated_at = timezone.now()
+        group.save(update_fields=['updated_at'])
+        return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('更新群成员角色错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def mute_group_member_api(request, group_id, user_id):
+    try:
+        from ...models import MessageGroup, MessageGroupMember
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+
+        data = json.loads(request.body or '{}')
+        target = get_object_or_404(MessageGroupMember, group=group, user_id=user_id, left_at__isnull=True)
+        if not _can_manage_target(membership, target):
+            return JsonResponse({'error': '无权操作该成员'}, status=403)
+
+        if data.get('action') == 'unmute':
+            target.muted_until = None
+            audit_action = 'member_unmute'
+        else:
+            target.muted_until = _parse_mute_until(data)
+            audit_action = 'member_mute'
+        target.save(update_fields=['muted_until'])
+        _create_group_audit_log(
+            group,
+            request.user,
+            audit_action,
+            target_user=target.user,
+            metadata={'muted_until': target.muted_until.isoformat() if target.muted_until else None},
+        )
+        group.updated_at = timezone.now()
+        group.save(update_fields=['updated_at'])
+        return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('更新群成员禁言错误', e)
+
+
+@require_http_methods(["GET", "POST"])
+@login_required
+def group_invite_links_api(request, group_id):
+    try:
+        from ...models import MessageGroup, MessageGroupInviteLink
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+
+        if request.method == 'POST':
+            data = json.loads(request.body or '{}')
+            expires_at = None
+            expires_in_minutes = data.get('expires_in_minutes')
+            if expires_in_minutes not in (None, '', 0, '0'):
+                try:
+                    minutes = int(expires_in_minutes)
+                except (TypeError, ValueError):
+                    return JsonResponse({'error': '过期时间必须是分钟数'}, status=400)
+                if minutes < 1:
+                    return JsonResponse({'error': '过期时间必须大于 0'}, status=400)
+                expires_at = timezone.now() + timedelta(minutes=min(minutes, 60 * 24 * 30))
+
+            max_uses = data.get('max_uses')
+            if max_uses in ('', 0, '0'):
+                max_uses = None
+            elif max_uses is not None:
+                try:
+                    max_uses = int(max_uses)
+                except (TypeError, ValueError):
+                    return JsonResponse({'error': '使用次数必须是数字'}, status=400)
+                if max_uses < 1:
+                    return JsonResponse({'error': '使用次数必须大于 0'}, status=400)
+                max_uses = min(max_uses, 1000)
+
+            link = MessageGroupInviteLink.objects.create(
+                group=group,
+                created_by=request.user,
+                expires_at=expires_at,
+                max_uses=max_uses,
+            )
+            _create_group_audit_log(
+                group,
+                request.user,
+                'invite_link_create',
+                metadata={'invite_id': link.id, 'expires_at': expires_at.isoformat() if expires_at else None, 'max_uses': max_uses},
+            )
+            return JsonResponse({
+                'status': 'success',
+                'invite': _invite_link_payload(link, request),
+            }, status=201)
+
+        links = group.invite_links.select_related('created_by').order_by('-created_at')[:20]
+        return JsonResponse({
+            'status': 'success',
+            'invites': [_invite_link_payload(link, request) for link in links],
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('处理群邀请链接错误', e)
+
+
+@require_http_methods(["GET", "POST"])
+@login_required
+def group_bans_api(request, group_id):
+    try:
+        from ...models import MessageGroup, MessageGroupBan, MessageGroupMember
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+
+        if request.method == 'GET':
+            bans = (
+                MessageGroupBan.objects
+                .filter(group=group, revoked_at__isnull=True)
+                .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+                .select_related('user', 'banned_by')
+                .order_by('-created_at')[:100]
+            )
+            return JsonResponse({'status': 'success', 'bans': [_active_group_ban_payload(ban) for ban in bans]})
+
+        data = json.loads(request.body or '{}')
+        try:
+            user_id = int(data.get('user_id'))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': '请选择要封禁的用户'}, status=400)
+        if user_id == request.user.id:
+            return JsonResponse({'error': '不能封禁自己'}, status=400)
+
+        target_user = get_object_or_404(User, id=user_id, is_active=True)
+        target_membership = MessageGroupMember.objects.filter(
+            group=group,
+            user=target_user,
+            left_at__isnull=True,
+        ).first()
+        if target_membership and not _can_manage_target(membership, target_membership):
+            return JsonResponse({'error': '无权封禁该成员'}, status=403)
+
+        reason = _body_string(data, 'reason')[:1000]
+        try:
+            expires_at = _parse_expires_at(data.get('expires_at'))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': '过期时间格式错误'}, status=400)
+        if expires_at and expires_at <= timezone.now():
+            return JsonResponse({'error': '过期时间必须晚于当前时间'}, status=400)
+
+        with transaction.atomic():
+            existing = _get_active_group_ban(group, target_user)
+            if existing:
+                ban = existing
+                ban.reason = reason
+                ban.expires_at = expires_at
+                ban.banned_by = request.user
+                ban.save(update_fields=['reason', 'expires_at', 'banned_by'])
+            else:
+                ban = MessageGroupBan.objects.create(
+                    group=group,
+                    user=target_user,
+                    banned_by=request.user,
+                    reason=reason,
+                    expires_at=expires_at,
+                )
+            if target_membership and data.get('remove_member', True):
+                target_membership.left_at = timezone.now()
+                target_membership.save(update_fields=['left_at'])
+            group.updated_at = timezone.now()
+            group.save(update_fields=['updated_at'])
+            _create_group_audit_log(
+                group,
+                request.user,
+                'member_ban',
+                target_user=target_user,
+                metadata={'reason': reason, 'expires_at': expires_at.isoformat() if expires_at else None},
+            )
+
+        return JsonResponse({'status': 'success', 'ban': _active_group_ban_payload(ban), 'group': _group_detail_payload(group, membership)}, status=201)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('处理群封禁错误', e)
+
+
+@require_http_methods(["POST", "DELETE"])
+@login_required
+def revoke_group_ban_api(request, group_id, ban_id):
+    try:
+        from ...models import MessageGroup, MessageGroupBan
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+        ban = get_object_or_404(MessageGroupBan.objects.select_related('user'), id=ban_id, group=group)
+        if ban.revoked_at is None:
+            ban.revoked_at = timezone.now()
+            ban.revoked_by = request.user
+            ban.save(update_fields=['revoked_at', 'revoked_by'])
+            _create_group_audit_log(group, request.user, 'member_unban', target_user=ban.user)
+        return JsonResponse({'status': 'success'})
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('解除群封禁错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def group_audit_logs_api(request, group_id):
+    try:
+        from ...models import MessageGroup, MessageGroupAuditLog
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+        try:
+            page = max(1, int(request.GET.get('page', '1')))
+            page_size = min(100, max(1, int(request.GET.get('page_size', '30'))))
+        except ValueError:
+            return JsonResponse({'error': '分页参数错误'}, status=400)
+        qs = MessageGroupAuditLog.objects.filter(group=group).select_related('actor', 'target_user').order_by('-created_at')
+        count = qs.count()
+        start = (page - 1) * page_size
+        logs = qs[start:start + page_size]
+        return JsonResponse({
+            'status': 'success',
+            'count': count,
+            'results': [
+                {
+                    'id': log.id,
+                    'actor': _user_payload(log.actor),
+                    'target_user': _user_payload(log.target_user),
+                    'action': log.action,
+                    'metadata': log.metadata,
+                    'created_at': log.created_at.isoformat() if log.created_at else None,
+                }
+                for log in logs
+            ],
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('获取群审计日志错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def preview_group_invite_api(request, token):
+    try:
+        from ...models import MessageGroupInviteLink, MessageGroupMember
+        link = get_object_or_404(
+            MessageGroupInviteLink.objects.select_related('group', 'created_by'),
+            token=token,
+        )
+        group = link.group
+        valid = link.is_valid()
+        reason = ''
+        if link.revoked_at is not None:
+            reason = 'revoked'
+        elif link.expires_at and link.expires_at <= timezone.now():
+            reason = 'expired'
+        elif link.max_uses is not None and link.uses_count >= link.max_uses:
+            reason = 'max_uses_reached'
+        elif not group.is_active:
+            reason = 'group_inactive'
+
+        membership = MessageGroupMember.objects.filter(group=group, user=request.user, left_at__isnull=True).first()
+        ban = _get_active_group_ban(group, request.user)
+        can_join = bool(valid and membership is None and ban is None)
+        return JsonResponse({
+            'status': 'success',
+            'valid': valid,
+            'reason': reason,
+            'group': {
+                'id': group.id,
+                'name': group.name,
+                'avatar': _group_avatar_url(group),
+                'description': group.description,
+                'member_count': group.memberships.filter(left_at__isnull=True).count(),
+            },
+            'link': {
+                'expires_at': link.expires_at.isoformat() if link.expires_at else None,
+                'max_uses': link.max_uses,
+                'uses_count': link.uses_count,
+                'remaining_uses': None if link.max_uses is None else max(0, link.max_uses - link.uses_count),
+            },
+            'viewer': {
+                'is_member': membership is not None,
+                'is_banned': ban is not None,
+                'ban': _active_group_ban_payload(ban),
+                'can_join': can_join,
+            },
+        })
+    except Http404:
+        return JsonResponse({'error': '邀请链接不存在'}, status=404)
+    except Exception as e:
+        return _server_error_response('预览群邀请错误', e)
+
+
+@require_http_methods(["POST", "DELETE"])
+@login_required
+def revoke_group_invite_link_api(request, group_id, invite_id):
+    try:
+        from ...models import MessageGroup, MessageGroupInviteLink
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+
+        link = get_object_or_404(MessageGroupInviteLink, id=invite_id, group=group)
+        if link.revoked_at is None:
+            link.revoked_at = timezone.now()
+            link.save(update_fields=['revoked_at'])
+            _create_group_audit_log(group, request.user, 'invite_link_revoke', metadata={'invite_id': link.id})
+        return JsonResponse({'status': 'success', 'invite': _invite_link_payload(link, request)})
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('撤销群邀请链接错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def join_group_by_invite_api(request, token):
+    try:
+        from ...models import MessageGroupInviteLink, MessageGroupMember
+        with transaction.atomic():
+            link = get_object_or_404(
+                MessageGroupInviteLink.objects.select_for_update().select_related('group'),
+                token=token,
+            )
+            if not link.is_valid():
+                return JsonResponse({'error': '邀请链接已失效'}, status=400)
+            active_ban = _get_active_group_ban(link.group, request.user)
+            if active_ban:
+                return JsonResponse({
+                    'error': '你已被该群组封禁，无法通过邀请链接加入',
+                    'ban': _active_group_ban_payload(active_ban),
+                }, status=403)
+
+            membership, created = MessageGroupMember.objects.get_or_create(
+                group=link.group,
+                user=request.user,
+                defaults={'role': 'member'},
+            )
+            if membership.left_at is None and not created:
+                return JsonResponse({
+                    'status': 'success',
+                    'already_member': True,
+                    'group': _group_detail_payload(link.group, membership),
+                })
+
+            membership.left_at = None
+            membership.role = 'member'
+            membership.muted_until = None
+            membership.joined_at = timezone.now()
+            membership.save(update_fields=['left_at', 'role', 'muted_until', 'joined_at'])
+            link.uses_count += 1
+            link.save(update_fields=['uses_count'])
+            link.group.updated_at = timezone.now()
+            link.group.save(update_fields=['updated_at'])
+            _create_group_audit_log(link.group, request.user, 'member_add', target_user=request.user, metadata={'via': 'invite', 'invite_id': link.id})
+
+        return JsonResponse({
+            'status': 'success',
+            'already_member': False,
+            'group': _group_detail_payload(link.group, membership),
+        })
+    except Http404:
+        return JsonResponse({'error': '邀请链接不存在'}, status=404)
+    except Exception as e:
+        return _server_error_response('加入群组错误', e)
 
 
 @require_http_methods(["POST"])
@@ -382,6 +1118,7 @@ def leave_message_group_api(request, group_id):
 
         membership.left_at = timezone.now()
         membership.save(update_fields=['left_at'])
+        _create_group_audit_log(group, request.user, 'group_leave', target_user=request.user)
         group.updated_at = timezone.now()
         group.save(update_fields=['updated_at'])
         return JsonResponse({'status': 'success'})
@@ -407,6 +1144,7 @@ def dissolve_message_group_api(request, group_id):
         group.updated_at = timezone.now()
         group.save(update_fields=['is_active', 'updated_at'])
         group.memberships.filter(left_at__isnull=True).update(left_at=timezone.now())
+        _create_group_audit_log(group, request.user, 'group_dissolve')
         return JsonResponse({'status': 'success'})
     except Http404:
         raise
@@ -489,6 +1227,9 @@ def get_group_messages_api(request, group_id):
                 'id': group.id,
                 'name': group.name,
                 'avatar': _group_avatar_url(group),
+                'description': group.description,
+                'announcement': group.announcement,
+                'mute_mode': group.mute_mode,
             },
             'messages': [_group_message_payload(message, viewer=request.user) for message in messages],
             'settings': _group_settings_payload(membership),
@@ -521,6 +1262,9 @@ def send_group_message_api(request, group_id):
         membership, error = _require_group_member(group, request.user)
         if error is not None:
             return error
+        send_error = _can_send_group_message(group, membership)
+        if send_error is not None:
+            return send_error
 
         with transaction.atomic():
             message = GroupMessage.objects.create(

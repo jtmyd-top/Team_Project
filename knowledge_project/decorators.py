@@ -255,6 +255,7 @@ def send_operation_2fa_email(user, operation_type='general'):
 
 
 VAULT_ACCESS_WINDOW = 30 * 60
+VAULT_SESSION_ACCESS_WINDOW = 24 * 60 * 60
 VAULT_DEVICE_FAIL_THRESHOLD = 3
 VAULT_USER_FAIL_THRESHOLD = 5
 VAULT_IP_FAIL_THRESHOLD = 10
@@ -468,13 +469,16 @@ def check_vault_access(request):
     return cache.get(cache_key) is not None
 
 
-def grant_vault_access(request, window_seconds=None):
+def grant_vault_access(request, window_seconds=None, session_scoped=False):
     if window_seconds is None:
         window_seconds = VAULT_ACCESS_WINDOW
 
     cache_key = get_vault_access_key(request)
     expire_time = int(time.time()) + window_seconds
-    cache.set(cache_key, expire_time, timeout=window_seconds)
+    cache.set(cache_key, {
+        'expire_time': expire_time,
+        'session_scoped': bool(session_scoped),
+    }, timeout=window_seconds)
     return expire_time
 
 
@@ -485,11 +489,21 @@ def revoke_vault_access(request):
 
 def get_vault_access_remaining(request):
     cache_key = get_vault_access_key(request)
-    expire_time = cache.get(cache_key)
-    if expire_time is None:
+    cached_access = cache.get(cache_key)
+    if cached_access is None:
         return 0
+    if isinstance(cached_access, dict):
+        expire_time = cached_access.get('expire_time')
+    else:
+        expire_time = cached_access
     remaining = expire_time - int(time.time())
     return max(0, remaining)
+
+
+def is_vault_access_session_scoped(request):
+    cache_key = get_vault_access_key(request)
+    cached_access = cache.get(cache_key)
+    return isinstance(cached_access, dict) and bool(cached_access.get('session_scoped'))
 
 
 def verify_captcha_for_vault(captcha_type, turnstile_token, image_captcha, user_id, request):
@@ -535,14 +549,19 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             except ValueError:
                 duration_minutes = 30
 
+        session_scoped = False
         if duration_minutes == 0:
-            window_seconds = 24 * 60 * 60
+            window_seconds = VAULT_SESSION_ACCESS_WINDOW
+            session_scoped = True
         elif duration_minutes < 1:
             window_seconds = VAULT_ACCESS_WINDOW
         elif duration_minutes > 720:
             window_seconds = 720 * 60
         else:
             window_seconds = duration_minutes * 60
+            session_scoped = False
+    if duration_minutes is None:
+        session_scoped = False
 
     if not profile:
         return {
@@ -554,11 +573,12 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             'lock_seconds': 0,
             'remaining_seconds': 0,
             'require_captcha': False,
-            'window_seconds': 0
+            'window_seconds': 0,
+            'session_scoped': False
         }
 
     if not profile.two_fa_enabled:
-        expire_time = grant_vault_access(request, window_seconds=window_seconds)
+        expire_time = grant_vault_access(request, window_seconds=window_seconds, session_scoped=session_scoped)
         remaining = get_vault_access_remaining(request)
         return {
             'success': True,
@@ -569,7 +589,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             'lock_seconds': 0,
             'remaining_seconds': remaining,
             'require_captcha': False,
-            'window_seconds': window_seconds
+            'window_seconds': window_seconds,
+            'session_scoped': session_scoped
         }
 
     is_locked, lock_remaining, fail_count = check_vault_locked(user.id, request)
@@ -583,7 +604,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             'lock_seconds': lock_remaining,
             'remaining_seconds': 0,
             'require_captcha': False,
-            'window_seconds': 0
+            'window_seconds': 0,
+            'session_scoped': False
         }
 
     if fail_count >= VAULT_CAPTCHA_THRESHOLD:
@@ -597,7 +619,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
                 'lock_seconds': 0,
                 'remaining_seconds': 0,
                 'require_captcha': True,
-                'window_seconds': 0
+                'window_seconds': 0,
+                'session_scoped': False
             }
 
         captcha_type = captcha_params.get('captcha_type', 'turnstile')
@@ -617,13 +640,14 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
                 'lock_seconds': 0,
                 'remaining_seconds': 0,
                 'require_captcha': True,
-                'window_seconds': 0
+                'window_seconds': 0,
+                'session_scoped': False
             }
 
     success, message = verify_2fa_for_request(request, code, use_backup)
     if success:
         reset_vault_fail_count(user.id, request)
-        expire_time = grant_vault_access(request, window_seconds=window_seconds)
+        expire_time = grant_vault_access(request, window_seconds=window_seconds, session_scoped=session_scoped)
         remaining = get_vault_access_remaining(request)
         return {
             'success': True,
@@ -634,7 +658,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             'lock_seconds': 0,
             'remaining_seconds': remaining,
             'require_captcha': False,
-            'window_seconds': window_seconds
+            'window_seconds': window_seconds,
+            'session_scoped': session_scoped
         }
 
     new_fail_count, lock_seconds, require_captcha = increment_vault_fail_count(user.id, request)
@@ -652,7 +677,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             'lock_seconds': lock_seconds,
             'remaining_seconds': 0,
             'require_captcha': False,
-            'window_seconds': 0
+            'window_seconds': 0,
+            'session_scoped': False
         }
 
     if require_captcha:
@@ -665,7 +691,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
             'lock_seconds': 0,
             'remaining_seconds': 0,
             'require_captcha': True,
-            'window_seconds': 0
+            'window_seconds': 0,
+            'session_scoped': False
         }
 
     return {
@@ -677,7 +704,8 @@ def verify_vault_2fa(request, code, use_backup=False, captcha_params=None, durat
         'lock_seconds': 0,
         'remaining_seconds': 0,
         'require_captcha': False,
-        'window_seconds': 0
+        'window_seconds': 0,
+        'session_scoped': False
     }
 
 

@@ -30,6 +30,7 @@ export function useGlobalVaultAutoLock() {
     if (mainCountdownTimer) { clearTimeout(mainCountdownTimer); mainCountdownTimer = null }
     const expire = vaultStore.keyExpireTime
     if (!vaultStore.isUnlocked || !expire) return
+    if (!Number.isFinite(expire)) return
     const remaining = expire - Date.now()
     if (remaining <= 0) {
       lock()

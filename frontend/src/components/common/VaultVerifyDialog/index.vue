@@ -157,6 +157,11 @@
 <script setup>
 import { ref } from 'vue'
 import { ElDialog, ElButton, ElCheckbox, ElSelect, ElOption } from 'element-plus'
+import 'element-plus/es/components/dialog/style/css'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/checkbox/style/css'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import CaptchaWidget from '@components/common/CaptchaWidget/index.vue'
 import { useVaultVerifyDialog } from '@composables/useVaultVerifyDialog'
 import '@/assets/styles/components/vault-verify-dialog.css'

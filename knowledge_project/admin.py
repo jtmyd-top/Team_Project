@@ -489,7 +489,8 @@ class TrustedDeviceAdmin(admin.ModelAdmin):
 from .models import (
     Message, MessagePreference, UserBlocklist,
     ConversationSettings, MessageReport, AttachmentReport,
-    NoteReport, CommentReport, MessageGroupPolicy, MessageGroup, MessageGroupMember, GroupMessage,
+    NoteReport, CommentReport, MessageGroupPolicy, MessageGroup, MessageGroupMember,
+    MessageGroupInviteLink, MessageGroupBan, MessageGroupAuditLog, GroupMessage,
 )
 
 
@@ -522,15 +523,44 @@ class MessageGroupMemberInline(admin.TabularInline):
     model = MessageGroupMember
     extra = 0
     autocomplete_fields = ['user']
+    fields = ('user', 'role', 'muted_until', 'joined_at', 'left_at', 'is_muted')
+    readonly_fields = ('joined_at',)
 
 
 @admin.register(MessageGroup)
 class MessageGroupAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'owner', 'is_active', 'created_at', 'updated_at')
-    list_filter = ('is_active', 'created_at')
-    search_fields = ('name', 'owner__username')
+    list_display = ('id', 'name', 'owner', 'mute_mode', 'is_active', 'created_at', 'updated_at')
+    list_filter = ('is_active', 'mute_mode', 'created_at')
+    search_fields = ('name', 'description', 'announcement', 'owner__username')
     autocomplete_fields = ['owner', 'created_by']
     inlines = [MessageGroupMemberInline]
+
+
+@admin.register(MessageGroupBan)
+class MessageGroupBanAdmin(admin.ModelAdmin):
+    list_display = ('id', 'group', 'user', 'banned_by', 'expires_at', 'revoked_at', 'created_at')
+    list_filter = ('created_at', 'expires_at', 'revoked_at')
+    search_fields = ('group__name', 'user__username', 'banned_by__username', 'reason')
+    autocomplete_fields = ['group', 'user', 'banned_by', 'revoked_by']
+    readonly_fields = ('created_at',)
+
+
+@admin.register(MessageGroupAuditLog)
+class MessageGroupAuditLogAdmin(admin.ModelAdmin):
+    list_display = ('id', 'group', 'actor', 'target_user', 'action', 'created_at')
+    list_filter = ('action', 'created_at')
+    search_fields = ('group__name', 'actor__username', 'target_user__username')
+    autocomplete_fields = ['group', 'actor', 'target_user']
+    readonly_fields = ('created_at', 'metadata')
+
+
+@admin.register(MessageGroupInviteLink)
+class MessageGroupInviteLinkAdmin(admin.ModelAdmin):
+    list_display = ('id', 'group', 'created_by', 'uses_count', 'max_uses', 'expires_at', 'revoked_at', 'created_at')
+    list_filter = ('created_at', 'expires_at', 'revoked_at')
+    search_fields = ('group__name', 'token', 'created_by__username')
+    readonly_fields = ('token', 'created_at', 'uses_count')
+    autocomplete_fields = ['group', 'created_by']
 
 
 @admin.register(GroupMessage)

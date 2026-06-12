@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+﻿import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
@@ -9,21 +9,21 @@ export default defineConfig({
     drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
   },
 
-  // 依赖优化：确保 crypto-js 被正确预构建
+  // 渚濊禆浼樺寲锛氱‘淇?crypto-js 琚纭鏋勫缓
   optimizeDeps: {
     include: ['crypto-js']
   },
 
-  // 生产环境资源 URL 前缀
+  // 鐢熶骇鐜璧勬簮 URL 鍓嶇紑
   base: '/static/dist/',
 
-  // 开发服务器配置
+  // 寮€鍙戞湇鍔″櫒閰嶇疆
   server: {
     port: 5173,
     open: false,
-    // 允许跨域访问（Django 在 8000 端口）
+    // 鍏佽璺ㄥ煙璁块棶锛圖jango 鍦?8000 绔彛锛?
     cors: true,
-    // 配置代理，将 API 请求转发到 Django
+    // 閰嶇疆浠ｇ悊锛屽皢 API 璇锋眰杞彂鍒?Django
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',
@@ -38,57 +38,56 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-    // 允许外部访问
+    // 鍏佽澶栭儴璁块棶
     host: true,
   },
 
-  // 构建配置
+  // 鏋勫缓閰嶇疆
   build: {
-    // 输出到 Django 的 static/dist 目录
+    // 杈撳嚭鍒?Django 鐨?static/dist 鐩綍
     outDir: '../static/dist',
     emptyOutDir: true,
 
-    // 生成 manifest.json 供 Django 识别哈希文件名
+    // 鐢熸垚 manifest.json 渚?Django 璇嗗埆鍝堝笇鏂囦欢鍚?
     manifest: true,
 
-    // 调整 chunk 大小警告限制
+    // 璋冩暣 chunk 澶у皬璀﹀憡闄愬埗
     chunkSizeWarningLimit: 1000,
 
     rollupOptions: {
       input: {
-        // 设置页面
+        // 璁剧疆椤甸潰
         settings: path.resolve(__dirname, 'src/entries/settings.js'),
-        // 认证相关入口文件
+        // 璁よ瘉鐩稿叧鍏ュ彛鏂囦欢
         login: path.resolve(__dirname, 'src/entries/login.js'),
         signup: path.resolve(__dirname, 'src/entries/signup.js'),
         'forgot-password': path.resolve(__dirname, 'src/entries/forgot-password.js'),
         'reset-password': path.resolve(__dirname, 'src/entries/reset-password.js'),
-        // 首页
+        // 棣栭〉
         home: path.resolve(__dirname, 'src/entries/home.js'),
-        // 公共笔记页面
+        // 鍏叡绗旇椤甸潰
         'public-note-entry': path.resolve(__dirname, 'src/entries/public-note-entry.js'),
         'public-note-page': path.resolve(__dirname, 'src/entries/public-note-page.js'),
         'public-notes-list': path.resolve(__dirname, 'src/entries/public-notes-list.js'),
-        // 知识笔记列表页面
+        // 鐭ヨ瘑绗旇鍒楄〃椤甸潰
         'knowledge-list': path.resolve(__dirname, 'src/entries/knowledge-list.js'),
         'knowledge-element': path.resolve(__dirname, 'src/entries/knowledge-element.js'),
-        // 主题管理器
-        'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
-        // 战情室大屏
+        // 涓婚绠＄悊鍣?        'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
+        // 鎴樻儏瀹ゅぇ灞?
         'dashboard': path.resolve(__dirname, 'src/entries/dashboard.js'),
-        // 私信页面
+        // 绉佷俊椤甸潰
         'messages': path.resolve(__dirname, 'src/entries/messages.js'),
-        // 举报处置中心
+        // 涓炬姤澶勭疆涓績
         'moderation': path.resolve(__dirname, 'src/entries/moderation.js'),
       },
       output: {
-        format: 'es',  // 主格式为 ES 模块
+        format: 'es',  // 涓绘牸寮忎负 ES 妯″潡
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
-        // CSS 使用固定文件名，方便模板引用
+        // CSS 浣跨敤鍥哄畾鏂囦欢鍚嶏紝鏂逛究妯℃澘寮曠敤
         assetFileNames: (assetInfo) => {
           if (assetInfo.name?.endsWith('.css')) {
-            // CSS 文件使用固定名称，只按 entry 分组
+            // CSS 鏂囦欢浣跨敤鍥哄畾鍚嶇О锛屽彧鎸?entry 鍒嗙粍
             const legacyNames = {
               'element-plus.css': 'element.css',
               'knowledge-list.css': 'knowledge.css',
@@ -99,27 +98,25 @@ export default defineConfig({
           return 'assets/[name]-[hash][extname]'
         },
 
-        // 手动分割代码块，优化加载性能
+        // 鎵嬪姩鍒嗗壊浠ｇ爜鍧楋紝浼樺寲鍔犺浇鎬ц兘
         manualChunks(id) {
-          // 将 node_modules 中的依赖分离到 vendor chunk
+          // 灏?node_modules 涓殑渚濊禆鍒嗙鍒?vendor chunk
           if (id.includes('node_modules')) {
-            // ECharts 单独打包
+            // ECharts 鍗曠嫭鎵撳寘
             if (id.includes('echarts') || id.includes('zrender')) {
               return 'echarts-vendor';
             }
-            // Vue 相关库单独打包
+            // Vue 鐩稿叧搴撳崟鐙墦鍖?
             if (id.includes('vue') || id.includes('pinia')) {
               return 'vue-vendor';
             }
-            // 其他第三方库打包到 vendor
-            return 'vendor';
           }
         }
       }
     }
   },
 
-  // 路径别名
+  // 璺緞鍒悕
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -131,7 +128,7 @@ export default defineConfig({
       '@api': path.resolve(__dirname, 'src/api'),
       '@lib': path.resolve(__dirname, 'src/lib'),
       '@entries': path.resolve(__dirname, 'src/entries'),
-      // Django 静态资源目录
+      // Django 闈欐€佽祫婧愮洰褰?
       '@static': path.resolve(__dirname, '../static'),
     }
   }

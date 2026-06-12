@@ -34,9 +34,10 @@ if not exist "%CERT_FILE%" (
 )
 
 echo [*] Collecting static files (this may take a while on first run)...
-"%VENV_PY%" manage.py collectstatic --noinput
+"%VENV_PY%" manage.py collectstatic --noinput --clear
 if errorlevel 1 (
-    echo [!] collectstatic failed. Aborting.
+    echo [!] collectstatic failed. Check if .env file exists and contains SECRET_KEY.
+    echo     Current directory: %CD%
     exit /b 1
 )
 

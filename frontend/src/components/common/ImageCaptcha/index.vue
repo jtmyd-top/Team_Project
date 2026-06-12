@@ -52,6 +52,8 @@
 </template>
 
 <script setup>
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
 import { useImageCaptcha } from '@/composables/useImageCaptcha'
 import '@/assets/styles/components/image-captcha.css'
 
