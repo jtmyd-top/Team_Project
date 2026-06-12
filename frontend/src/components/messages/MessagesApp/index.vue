@@ -614,11 +614,12 @@
               <span>邀请链接</span>
               <button
                 class="group-secondary-btn small"
-                :disabled="groupPanel.inviteBusy"
+                :disabled="groupPanel.inviteBusy || groupPanel.inviteLoading || groupPanel.inviteLinks.length > 0"
+                :title="groupPanel.inviteLinks.length > 0 ? '每个群组仅能创建一个邀请链接' : '新建邀请链接'"
                 @click="createGroupInviteLink"
               >
                 <i :class="groupPanel.inviteBusy ? 'fas fa-spinner fa-spin' : 'fas fa-link'"></i>
-                新建
+                {{ groupPanel.inviteLinks.length > 0 ? '已创建' : '新建' }}
               </button>
             </div>
             <div v-if="groupPanel.inviteLoading" class="group-inline-state">
@@ -3081,6 +3082,10 @@ async function loadGroupInviteLinks() {
 async function createGroupInviteLink() {
   const groupId = selectedGroupId()
   if (!groupId) return
+  if (groupPanel.value.inviteLinks.length > 0) {
+    ElMessage.info('每个群组仅能创建一个邀请链接')
+    return
+  }
   groupPanel.value.inviteBusy = true
   try {
     const d = await apiPost(`/api/messages/groups/${groupId}/invites/`, {})

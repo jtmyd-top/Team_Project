@@ -865,18 +865,23 @@ def group_invite_links_api(request, group_id):
                     return JsonResponse({'error': '使用次数必须大于 0'}, status=400)
                 max_uses = min(max_uses, 1000)
 
-            link = MessageGroupInviteLink.objects.create(
-                group=group,
-                created_by=request.user,
-                expires_at=expires_at,
-                max_uses=max_uses,
-            )
-            _create_group_audit_log(
-                group,
-                request.user,
-                'invite_link_create',
-                metadata={'invite_id': link.id, 'expires_at': expires_at.isoformat() if expires_at else None, 'max_uses': max_uses},
-            )
+            with transaction.atomic():
+                locked_group = MessageGroup.objects.select_for_update().get(id=group.id)
+                if MessageGroupInviteLink.objects.filter(group=locked_group).exists():
+                    return JsonResponse({'error': '每个群组仅能创建一个邀请链接'}, status=409)
+
+                link = MessageGroupInviteLink.objects.create(
+                    group=locked_group,
+                    created_by=request.user,
+                    expires_at=expires_at,
+                    max_uses=max_uses,
+                )
+                _create_group_audit_log(
+                    locked_group,
+                    request.user,
+                    'invite_link_create',
+                    metadata={'invite_id': link.id, 'expires_at': expires_at.isoformat() if expires_at else None, 'max_uses': max_uses},
+                )
             return JsonResponse({
                 'status': 'success',
                 'invite': _invite_link_payload(link, request),

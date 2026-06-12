@@ -487,6 +487,10 @@ class MessageGroupTests(_MessageTestBase):
         invite = MessageGroupInviteLink.objects.get(group=group)
         self.assertIn('group_invite=', parse(response)['invite']['url'])
 
+        duplicate_response = post_json(self.client, reverse('group_invite_links_api', args=[group.id]), {})
+        self.assertEqual(duplicate_response.status_code, 409, duplicate_response.content)
+        self.assertEqual(MessageGroupInviteLink.objects.filter(group=group).count(), 1)
+
         self.client.logout()
         login(self.client, outsider)
         response = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})

@@ -201,7 +201,7 @@
       <el-tab-pane label="邀请链接" name="invites" v-if="canInvite">
         <div class="tab-content">
           <div class="invites-header">
-            <el-button type="primary" @click="createInviteLink">
+            <el-button type="primary" :disabled="inviteLinks.length > 0" @click="createInviteLink">
               <el-icon><Link /></el-icon>
               创建邀请链接
             </el-button>
@@ -644,6 +644,10 @@ export default {
     };
 
     const createInviteLink = async () => {
+      if (inviteLinks.value.length > 0) {
+        ElMessage.info('每个群组仅能创建一个邀请链接');
+        return;
+      }
       showInviteDialog.value = true;
     };
 
