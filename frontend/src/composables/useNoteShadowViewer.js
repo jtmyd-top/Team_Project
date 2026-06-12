@@ -24,6 +24,7 @@ export function useNoteShadowViewer(props) {
   // ==================== 状态 ====================
   const hasRequestedVaultUnlock = ref(false)
   const isDecrypting = ref(false)
+  const isRecoveringVaultKey = ref(false)
   const decryptError = ref('')
   const decryptedContent = ref('')
   const tocItems = ref([])
@@ -35,6 +36,7 @@ export function useNoteShadowViewer(props) {
   let cachedRawHtml = ''
   let cachedCleanHtml = ''
   let scrollParent = null
+  let latestRecoverRequestId = 0
 
   // ==================== 计算属性 ====================
   // 是否有有效的密钥（统一走 vaultStore.isUnlocked）
@@ -66,6 +68,36 @@ export function useNoteShadowViewer(props) {
 
   // ==================== 解密逻辑 ====================
   let latestDecryptRequestId = 0
+  async function recoverVaultKeySilently() {
+    if (!props.isSecret || !props.content || !props.noteId) {
+      return false
+    }
+
+    if (vaultStore.isUnlocked) {
+      return true
+    }
+
+    const requestId = ++latestRecoverRequestId
+    const capturedNoteId = props.noteId
+    isRecoveringVaultKey.value = true
+    renderContent(false)
+
+    try {
+      const recovered = await vaultStore.recoverKey()
+      if (requestId !== latestRecoverRequestId || capturedNoteId !== props.noteId) {
+        return false
+      }
+      return recovered && vaultStore.isUnlocked
+    } catch (e) {
+      console.warn('[Vault] Silent key recovery failed:', e)
+      return false
+    } finally {
+      if (requestId === latestRecoverRequestId) {
+        isRecoveringVaultKey.value = false
+      }
+    }
+  }
+
   async function decryptNoteContent() {
     if (!props.isSecret || !props.content) {
       return
@@ -96,7 +128,7 @@ export function useNoteShadowViewer(props) {
     }
 
     if (!vaultStore.isUnlocked) {
-      const recovered = await vaultStore.recoverKey()
+      const recovered = await recoverVaultKeySilently()
       if (requestId !== latestDecryptRequestId || capturedNoteId !== props.noteId) return
       if (!recovered || !vaultStore.isUnlocked) {
         isDecrypting.value = false
@@ -130,10 +162,11 @@ export function useNoteShadowViewer(props) {
 
     const rawHtml = displayContent.value || ''
     const hasValidDek = vaultStore.isUnlocked
-    const needsVerification = props.isSecret && props.content && !hasValidDek && !isDecrypting.value && !decryptError.value
+    const needsVerification = props.isSecret && props.content && !hasValidDek && !isDecrypting.value && !isRecoveringVaultKey.value && !decryptError.value
     const shouldUpdate = rawHtml !== cachedRawHtml ||
       needsVerification ||
       (props.isSecret && isDecrypting.value) ||
+      (props.isSecret && isRecoveringVaultKey.value) ||
       (props.isSecret && !!decryptError.value) ||
       forceStyleUpdate
 
@@ -147,7 +180,11 @@ export function useNoteShadowViewer(props) {
     if (shouldUpdate) {
       cachedRawHtml = rawHtml
 
-      if (needsVerification) {
+      if (props.isSecret && isRecoveringVaultKey.value) {
+        cachedCleanHtml = '<div style="padding: 20px; text-align: center; color: #999;">正在恢复保险柜解锁状态，请稍候...</div>'
+        tocItems.value = []
+        showToc.value = false
+      } else if (needsVerification) {
         cachedCleanHtml = `
           <div class="vault-trash-locked-notice">
             <div class="notice-icon">🔒</div>
@@ -392,7 +429,13 @@ export function useNoteShadowViewer(props) {
       decryptNoteContent()
     } else if (!valid && props.isSecret) {
       decryptedContent.value = ''
-      renderContent(false)
+      recoverVaultKeySilently().then((recovered) => {
+        if (recovered && props.isSecret && props.content && props.noteId) {
+          decryptNoteContent()
+        } else {
+          renderContent(false)
+        }
+      })
     }
   })
 

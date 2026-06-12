@@ -3432,8 +3432,8 @@ function closeGroupInvitePreview() {
 }
 
 async function handleGroupJoined(groupId) {
-  showGroupInvitePreview.value = false
-  groupInviteToken.value = ''
+  // 不立即关闭弹窗，让 GroupInvitePreview 自己处理延迟关闭
+  // showGroupInvitePreview 将在 GroupInvitePreview emit('close') 时由 closeGroupInvitePreview 处理
 
   // Reload conversations and select the group
   await loadConversations({ silent: true })

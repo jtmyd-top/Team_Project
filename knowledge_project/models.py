@@ -1724,6 +1724,17 @@ class MessageGroup(models.Model):
     avatar = models.ImageField(upload_to='group_avatars/', null=True, blank=True, verbose_name="群头像")
     description = models.TextField(blank=True, default='', verbose_name="群简介")
     announcement = models.TextField(blank=True, default='', verbose_name="群公告")
+    # Phase 3: 群公告增强
+    announcement_pinned_at = models.DateTimeField(null=True, blank=True, verbose_name="公告置顶时间")
+    announcement_updated_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='updated_group_announcements', verbose_name="公告更新者"
+    )
+    # Phase 3: 入群审批
+    require_approval = models.BooleanField(default=False, verbose_name="需要入群审批")
+    # Phase 3: 自动回复
+    auto_reply_enabled = models.BooleanField(default=False, verbose_name="启用自动回复")
+    auto_reply_text = models.TextField(max_length=500, blank=True, default='', verbose_name="自动回复文本")
     mute_mode = models.CharField(
         max_length=32,
         choices=MUTE_MODE_CHOICES,
@@ -1850,6 +1861,15 @@ class GroupMessage(models.Model):
     )
     content = models.TextField(verbose_name="消息内容")
     searchable_text = models.TextField(blank=True, default='', verbose_name="搜索文本")
+    # Phase 2: 消息引用和转发
+    reply_to = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='replies', verbose_name="回复消息"
+    )
+    forwarded_from = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='forwards', verbose_name="转发自消息"
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="发送时间")
     is_edited = models.BooleanField(default=False, verbose_name="已编辑")
     edited_at = models.DateTimeField(null=True, blank=True, verbose_name="编辑时间")
@@ -2283,3 +2303,142 @@ def create_message_preference(sender, instance, created, **kwargs):
     """自动为新用户创建私信偏好设置"""
     if created:
         MessagePreference.objects.get_or_create(user=instance)
+
+
+# ==================== Phase 2: 群组消息系统增强 ====================
+
+class GroupMessageMention(models.Model):
+    """群组消息@提及记录"""
+    message = models.ForeignKey(
+        'GroupMessage', on_delete=models.CASCADE, related_name='mentions', verbose_name="消息"
+    )
+    mentioned_user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='group_mentions', verbose_name="被提及用户"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="提及时间")
+
+    class Meta:
+        verbose_name = "群组消息提及"
+        verbose_name_plural = "群组消息提及"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['message']),
+            models.Index(fields=['mentioned_user', '-created_at']),
+        ]
+        unique_together = [('message', 'mentioned_user')]
+
+    def __str__(self):
+        return f"@{self.mentioned_user.username} in {self.message.group.name}"
+
+
+class GroupMessageReaction(models.Model):
+    """群组消息表情回应"""
+    message = models.ForeignKey(
+        'GroupMessage', on_delete=models.CASCADE, related_name='reactions', verbose_name="消息"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='group_message_reactions', verbose_name="用户"
+    )
+    emoji = models.CharField(max_length=20, verbose_name="表情符号")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="反应时间")
+
+    class Meta:
+        verbose_name = "群组消息表情回应"
+        verbose_name_plural = "群组消息表情回应"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['message', 'emoji']),
+            models.Index(fields=['user', '-created_at']),
+        ]
+        unique_together = [('message', 'user', 'emoji')]
+
+    def __str__(self):
+        return f"{self.user.username} {self.emoji} on {self.message_id}"
+
+
+# ==================== Phase 3: 群组管理功能增强 ====================
+
+class GroupJoinRequest(models.Model):
+    """入群审批请求"""
+    STATUS_CHOICES = [
+        ('pending', '待审批'),
+        ('approved', '已通过'),
+        ('rejected', '已拒绝'),
+    ]
+
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='join_requests', verbose_name="群组"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='group_join_requests', verbose_name="申请用户"
+    )
+    request_message = models.TextField(
+        max_length=200, blank=True, default='', verbose_name="申请留言"
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="状态"
+    )
+    reviewed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='reviewed_join_requests', verbose_name="审批人"
+    )
+    rejection_reason = models.TextField(
+        max_length=200, blank=True, default='', verbose_name="拒绝原因"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="申请时间")
+    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="审批时间")
+
+    class Meta:
+        verbose_name = "入群申请"
+        verbose_name_plural = "入群申请"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', 'status', '-created_at']),
+            models.Index(fields=['user', '-created_at']),
+        ]
+        unique_together = [('group', 'user', 'status')]
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.group.name} ({self.get_status_display()})"
+
+
+class GroupTag(models.Model):
+    """群组标签"""
+    name = models.CharField(max_length=20, unique=True, verbose_name="标签名称")
+    color = models.CharField(max_length=7, default='#409EFF', verbose_name="标签颜色")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "群组标签"
+        verbose_name_plural = "群组标签"
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class GroupTagRelation(models.Model):
+    """用户给群组打标签的关系"""
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='group_tag_relations', verbose_name="用户"
+    )
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='user_tags', verbose_name="群组"
+    )
+    tag = models.ForeignKey(
+        GroupTag, on_delete=models.CASCADE, related_name='group_relations', verbose_name="标签"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "群组标签关系"
+        verbose_name_plural = "群组标签关系"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'group']),
+            models.Index(fields=['group', 'tag']),
+        ]
+        unique_together = [('user', 'group', 'tag')]
+
+    def __str__(self):
+        return f"{self.user.username} tagged {self.group.name} as {self.tag.name}"

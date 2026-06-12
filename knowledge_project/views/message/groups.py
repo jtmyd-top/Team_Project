@@ -223,6 +223,56 @@ def _group_settings_payload(membership):
 
 
 def _group_message_payload(message, viewer=None):
+    # Phase 2: 获取回复消息信息
+    reply_to_data = None
+    if message.reply_to:
+        reply_to_data = {
+            'id': message.reply_to.id,
+            'sender': message.reply_to.sender.username,
+            'sender_id': message.reply_to.sender_id,
+            'content': message.reply_to.content[:100],  # 只显示前100字符
+            'created_at': message.reply_to.created_at.isoformat(),
+        }
+
+    # Phase 2: 获取转发消息信息
+    forwarded_from_data = None
+    if message.forwarded_from:
+        forwarded_from_data = {
+            'id': message.forwarded_from.id,
+            'sender': message.forwarded_from.sender.username,
+            'sender_id': message.forwarded_from.sender_id,
+            'content': message.forwarded_from.content,
+            'created_at': message.forwarded_from.created_at.isoformat(),
+            'group_name': message.forwarded_from.group.name if message.forwarded_from.group else None,
+        }
+
+    # Phase 2: 获取@提及的用户列表
+    mentions = []
+    if hasattr(message, 'mentions'):
+        mentions = [
+            {
+                'user_id': mention.mentioned_user_id,
+                'username': mention.mentioned_user.username,
+            }
+            for mention in message.mentions.select_related('mentioned_user').all()
+        ]
+
+    # Phase 2: 获取表情回应统计
+    reactions = {}
+    if hasattr(message, 'reactions'):
+        from django.db.models import Count
+        reaction_stats = message.reactions.values('emoji').annotate(count=Count('id'))
+        for stat in reaction_stats:
+            emoji = stat['emoji']
+            count = stat['count']
+            # 获取使用该表情的用户列表（最多显示3个）
+            users = list(message.reactions.filter(emoji=emoji).select_related('user')[:3])
+            reactions[emoji] = {
+                'count': count,
+                'users': [{'user_id': r.user_id, 'username': r.user.username} for r in users],
+                'reacted_by_me': viewer and any(r.user_id == viewer.id for r in users) if viewer else False,
+            }
+
     return {
         'id': message.id,
         'conversation_type': 'group',
@@ -242,6 +292,11 @@ def _group_message_payload(message, viewer=None):
         'read_at': None,
         'is_own': (viewer is not None and viewer.id == message.sender_id),
         'attachments': [],
+        # Phase 2: 新增字段
+        'reply_to': reply_to_data,
+        'forwarded_from': forwarded_from_data,
+        'mentions': mentions,
+        'reactions': reactions,
     }
 
 
@@ -491,9 +546,12 @@ def update_group_profile_api(request, group_id):
 @login_required
 def transfer_group_ownership_api(request, group_id):
     try:
-        from ...models import MessageGroup, MessageGroupMember
+        from ...models import MessageGroup, MessageGroupMember, MessageGroupPolicy
         data = json.loads(request.body or '{}')
-        target_user_id = int(data.get('user_id'))
+        # 支持 user_id 和 new_owner_id 两种参数名
+        target_user_id = int(data.get('new_owner_id') or data.get('user_id'))
+        password = data.get('password', '')
+
         group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
         membership, error = _require_group_member(group, request.user)
         if error is not None:
@@ -501,6 +559,10 @@ def transfer_group_ownership_api(request, group_id):
         owner_error = _require_group_owner(membership)
         if owner_error is not None:
             return owner_error
+
+        # 验证密码（可选，增强安全性）
+        if password and not request.user.check_password(password):
+            return JsonResponse({'error': '密码验证失败'}, status=403)
 
         with transaction.atomic():
             current_owner = MessageGroupMember.objects.select_for_update().get(
@@ -514,6 +576,20 @@ def transfer_group_ownership_api(request, group_id):
             )
             if target.user_id == request.user.id:
                 return JsonResponse({'error': '不能转让给自己'}, status=400)
+
+            # 【新增】验证新群主是否满足开群条件
+            policy = MessageGroupPolicy.get_current()
+            eligible, stats = policy.can_create_group(target.user)
+
+            if not eligible:
+                return JsonResponse({
+                    'error': '新群主不满足创建群组条件',
+                    'policy': _policy_payload(policy, target.user),
+                    'stats': stats,
+                    'message': f'新群主需满足以下任一条件：公开文章数 ≥ {policy.min_public_notes} 或 关注者数 ≥ {policy.min_followers}。'
+                               f'当前状态：公开文章 {stats["public_notes"]} 篇，关注者 {stats["followers"]} 人。',
+                }, status=403)
+
             current_owner.role = 'admin'
             target.role = 'owner'
             current_owner.save(update_fields=['role'])
@@ -1244,7 +1320,7 @@ def get_group_messages_api(request, group_id):
 @login_required
 def send_group_message_api(request, group_id):
     try:
-        from ...models import GroupMessage, MessageGroup, UserSanction
+        from ...models import GroupMessage, GroupMessageMention, MessageGroup, MessageGroupMember, UserSanction
         data = json.loads(request.body)
         content = _body_string(data, 'content')
         if not content:
@@ -1253,6 +1329,11 @@ def send_group_message_api(request, group_id):
             return JsonResponse({'error': f'消息内容不能超过{MESSAGE_CONTENT_MAX_LENGTH}字'}, status=400)
         if data.get('attachment_ids'):
             return JsonResponse({'error': '群组暂不支持阅后即焚或附件消息'}, status=400)
+
+        # Phase 2: 获取回复和转发参数
+        reply_to_id = data.get('reply_to')
+        forwarded_from_id = data.get('forwarded_from')
+        mentioned_usernames = data.get('mentions', [])  # @提及的用户名列表
 
         mute = UserSanction.is_muted(request.user)
         if mute is not None:
@@ -1266,13 +1347,60 @@ def send_group_message_api(request, group_id):
         if send_error is not None:
             return send_error
 
+        # Phase 2: 验证回复消息
+        reply_to_message = None
+        if reply_to_id:
+            try:
+                reply_to_message = GroupMessage.objects.get(id=reply_to_id, group=group, is_recalled=False)
+            except GroupMessage.DoesNotExist:
+                return JsonResponse({'error': '回复的消息不存在或已撤回'}, status=400)
+
+        # Phase 2: 验证转发消息
+        forwarded_message = None
+        if forwarded_from_id:
+            try:
+                forwarded_message = GroupMessage.objects.get(id=forwarded_from_id, is_recalled=False)
+            except GroupMessage.DoesNotExist:
+                return JsonResponse({'error': '转发的消息不存在或已撤回'}, status=400)
+
         with transaction.atomic():
             message = GroupMessage.objects.create(
                 group=group,
                 sender=request.user,
                 content=content,
                 searchable_text=_message_searchable_text(content),
+                reply_to=reply_to_message,
+                forwarded_from=forwarded_message,
             )
+
+            # Phase 2: 创建@提及记录
+            if mentioned_usernames:
+                # 获取群成员中被提及的用户
+                mentioned_members = MessageGroupMember.objects.filter(
+                    group=group,
+                    user__username__in=mentioned_usernames,
+                    left_at__isnull=True
+                ).select_related('user')
+
+                for member in mentioned_members:
+                    GroupMessageMention.objects.create(
+                        message=message,
+                        mentioned_user=member.user
+                    )
+                    # 可选：发送通知给被提及的用户
+                    if member.user.id != request.user.id:  # 不通知自己
+                        try:
+                            notify_user(
+                                member.user,
+                                'group_mention',
+                                f'{request.user.username} 在群组中提到了你',
+                                f'在 {group.name} 中: {content[:50]}...' if len(content) > 50 else content,
+                                group_id=group.id,
+                                message_id=message.id,
+                            )
+                        except Exception as e:
+                            logger.warning(f'发送提及通知失败: {e}')
+
             group.updated_at = timezone.now()
             group.save(update_fields=['updated_at'])
             membership.force_unread = False
@@ -1410,3 +1538,56 @@ def report_group_message_api(request, group_id, message_id):
         raise
     except Exception as e:
         return _server_error_response('举报群组消息错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def check_transfer_eligibility_api(request, group_id, user_id):
+    """检查指定用户是否满足群主转让条件"""
+    try:
+        from ...models import MessageGroup, MessageGroupMember, MessageGroupPolicy
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        # 只有群主可以查询转让资格
+        owner_error = _require_group_owner(membership)
+        if owner_error is not None:
+            return owner_error
+
+        # 验证目标用户是群成员
+        target_membership = get_object_or_404(
+            MessageGroupMember,
+            group=group,
+            user_id=user_id,
+            left_at__isnull=True,
+        )
+
+        # 获取群组创建策略
+        policy = MessageGroupPolicy.get_current()
+        eligible, stats = policy.can_create_group(target_membership.user)
+
+        return JsonResponse({
+            'status': 'success',
+            'eligible': eligible,
+            'stats': stats,
+            'policy': {
+                'enabled': policy.enabled,
+                'min_public_notes': policy.min_public_notes,
+                'min_followers': policy.min_followers,
+            },
+            'reasons': {
+                'public_notes': stats['public_notes'] >= policy.min_public_notes,
+                'followers': stats['followers'] >= policy.min_followers,
+            },
+            'user': {
+                'id': target_membership.user.id,
+                'username': target_membership.user.username,
+            },
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('检查转让资格错误', e)

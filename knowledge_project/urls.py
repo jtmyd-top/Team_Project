@@ -82,6 +82,7 @@ urlpatterns = [
     path('api/messages/groups/<int:group_id>/', views.message_group_detail_api, name='message_group_detail_api'),
     path('api/messages/groups/<int:group_id>/profile/', views.update_group_profile_api, name='update_group_profile_api'),
     path('api/messages/groups/<int:group_id>/transfer-ownership/', views.transfer_group_ownership_api, name='transfer_group_ownership_api'),
+    path('api/messages/groups/<int:group_id>/check-transfer-eligibility/<int:user_id>/', views.check_transfer_eligibility_api, name='check_transfer_eligibility_api'),
     path('api/messages/groups/<int:group_id>/mute-mode/', views.set_group_mute_mode_api, name='set_group_mute_mode_api'),
     path('api/messages/groups/<int:group_id>/bans/', views.group_bans_api, name='group_bans_api'),
     path('api/messages/groups/<int:group_id>/bans/<int:ban_id>/revoke/', views.revoke_group_ban_api, name='revoke_group_ban_api'),

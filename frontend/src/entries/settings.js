@@ -1,13 +1,61 @@
 // Vite 入口文件 - 用于构建设置页面
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import ElementPlus from 'element-plus';
+import {
+  ElAlert,
+  ElAvatar,
+  ElBadge,
+  ElButton,
+  ElColorPicker,
+  ElDialog,
+  ElDivider,
+  ElEmpty,
+  ElForm,
+  ElFormItem,
+  ElInput,
+  ElInputNumber,
+  ElRadio,
+  ElRadioGroup,
+  ElSkeleton,
+  ElSlider,
+  ElStep,
+  ElSteps,
+  ElSwitch,
+  ElTag,
+  ElTooltip,
+  ElUpload
+} from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/avatar/style/css';
+import 'element-plus/es/components/badge/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/color-picker/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/divider/style/css';
+import 'element-plus/es/components/empty/style/css';
+import 'element-plus/es/components/form/style/css';
+import 'element-plus/es/components/form-item/style/css';
+import 'element-plus/es/components/input/style/css';
+import 'element-plus/es/components/input-number/style/css';
+import 'element-plus/es/components/message/style/css';
+import 'element-plus/es/components/message-box/style/css';
+import 'element-plus/es/components/radio/style/css';
+import 'element-plus/es/components/radio-group/style/css';
+import 'element-plus/es/components/skeleton/style/css';
+import 'element-plus/es/components/slider/style/css';
+import 'element-plus/es/components/step/style/css';
+import 'element-plus/es/components/steps/style/css';
+import 'element-plus/es/components/switch/style/css';
+import 'element-plus/es/components/tag/style/css';
+import 'element-plus/es/components/tooltip/style/css';
+import 'element-plus/es/components/upload/style/css';
 
 // 导入 API 服务（会自动挂载到 window.apiService）
 import { apiService } from '@services/apiService';
 
 // 导入主应用组件
 import SettingsApp from '@components/settings/SettingsApp/index.vue';
+import { registerElementComponents } from './element-plus-components';
 
 // 导入用户状态管理
 import { useUserStore } from '@stores/user.js';
@@ -65,7 +113,30 @@ const pinia = createPinia();
 app.use(pinia);
 
 // 使用 Element Plus UI 组件库
-app.use(ElementPlus);
+registerElementComponents(app, [
+  ElAlert,
+  ElAvatar,
+  ElBadge,
+  ElButton,
+  ElColorPicker,
+  ElDialog,
+  ElDivider,
+  ElEmpty,
+  ElForm,
+  ElFormItem,
+  ElInput,
+  ElInputNumber,
+  ElRadio,
+  ElRadioGroup,
+  ElSkeleton,
+  ElSlider,
+  ElStep,
+  ElSteps,
+  ElSwitch,
+  ElTag,
+  ElTooltip,
+  ElUpload
+]);
 
 // 初始化用户数据（从 Django 模板注入的全局变量）
 if (window.SETTINGS_INITIAL) {

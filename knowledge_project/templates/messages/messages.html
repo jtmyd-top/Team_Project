@@ -4,8 +4,6 @@
 {% block title %}私信{% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="{% static 'css/element-plus/index.css' %}">
-<link rel="stylesheet" href="{% static 'dist/assets/element.css' %}">
 <link rel="stylesheet" href="{% static 'dist/assets/messages.css' %}?v={{ messages_asset_version }}">
 <style>
   main {
@@ -15,9 +13,12 @@
 {% endblock %}
 
 {% block content %}
+{{ user.profile.theme|json_script:"themeData" }}
 <script>
-// 注入用户ID
+// 注入用户ID和配置
 window.currentUserId = {{ user.id }};
+window.currentUsername = "{{ user.username|escapejs }}";
+window.userTheme = JSON.parse(document.getElementById('themeData').textContent);
 window.MESSAGE_REALTIME = {
   enabled: {{ realtime_enabled|yesno:"true,false" }},
   wsPath: "{{ realtime_ws_path|escapejs }}"

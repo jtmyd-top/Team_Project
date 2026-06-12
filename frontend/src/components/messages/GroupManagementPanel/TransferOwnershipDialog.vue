@@ -22,6 +22,7 @@
             placeholder="请选择成员"
             filterable
             style="width: 100%"
+            @change="handleMemberChange"
           >
             <el-option
               v-for="member in eligibleMembers"
@@ -42,6 +43,64 @@
           </el-select>
         </el-form-item>
 
+        <!-- 资格检查状态显示 -->
+        <el-alert
+          v-if="eligibilityLoading"
+          type="info"
+          :closable="false"
+        >
+          正在检查成员资格...
+        </el-alert>
+
+        <el-alert
+          v-else-if="eligibilityData && !eligibilityData.eligible"
+          type="error"
+          :closable="false"
+          show-icon
+        >
+          <template #title>该成员不满足创建群组条件</template>
+          <div class="eligibility-details">
+            <div class="stat-item">
+              <span class="label">公开文章数：</span>
+              <span :class="eligibilityData.reasons.public_notes ? 'success' : 'error'">
+                {{ eligibilityData.stats.public_notes }} / {{ eligibilityData.policy.min_public_notes }}
+                <el-icon v-if="eligibilityData.reasons.public_notes"><CircleCheck /></el-icon>
+                <el-icon v-else><CircleClose /></el-icon>
+              </span>
+            </div>
+            <div class="stat-item">
+              <span class="label">关注者数：</span>
+              <span :class="eligibilityData.reasons.followers ? 'success' : 'error'">
+                {{ eligibilityData.stats.followers }} / {{ eligibilityData.policy.min_followers }}
+                <el-icon v-if="eligibilityData.reasons.followers"><CircleCheck /></el-icon>
+                <el-icon v-else><CircleClose /></el-icon>
+              </span>
+            </div>
+            <div class="requirement-note">
+              需满足其中一项条件。
+            </div>
+          </div>
+        </el-alert>
+
+        <el-alert
+          v-else-if="eligibilityData && eligibilityData.eligible"
+          type="success"
+          :closable="false"
+          show-icon
+        >
+          <template #title>该成员满足创建群组条件</template>
+          <div class="eligibility-details">
+            <div class="stat-item">
+              <span class="label">公开文章数：</span>
+              <span class="success">{{ eligibilityData.stats.public_notes }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">关注者数：</span>
+              <span class="success">{{ eligibilityData.stats.followers }}</span>
+            </div>
+          </div>
+        </el-alert>
+
         <el-form-item label="确认密码">
           <el-input
             v-model="form.password"
@@ -61,7 +120,7 @@
         type="danger"
         @click="handleTransfer"
         :loading="loading"
-        :disabled="!form.newOwnerId || !form.password"
+        :disabled="!canTransfer"
       >
         确认转让
       </el-button>
@@ -72,10 +131,15 @@
 <script>
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import { getCsrfToken } from '../../../utils/csrf';
 
 export default {
   name: 'TransferOwnershipDialog',
+  components: {
+    CircleCheck,
+    CircleClose,
+  },
   props: {
     modelValue: {
       type: Boolean,
@@ -98,6 +162,9 @@ export default {
     });
 
     const loading = ref(false);
+    const eligibilityLoading = ref(false);
+    const eligibilityData = ref(null);
+
     const form = ref({
       newOwnerId: null,
       password: '',
@@ -107,6 +174,10 @@ export default {
       return props.members.filter(m => m.role !== 'owner');
     });
 
+    const canTransfer = computed(() => {
+      return form.value.newOwnerId && form.value.password && !eligibilityLoading.value;
+    });
+
     const getRoleLabel = (role) => {
       const labels = {
         owner: '群主',
@@ -114,6 +185,36 @@ export default {
         member: '成员',
       };
       return labels[role] || role;
+    };
+
+    const checkEligibility = async (userId) => {
+      if (!userId) {
+        eligibilityData.value = null;
+        return;
+      }
+
+      eligibilityLoading.value = true;
+      try {
+        const resp = await fetch(`/api/messages/groups/${props.groupId}/check-transfer-eligibility/${userId}/`);
+        const data = await resp.json();
+
+        if (data.status === 'success') {
+          eligibilityData.value = data;
+        } else {
+          ElMessage.error(data.error || '检查资格失败');
+          eligibilityData.value = null;
+        }
+      } catch (error) {
+        console.error('检查资格失败:', error);
+        ElMessage.error('检查资格失败');
+        eligibilityData.value = null;
+      } finally {
+        eligibilityLoading.value = false;
+      }
+    };
+
+    const handleMemberChange = (userId) => {
+      checkEligibility(userId);
     };
 
     const handleTransfer = async () => {
@@ -146,7 +247,7 @@ export default {
           emit('success');
           handleClose();
         } else {
-          ElMessage.error(data.error || '转让失败');
+          ElMessage.error(data.message || data.error || '转让失败');
         }
       } catch (error) {
         console.error('转让群主失败:', error);
@@ -161,6 +262,7 @@ export default {
         newOwnerId: null,
         password: '',
       };
+      eligibilityData.value = null;
       visible.value = false;
     };
 
@@ -173,9 +275,13 @@ export default {
     return {
       visible,
       loading,
+      eligibilityLoading,
+      eligibilityData,
       form,
       eligibleMembers,
+      canTransfer,
       getRoleLabel,
+      handleMemberChange,
       handleTransfer,
       handleClose,
     };
@@ -208,5 +314,45 @@ export default {
   font-size: 12px;
   color: #909399;
   margin-top: 8px;
+}
+
+.eligibility-details {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stat-item .label {
+  font-weight: 500;
+  color: #606266;
+}
+
+.stat-item .success {
+  color: #67c23a;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-item .error {
+  color: #f56c6c;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.requirement-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+  font-style: italic;
 }
 </style>

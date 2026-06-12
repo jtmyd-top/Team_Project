@@ -72,7 +72,8 @@ export default defineConfig({
         // 鐭ヨ瘑绗旇鍒楄〃椤甸潰
         'knowledge-list': path.resolve(__dirname, 'src/entries/knowledge-list.js'),
         'knowledge-element': path.resolve(__dirname, 'src/entries/knowledge-element.js'),
-        // 涓婚绠＄悊鍣?        'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
+        // 涓婚绠＄悊鍣?
+        'theme-manager': path.resolve(__dirname, 'src/entries/theme-manager.js'),
         // 鎴樻儏瀹ゅぇ灞?
         'dashboard': path.resolve(__dirname, 'src/entries/dashboard.js'),
         // 绉佷俊椤甸潰

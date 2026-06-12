@@ -41,6 +41,7 @@ from .conversation import (
 )
 from .groups import (
     add_group_members_api,
+    check_transfer_eligibility_api,
     create_message_group_api,
     delete_group_message_api,
     dissolve_message_group_api,
@@ -122,6 +123,7 @@ __all__ = [
     'toggle_pin_api',
     # groups
     'add_group_members_api',
+    'check_transfer_eligibility_api',
     'create_message_group_api',
     'delete_group_message_api',
     'dissolve_message_group_api',

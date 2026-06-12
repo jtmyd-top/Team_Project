@@ -10,10 +10,17 @@ export function useEncryptedNoteContent(props) {
   const isDecrypting = ref(false)
   const decryptError = ref('')
   const showVerifyPrompt = ref(false)
+  const isRecoveringVaultKey = ref(false)
 
   async function ensureVaultKey() {
     if (vaultStore.isUnlocked) return true
-    return await vaultStore.recoverKey()
+    try {
+      const recovered = await vaultStore.recoverKey()
+      return recovered && vaultStore.isUnlocked
+    } catch (e) {
+      console.warn('[Vault] Silent key recovery failed:', e)
+      return false
+    }
   }
 
   // 监听 vault 解锁状态
@@ -23,8 +30,15 @@ export function useEncryptedNoteContent(props) {
       if (unlocked && props.isSecret && props.encryptedContent) {
         await decryptContent()
       } else if (!unlocked && props.isSecret) {
-        showVerifyPrompt.value = true
         decryptedContent.value = ''
+        isRecoveringVaultKey.value = true
+        const recovered = await ensureVaultKey()
+        isRecoveringVaultKey.value = false
+        if (recovered && vaultStore.isUnlocked && props.encryptedContent) {
+          await decryptContent()
+        } else {
+          showVerifyPrompt.value = true
+        }
       }
     }
   )
@@ -88,6 +102,7 @@ export function useEncryptedNoteContent(props) {
     isDecrypting,
     decryptError,
     showVerifyPrompt,
+    isRecoveringVaultKey,
     decryptContent,
     clearDecryptError
   }

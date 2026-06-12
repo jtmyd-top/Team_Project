@@ -12,6 +12,7 @@ import { useVaultStore } from '@/stores/vault'
 export function useNoteViewer(props) {
   const contentRef = ref(null)
   const isDecrypting = ref(false)
+  const isRecoveringVaultKey = ref(false)
   const decryptError = ref('')
   const decryptedContent = ref('')
 
@@ -134,14 +135,27 @@ export function useNoteViewer(props) {
    * 解密加密笔记的内容
    */
   let latestDecryptRequestId = 0
+  async function recoverVaultKeySafely() {
+    if (vaultStore.isUnlocked) return true
+    isRecoveringVaultKey.value = true
+    try {
+      const recovered = await vaultStore.recoverKey()
+      return recovered && vaultStore.isUnlocked
+    } catch (e) {
+      console.warn('[Vault] Silent key recovery failed:', e)
+      return false
+    } finally {
+      isRecoveringVaultKey.value = false
+    }
+  }
+
   async function decryptContent() {
     if (!props.isSecret || !props.content || !props.noteId) {
       return
     }
 
     if (!vaultStore.isUnlocked) {
-      const recovered = await vaultStore.recoverKey()
-      if (!recovered || !vaultStore.isUnlocked) {
+      if (!(await recoverVaultKeySafely())) {
         decryptError.value = '未能获取解密密钥，请进行 2FA 验证'
         return
       }
@@ -187,12 +201,14 @@ export function useNoteViewer(props) {
   })
 
   // 监听 isKeyValid 变化
-  watch(() => isKeyValid.value, (valid) => {
+  watch(() => isKeyValid.value, async (valid) => {
     if (valid && props.isSecret && props.content && !decryptedContent.value) {
       decryptContent()
     } else if (!valid && props.isSecret) {
-      // 锁定时立即清明文
       decryptedContent.value = ''
+      if ((await recoverVaultKeySafely()) && props.content) {
+        decryptContent()
+      }
     }
   })
 
@@ -206,6 +222,7 @@ export function useNoteViewer(props) {
   return {
     contentRef,
     isDecrypting,
+    isRecoveringVaultKey,
     decryptError,
     decryptedContent,
     isKeyValid,
