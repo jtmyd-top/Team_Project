@@ -83,6 +83,14 @@ urlpatterns = [
     path('api/messages/groups/<int:group_id>/profile/', views.update_group_profile_api, name='update_group_profile_api'),
     path('api/messages/groups/<int:group_id>/transfer-ownership/', views.transfer_group_ownership_api, name='transfer_group_ownership_api'),
     path('api/messages/groups/<int:group_id>/check-transfer-eligibility/<int:user_id>/', views.check_transfer_eligibility_api, name='check_transfer_eligibility_api'),
+    # Phase 2: 表情回应
+    path('api/messages/groups/<int:group_id>/messages/<int:message_id>/reaction/', views.toggle_message_reaction_api, name='toggle_message_reaction_api'),
+    # Phase 3: 入群审批
+    path('api/messages/groups/<int:group_id>/join-request/', views.request_join_group_api, name='request_join_group_api'),
+    path('api/messages/groups/<int:group_id>/join-requests/', views.group_join_requests_api, name='group_join_requests_api'),
+    path('api/messages/groups/<int:group_id>/join-requests/<int:request_id>/review/', views.review_join_request_api, name='review_join_request_api'),
+    # Phase 3: 群公告管理
+    path('api/messages/groups/<int:group_id>/announcement/', views.update_group_announcement_api, name='update_group_announcement_api'),
     path('api/messages/groups/<int:group_id>/mute-mode/', views.set_group_mute_mode_api, name='set_group_mute_mode_api'),
     path('api/messages/groups/<int:group_id>/bans/', views.group_bans_api, name='group_bans_api'),
     path('api/messages/groups/<int:group_id>/bans/<int:ban_id>/revoke/', views.revoke_group_ban_api, name='revoke_group_ban_api'),

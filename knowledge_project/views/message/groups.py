@@ -1591,3 +1591,358 @@ def check_transfer_eligibility_api(request, group_id, user_id):
         raise
     except Exception as e:
         return _server_error_response('检查转让资格错误', e)
+
+
+# ==================== Phase 2: 表情回应 API ====================
+
+@require_http_methods(["POST"])
+@login_required
+def toggle_message_reaction_api(request, group_id, message_id):
+    """切换消息表情回应（添加或移除）"""
+    try:
+        from ...models import GroupMessage, GroupMessageReaction, MessageGroup
+
+        data = json.loads(request.body)
+        emoji = data.get('emoji', '').strip()
+
+        if not emoji:
+            return JsonResponse({'error': '表情符号不能为空'}, status=400)
+
+        if len(emoji) > 20:
+            return JsonResponse({'error': '表情符号过长'}, status=400)
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        message = get_object_or_404(GroupMessage, id=message_id, group=group, is_recalled=False)
+
+        # 尝试移除已有的反应
+        existing = GroupMessageReaction.objects.filter(
+            message=message,
+            user=request.user,
+            emoji=emoji
+        ).first()
+
+        if existing:
+            existing.delete()
+            action = 'removed'
+        else:
+            # 添加新反应
+            GroupMessageReaction.objects.create(
+                message=message,
+                user=request.user,
+                emoji=emoji
+            )
+            action = 'added'
+
+        # 返回更新后的反应统计
+        from django.db.models import Count
+        reaction_stats = message.reactions.values('emoji').annotate(count=Count('id'))
+        reactions = {}
+        for stat in reaction_stats:
+            e = stat['emoji']
+            count = stat['count']
+            users = list(message.reactions.filter(emoji=e).select_related('user')[:3])
+            reactions[e] = {
+                'count': count,
+                'users': [{'user_id': r.user_id, 'username': r.user.username} for r in users],
+                'reacted_by_me': any(r.user_id == request.user.id for r in users),
+            }
+
+        return JsonResponse({
+            'status': 'success',
+            'action': action,
+            'reactions': reactions,
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('切换表情回应错误', e)
+
+
+# ==================== Phase 3: 入群审批 API ====================
+
+@require_http_methods(["POST"])
+@login_required
+def request_join_group_api(request, group_id):
+    """申请加入群组（需要审批时使用）"""
+    try:
+        from ...models import GroupJoinRequest, MessageGroup
+
+        data = json.loads(request.body)
+        request_message = data.get('message', '').strip()
+
+        if len(request_message) > 200:
+            return JsonResponse({'error': '申请留言不能超过200字'}, status=400)
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+
+        # 检查是否需要审批
+        if not group.require_approval:
+            return JsonResponse({'error': '此群组无需审批，请直接通过邀请链接加入'}, status=400)
+
+        # 检查是否已经是成员
+        from ...models import MessageGroupMember
+        existing_membership = MessageGroupMember.objects.filter(
+            group=group,
+            user=request.user,
+            left_at__isnull=True
+        ).first()
+
+        if existing_membership:
+            return JsonResponse({'error': '你已经是群成员'}, status=400)
+
+        # 检查是否有待处理的申请
+        pending_request = GroupJoinRequest.objects.filter(
+            group=group,
+            user=request.user,
+            status='pending'
+        ).first()
+
+        if pending_request:
+            return JsonResponse({'error': '你已有待处理的入群申请'}, status=400)
+
+        # 创建申请
+        join_request = GroupJoinRequest.objects.create(
+            group=group,
+            user=request.user,
+            request_message=request_message,
+            status='pending'
+        )
+
+        # 通知群主和管理员
+        admins = MessageGroupMember.objects.filter(
+            group=group,
+            role__in=['owner', 'admin'],
+            left_at__isnull=True
+        ).select_related('user')
+
+        for admin_member in admins:
+            try:
+                notify_user(
+                    admin_member.user,
+                    'group_join_request',
+                    f'{request.user.username} 申请加入群组',
+                    f'群组：{group.name}\n留言：{request_message}',
+                    group_id=group.id,
+                    request_id=join_request.id,
+                )
+            except Exception as e:
+                logger.warning(f'发送入群申请通知失败: {e}')
+
+        return JsonResponse({
+            'status': 'success',
+            'message': '申请已提交，请等待管理员审批',
+            'request_id': join_request.id,
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('申请加入群组错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def group_join_requests_api(request, group_id):
+    """获取群组的入群申请列表（群主和管理员可查看）"""
+    try:
+        from ...models import GroupJoinRequest, MessageGroup
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        # 只有群主和管理员可以查看
+        if membership.role not in ['owner', 'admin']:
+            return JsonResponse({'error': '权限不足'}, status=403)
+
+        status_filter = request.GET.get('status', 'pending')
+        requests = GroupJoinRequest.objects.filter(
+            group=group,
+            status=status_filter
+        ).select_related('user', 'reviewed_by').order_by('-created_at')
+
+        results = []
+        for req in requests:
+            results.append({
+                'id': req.id,
+                'user': {
+                    'id': req.user.id,
+                    'username': req.user.username,
+                    'avatar': _get_avatar_url(req.user),
+                },
+                'request_message': req.request_message,
+                'status': req.status,
+                'reviewed_by': {
+                    'id': req.reviewed_by.id,
+                    'username': req.reviewed_by.username,
+                } if req.reviewed_by else None,
+                'rejection_reason': req.rejection_reason,
+                'created_at': req.created_at.isoformat(),
+                'reviewed_at': req.reviewed_at.isoformat() if req.reviewed_at else None,
+            })
+
+        return JsonResponse({
+            'status': 'success',
+            'requests': results,
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('获取入群申请列表错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def review_join_request_api(request, group_id, request_id):
+    """审批入群申请"""
+    try:
+        from ...models import GroupJoinRequest, MessageGroup, MessageGroupAuditLog, MessageGroupMember
+
+        data = json.loads(request.body)
+        action = data.get('action')  # 'approve' 或 'reject'
+        rejection_reason = data.get('rejection_reason', '').strip()
+
+        if action not in ['approve', 'reject']:
+            return JsonResponse({'error': '无效的审批操作'}, status=400)
+
+        if action == 'reject' and not rejection_reason:
+            return JsonResponse({'error': '拒绝申请需要填写原因'}, status=400)
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        # 只有群主和管理员可以审批
+        if membership.role not in ['owner', 'admin']:
+            return JsonResponse({'error': '权限不足'}, status=403)
+
+        join_request = get_object_or_404(GroupJoinRequest, id=request_id, group=group)
+
+        if join_request.status != 'pending':
+            return JsonResponse({'error': '该申请已被处理'}, status=400)
+
+        with transaction.atomic():
+            if action == 'approve':
+                # 通过申请，添加为群成员
+                MessageGroupMember.objects.create(
+                    group=group,
+                    user=join_request.user,
+                    role='member'
+                )
+                join_request.status = 'approved'
+                join_request.reviewed_by = request.user
+                join_request.reviewed_at = timezone.now()
+                join_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
+
+                # 记录审计日志
+                MessageGroupAuditLog.objects.create(
+                    group=group,
+                    actor=request.user,
+                    target_user=join_request.user,
+                    action='member_add',
+                    metadata={'via': 'join_request_approval', 'request_id': request_id}
+                )
+
+                # 通知申请人
+                notify_user(
+                    join_request.user,
+                    'group_join_approved',
+                    '入群申请已通过',
+                    f'你的加入 {group.name} 的申请已通过',
+                    group_id=group.id,
+                )
+
+                message = '申请已通过'
+            else:
+                # 拒绝申请
+                join_request.status = 'rejected'
+                join_request.reviewed_by = request.user
+                join_request.reviewed_at = timezone.now()
+                join_request.rejection_reason = rejection_reason
+                join_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+                # 通知申请人
+                notify_user(
+                    join_request.user,
+                    'group_join_rejected',
+                    '入群申请被拒绝',
+                    f'你的加入 {group.name} 的申请被拒绝\n原因：{rejection_reason}',
+                    group_id=group.id,
+                )
+
+                message = '申请已拒绝'
+
+        return JsonResponse({
+            'status': 'success',
+            'message': message,
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('审批入群申请错误', e)
+
+
+# ==================== Phase 3: 群公告管理 API ====================
+
+@require_http_methods(["POST"])
+@login_required
+def update_group_announcement_api(request, group_id):
+    """更新群公告"""
+    try:
+        from ...models import MessageGroup, MessageGroupAuditLog
+
+        data = json.loads(request.body)
+        announcement = data.get('announcement', '').strip()
+        pin = data.get('pin', False)  # 是否置顶
+
+        if len(announcement) > 2000:
+            return JsonResponse({'error': '群公告不能超过2000字'}, status=400)
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        # 只有群主和管理员可以修改公告
+        if membership.role not in ['owner', 'admin']:
+            return JsonResponse({'error': '权限不足'}, status=403)
+
+        with transaction.atomic():
+            group.announcement = announcement
+            group.announcement_updated_by = request.user
+            if pin:
+                group.announcement_pinned_at = timezone.now()
+            else:
+                group.announcement_pinned_at = None
+            group.save(update_fields=['announcement', 'announcement_updated_by', 'announcement_pinned_at', 'updated_at'])
+
+            # 记录审计日志
+            MessageGroupAuditLog.objects.create(
+                group=group,
+                actor=request.user,
+                action='group_announcement_update',
+                metadata={'pinned': pin}
+            )
+
+        return JsonResponse({
+            'status': 'success',
+            'announcement': announcement,
+            'pinned_at': group.announcement_pinned_at.isoformat() if group.announcement_pinned_at else None,
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('更新群公告错误', e)
