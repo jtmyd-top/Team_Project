@@ -71,6 +71,10 @@ export function useNoteShadowViewer(props) {
       return
     }
 
+    const requestId = ++latestDecryptRequestId
+    const capturedNoteId = props.noteId
+    const capturedContent = props.content
+
     console.log('[Vault] Starting decryption process...', {
       isSecret: props.isSecret,
       isTrashed: props.isTrashed,
@@ -78,27 +82,29 @@ export function useNoteShadowViewer(props) {
       isUnlocked: vaultStore.isUnlocked
     })
 
-    if (!looksLikeEncrypted(props.content)) {
+    isDecrypting.value = true
+    decryptError.value = ''
+    decryptedContent.value = ''
+    renderContent(false)
+
+    if (!looksLikeEncrypted(capturedContent)) {
       console.warn('[Vault] Content does not look like encrypted data, treating as plaintext')
-      decryptedContent.value = props.content
+      decryptedContent.value = capturedContent
+      isDecrypting.value = false
+      renderContent(false)
       return
     }
 
     if (!vaultStore.isUnlocked) {
       const recovered = await vaultStore.recoverKey()
+      if (requestId !== latestDecryptRequestId || capturedNoteId !== props.noteId) return
       if (!recovered || !vaultStore.isUnlocked) {
+        isDecrypting.value = false
+        renderContent(false)
         console.error('[Vault] Vault is locked, cannot decrypt')
-        decryptError.value = '缺少加密密钥，请重新验证'
         return
       }
     }
-
-    const requestId = ++latestDecryptRequestId
-    const capturedNoteId = props.noteId
-    const capturedContent = props.content
-
-    isDecrypting.value = true
-    decryptError.value = ''
 
     try {
       const plaintext = await decryptContent(capturedContent)
@@ -113,6 +119,7 @@ export function useNoteShadowViewer(props) {
     } finally {
       if (requestId === latestDecryptRequestId) {
         isDecrypting.value = false
+        renderContent(false)
       }
     }
   }
@@ -123,8 +130,12 @@ export function useNoteShadowViewer(props) {
 
     const rawHtml = displayContent.value || ''
     const hasValidDek = vaultStore.isUnlocked
-    const needsVerification = props.isSecret && !hasValidDek
-    const shouldUpdate = rawHtml !== cachedRawHtml || needsVerification || forceStyleUpdate
+    const needsVerification = props.isSecret && props.content && !hasValidDek && !isDecrypting.value && !decryptError.value
+    const shouldUpdate = rawHtml !== cachedRawHtml ||
+      needsVerification ||
+      (props.isSecret && isDecrypting.value) ||
+      (props.isSecret && !!decryptError.value) ||
+      forceStyleUpdate
 
     console.log('[ShadowViewer] renderContent called', {
       rawHtmlLength: rawHtml.length,
@@ -332,8 +343,11 @@ export function useNoteShadowViewer(props) {
 
   // ==================== 生命周期 ====================
   onMounted(() => {
+    if (props.isSecret && props.content && props.noteId) {
+      isDecrypting.value = true
+    }
     initShadowRoot()
-    if (props.isSecret && hasValidKey.value && props.content && props.noteId) {
+    if (props.isSecret && props.content && props.noteId) {
       decryptNoteContent()
     }
   })
@@ -353,7 +367,7 @@ export function useNoteShadowViewer(props) {
       initShadowRoot()
     }
 
-    if (props.isSecret && hasValidKey.value && props.content && props.noteId) {
+    if (props.isSecret && props.content && props.noteId) {
       decryptNoteContent()
     } else {
       renderContent(false)
@@ -363,9 +377,10 @@ export function useNoteShadowViewer(props) {
   watch(() => props.noteId, () => {
     decryptedContent.value = ''
     decryptError.value = ''
+    isDecrypting.value = false
     hasRequestedVaultUnlock.value = false
 
-    if (props.isSecret && hasValidKey.value && props.content && props.noteId) {
+    if (props.isSecret && props.content && props.noteId) {
       decryptNoteContent()
     } else {
       renderContent(false)

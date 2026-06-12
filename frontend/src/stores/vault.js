@@ -212,8 +212,8 @@ export const useVaultStore = defineStore('vault', () => {
         })
         if (!response.ok) return false
         const data = await response.json()
-        const ttl = data.remaining_seconds || data.expire_time
-        if (data.server_pub && data.iv && data.ct && ttl) {
+        const ttl = data.session_scoped ? 0 : (data.remaining_seconds ?? data.expire_time)
+        if (data.server_pub && data.iv && data.ct && (data.session_scoped || ttl > 0)) {
           await vaultKey.completeHandshakeImport({
             serverPubB64: data.server_pub,
             ivB64: data.iv,

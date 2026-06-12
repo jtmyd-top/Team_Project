@@ -48,6 +48,32 @@ export function useKnowledgeList() {
   // 原始标题，用于检测标题是否被修改
   let originalTitle = ''
 
+  function resetCurrentNotePreview(options = {}) {
+    const { syncSidebar = false } = options
+    currentNoteId.value = null
+    currentNoteData.value = {
+      id: null,
+      title: '',
+      content: '',
+      toc: [],
+      updated_at: null,
+      author: null,
+      is_public: false,
+      is_secret: false,
+      is_trashed: false,
+      public_url: ''
+    }
+    decryptedTitle.value = ''
+    hasUnsavedChanges.value = false
+    isSaving.value = false
+    viewMode.value = 'read'
+    originalTitle = ''
+
+    if (syncSidebar) {
+      sidebarStore.setCurrentNoteId(null)
+    }
+  }
+
   // ==================== 计算属性 ====================
   const showBreadcrumb = computed(() => {
     return sidebarStore.activeModule === 'my-space' && sidebarStore.secondaryView === 'notes' && sidebarStore.currentFolderId
@@ -444,6 +470,7 @@ export function useKnowledgeList() {
   // 删除笔记
   async function handleDelete() {
     if (!currentNoteId.value) return
+    const noteId = currentNoteId.value
 
     if (currentNoteData.value.is_trashed) {
       try {
@@ -460,11 +487,11 @@ export function useKnowledgeList() {
           }
         )
 
-        await sidebarStore.permanentDeleteNote(currentNoteId.value)
+        await sidebarStore.permanentDeleteNote(noteId)
         ElMessage.success('笔记已永久删除')
-        currentNoteId.value = null
-        currentNoteData.value = { id: null, title: '', content: '', toc: [] }
-        sidebarStore.setCurrentNoteId(null)
+        if (currentNoteId.value === noteId) {
+          resetCurrentNotePreview({ syncSidebar: true })
+        }
       } catch (e) {
         if (e !== 'cancel') {
           ElMessage.error('永久删除失败')
@@ -489,7 +516,7 @@ export function useKnowledgeList() {
 
       const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
 
-      const response = await fetch(`/api/notes/${currentNoteId.value}/delete/`, {
+      const response = await fetch(`/api/notes/${noteId}/delete/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -501,8 +528,9 @@ export function useKnowledgeList() {
 
       if (data.status === 'success') {
         ElMessage.success('笔记已移至回收站')
-        currentNoteId.value = null
-        currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+        if (currentNoteId.value === noteId) {
+          resetCurrentNotePreview({ syncSidebar: true })
+        }
         await sidebarStore.loadModuleData()
       } else {
         throw new Error(extractApiErrorMessage(data, '删除失败'))
@@ -679,23 +707,8 @@ export function useKnowledgeList() {
     }
   }
 
-  function clearCurrentPreview() {
-    currentNoteId.value = null
-    currentNoteData.value = {
-      id: null,
-      title: '',
-      content: '',
-      toc: [],
-      updated_at: null,
-      author: null,
-      is_public: false,
-      is_secret: false,
-      is_trashed: false,
-      public_url: ''
-    }
-    decryptedTitle.value = ''
-    hasUnsavedChanges.value = false
-    viewMode.value = 'read'
+  function clearCurrentPreview(options = {}) {
+    resetCurrentNotePreview(options)
   }
 
   // ==================== 监听器 ====================
@@ -744,8 +757,7 @@ export function useKnowledgeList() {
   // 监听当前模块变化，切换模块时清空预览区，避免在只读区域残留旧笔记操作。
   watch(() => sidebarStore.activeModule, (newModule, previousModule) => {
     if (newModule !== previousModule) {
-      clearCurrentPreview()
-      sidebarStore.setCurrentNoteId(null)
+      clearCurrentPreview({ syncSidebar: true })
     }
   })
 
@@ -759,8 +771,7 @@ export function useKnowledgeList() {
     window.addEventListener('note-moved-to-vault', async (event) => {
       const { noteId } = event.detail
       if (currentNoteId.value === noteId) {
-        currentNoteId.value = null
-        currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+        clearCurrentPreview({ syncSidebar: true })
         ElMessage.warning('笔记已移入保密柜，预览已清空')
       }
     })
@@ -790,7 +801,7 @@ export function useKnowledgeList() {
     window.addEventListener('note-moved-to-trash', (event) => {
       const { noteId } = event.detail
       if (currentNoteId.value === noteId) {
-        clearCurrentPreview()
+        clearCurrentPreview({ syncSidebar: true })
         ElMessage.info('笔记已移入回收站')
       }
     })
@@ -802,8 +813,7 @@ export function useKnowledgeList() {
       const { noteId, oldFolderId, newFolderId } = event.detail
       if (currentNoteId.value === noteId) {
         if (sidebarStore.secondaryView === 'notes' && sidebarStore.currentFolderId === oldFolderId) {
-          currentNoteId.value = null
-          currentNoteData.value = { id: null, title: '', content: '', toc: [] }
+          clearCurrentPreview({ syncSidebar: true })
           ElMessage.info('笔记已移动到其他文件夹')
         } else {
           try {

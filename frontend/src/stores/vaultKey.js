@@ -28,6 +28,12 @@ function sanitizeTtl(ttlSeconds) {
   return n
 }
 
+function resolveExpireTimestamp(ttlSeconds) {
+  const ttl = sanitizeTtl(ttlSeconds)
+  if (ttl > 0) return Date.now() + ttl * 1000
+  return Number(ttlSeconds) === 0 ? Number.POSITIVE_INFINITY : Date.now()
+}
+
 function base64ToBytes(base64) {
   const binary = atob(base64)
   const bytes = new Uint8Array(binary.length)
@@ -74,7 +80,7 @@ export async function importDekBase64(base64, ttlSeconds) {
   } finally {
     raw.fill(0)
   }
-  expireTimestamp = Date.now() + (ttlSeconds || 0) * 1000
+  expireTimestamp = resolveExpireTimestamp(ttlSeconds)
   notify('unlock')
 }
 
@@ -173,7 +179,7 @@ export async function completeHandshakeImport({
     sharedBytes.fill(0)
   }
 
-  expireTimestamp = Date.now() + sanitizeTtl(ttlSeconds) * 1000
+  expireTimestamp = resolveExpireTimestamp(ttlSeconds)
   notify('unlock')
 }
 
@@ -186,7 +192,11 @@ export function clearKey() {
 
 export function hasKey() {
   if (!cryptoKey) return false
-  if (!expireTimestamp || expireTimestamp <= Date.now()) {
+  if (!expireTimestamp) {
+    clearKey()
+    return false
+  }
+  if (Number.isFinite(expireTimestamp) && expireTimestamp <= Date.now()) {
     clearKey()
     return false
   }
@@ -202,7 +212,7 @@ export function getExpireTime() {
  */
 export function extendExpire(ttlSeconds) {
   if (!cryptoKey) return false
-  expireTimestamp = Date.now() + sanitizeTtl(ttlSeconds) * 1000
+  expireTimestamp = resolveExpireTimestamp(ttlSeconds)
   return true
 }
 
