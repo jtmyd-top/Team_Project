@@ -90,6 +90,41 @@
         </div>
       </div>
 
+      <!-- Phase 2: 表情回应区域 -->
+      <div v-if="hasReactions" class="message-reactions">
+        <button
+          v-for="(reaction, emoji) in reactions"
+          :key="emoji"
+          class="reaction-item"
+          :class="{ 'reacted-by-me': reaction.reacted_by_me }"
+          type="button"
+          @click.stop="toggleReaction(emoji)"
+          :title="getReactionTooltip(reaction)"
+        >
+          <span class="reaction-emoji">{{ emoji }}</span>
+          <span class="reaction-count">{{ reaction.count }}</span>
+        </button>
+        <button
+          v-if="!selectable"
+          class="reaction-add"
+          type="button"
+          @click.stop="showReactionPicker"
+          title="添加表情"
+        >
+          <i class="fas fa-plus"></i>
+        </button>
+      </div>
+      <div v-else-if="!selectable && showAddReactionButton" class="message-reactions-empty">
+        <button
+          class="reaction-add"
+          type="button"
+          @click.stop="showReactionPicker"
+          title="添加表情"
+        >
+          <i class="far fa-smile"></i>
+        </button>
+      </div>
+
       <div class="bubble-meta">
         <span class="time">{{ formatTime(msg.created_at) }}</span>
         <span v-if="msg.is_edited" class="edited-state">已编辑</span>
@@ -97,6 +132,28 @@
           <i class="fas" :class="msg.is_read ? 'fa-check-double' : 'fa-check'"></i>
           <span>{{ msg.is_read ? '已读' : '未读' }}</span>
         </span>
+      </div>
+    </div>
+
+    <!-- Phase 2: 表情选择器弹窗 -->
+    <div
+      v-if="showEmojiPicker"
+      class="emoji-picker-overlay"
+      @click.stop="closeReactionPicker"
+    >
+      <div class="emoji-picker" @click.stop>
+        <div class="emoji-picker-title">选择表情</div>
+        <div class="emoji-picker-grid">
+          <button
+            v-for="emoji in commonEmojis"
+            :key="emoji"
+            class="emoji-picker-item"
+            type="button"
+            @click.stop="selectEmoji(emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -117,7 +174,7 @@ const props = defineProps({
   selected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['context-menu', 'toggle-selected', 'open-merged-forward'])
+const emit = defineEmits(['context-menu', 'toggle-selected', 'open-merged-forward', 'reaction-toggle'])
 
 // Backend fields (recommended):
 // msg.is_read: boolean read receipt flag; msg.read_at: optional ISO timestamp.
@@ -126,6 +183,19 @@ const LONG_PRESS_MOVE_THRESHOLD_PX = 12
 let touchHoldTimer = null
 let touchStartPoint = null
 const messageTextRef = ref(null)
+
+// Phase 2: 表情回应相关状态
+const showEmojiPicker = ref(false)
+const showAddReactionButton = ref(false)
+
+// 常用表情列表
+const commonEmojis = [
+  '👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🎉',
+  '🔥', '👏', '✅', '❌', '💯', '🙏', '💪', '👀',
+]
+
+const reactions = computed(() => props.msg.reactions || {})
+const hasReactions = computed(() => Object.keys(reactions.value).length > 0)
 
 const highlighted = computed(
   () => !!props.highlight && !!props.msg.content && String(props.msg.content).includes(props.highlight)
@@ -258,6 +328,35 @@ function onTouchMove(event) {
   if (movedX > LONG_PRESS_MOVE_THRESHOLD_PX || movedY > LONG_PRESS_MOVE_THRESHOLD_PX) {
     clearTouchHold()
   }
+}
+
+// Phase 2: 表情回应方法
+function toggleReaction(emoji) {
+  emit('reaction-toggle', { msg: props.msg, emoji })
+}
+
+function showReactionPicker() {
+  showEmojiPicker.value = true
+}
+
+function closeReactionPicker() {
+  showEmojiPicker.value = false
+}
+
+function selectEmoji(emoji) {
+  toggleReaction(emoji)
+  closeReactionPicker()
+}
+
+function getReactionTooltip(reaction) {
+  if (!reaction.users || reaction.users.length === 0) {
+    return `${reaction.count} 人`
+  }
+  const usernames = reaction.users.map(u => u.username).join(', ')
+  if (reaction.count > reaction.users.length) {
+    return `${usernames} 和其他 ${reaction.count - reaction.users.length} 人`
+  }
+  return usernames
 }
 
 onBeforeUnmount(() => {
@@ -667,9 +766,160 @@ onUpdated(() => {
   color: var(--text-secondary, #475569);
 }
 
+/* Phase 2: 表情回应样式 */
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
+.message-reactions-empty {
+  display: flex;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
+.bubble-row:hover .message-reactions-empty {
+  opacity: 1;
+}
+
+.reaction-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color, #cbd5e1) 68%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary, #f1f5f9) 45%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.reaction-item:hover {
+  background: color-mix(in srgb, var(--bg-secondary, #f1f5f9) 75%, transparent);
+  border-color: color-mix(in srgb, var(--border-color, #cbd5e1) 88%, transparent);
+  transform: scale(1.05);
+}
+
+.reaction-item.reacted-by-me {
+  background: color-mix(in srgb, var(--primary-color, #3b82f6) 15%, transparent);
+  border-color: color-mix(in srgb, var(--primary-color, #3b82f6) 45%, transparent);
+}
+
+.reaction-item.reacted-by-me:hover {
+  background: color-mix(in srgb, var(--primary-color, #3b82f6) 22%, transparent);
+}
+
+.reaction-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.reaction-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.reaction-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color, #cbd5e1) 58%, transparent);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-tertiary, #94a3b8);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 12px;
+}
+
+.reaction-add:hover {
+  background: color-mix(in srgb, var(--bg-secondary, #f1f5f9) 65%, transparent);
+  border-color: color-mix(in srgb, var(--border-color, #cbd5e1) 85%, transparent);
+  color: var(--text-secondary);
+}
+
+.emoji-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.emoji-picker {
+  background: var(--bg-primary, #fff);
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  padding: 16px;
+  max-width: min(90vw, 360px);
+  max-height: min(80vh, 480px);
+  overflow: auto;
+}
+
+.emoji-picker-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.emoji-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+}
+
+.emoji-picker-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 22px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.emoji-picker-item:hover {
+  background: color-mix(in srgb, var(--bg-secondary, #f1f5f9) 75%, transparent);
+  border-color: var(--border-color, #e5e7eb);
+  transform: scale(1.1);
+}
+
 @media (max-width: 768px) {
   .bubble-wrap {
     max-width: 82%;
+  }
+
+  .emoji-picker-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .emoji-picker-item {
+    width: 36px;
+    height: 36px;
+    font-size: 20px;
   }
 }
 </style>

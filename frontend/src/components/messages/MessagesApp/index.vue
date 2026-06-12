@@ -290,6 +290,7 @@
                   @context-menu="onMessageContextMenu"
                   @toggle-selected="toggleMessageSelected"
                   @open-merged-forward="openMergedForwardDialog"
+                  @reaction-toggle="handleReactionToggle"
                 />
               </div>
               <div v-if="typingIndicator.visible" class="typing-indicator">
@@ -674,13 +675,42 @@
                 >
                   <i :class="member.role === 'admin' ? 'fas fa-user' : 'fas fa-user-shield'"></i>
                 </button>
-                <button
-                  class="group-icon-btn"
-                  :title="member.is_group_muted ? '解除禁言' : '禁言 1 小时'"
-                  @click="member.is_group_muted ? unmuteGroupMember(member) : muteGroupMember(member, 60)"
-                >
-                  <i :class="member.is_group_muted ? 'fas fa-microphone' : 'fas fa-microphone-slash'"></i>
-                </button>
+                <div class="group-mute-menu-wrap" @click.stop>
+                  <button
+                    class="group-icon-btn"
+                    :class="{ active: activeMuteMenuUserId === member.user_id, muted: member.is_group_muted }"
+                    :title="member.is_group_muted ? '禁言设置' : '禁言时长'"
+                    @click="toggleMuteMenu(member)"
+                  >
+                    <i :class="member.is_group_muted ? 'fas fa-microphone' : 'fas fa-microphone-slash'"></i>
+                  </button>
+                  <div
+                    v-if="activeMuteMenuUserId === member.user_id"
+                    class="group-mute-menu"
+                    role="menu"
+                  >
+                    <button
+                      v-if="member.is_group_muted"
+                      class="group-mute-menu-item primary"
+                      @click="unmuteGroupMember(member)"
+                    >
+                      <i class="fas fa-microphone"></i>
+                      解除禁言
+                    </button>
+                    <div v-if="member.is_group_muted" class="group-mute-menu-separator"></div>
+                    <div class="group-mute-menu-title">
+                      {{ member.is_group_muted ? '延长禁言' : '禁言时长' }}
+                    </div>
+                    <button
+                      v-for="option in muteDurationOptions"
+                      :key="option.value"
+                      class="group-mute-menu-item"
+                      @click="muteGroupMember(member, option.value)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+                </div>
                 <button
                   v-if="canRemoveGroupMember(member)"
                   class="group-icon-btn danger"
@@ -901,6 +931,16 @@ const groupPanel = ref({
   inviteBusy: false,
   inviteLinks: [],
 })
+const activeMuteMenuUserId = ref(null)
+const muteDurationOptions = [
+  { label: '10 分钟', value: 10 },
+  { label: '30 分钟', value: 30 },
+  { label: '1 小时', value: 60 },
+  { label: '3 小时', value: 180 },
+  { label: '6 小时', value: 360 },
+  { label: '24 小时', value: 1440 },
+  { label: '永久禁言', value: 'permanent' },
+]
 const ctxMenu = ref({ visible: false, x: 0, y: 0, conv: null })
 const messageCtxMenu = ref({ visible: false, x: 0, y: 0, msg: null })
 const selectionMode = ref(false)
@@ -2964,6 +3004,11 @@ function canRemoveGroupMember(member) {
   return viewerRole === 'owner' || member.role !== 'admin'
 }
 
+function toggleMuteMenu(member) {
+  if (!member?.user_id) return
+  activeMuteMenuUserId.value = activeMuteMenuUserId.value === member.user_id ? null : member.user_id
+}
+
 function formatMutedUntil(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -2988,11 +3033,15 @@ async function muteGroupMember(member, durationMinutes = 60) {
   const groupId = selectedGroupId()
   if (!groupId || !member?.user_id) return
   try {
+    const payload = durationMinutes === 'permanent'
+      ? { duration: 'permanent' }
+      : { duration_minutes: durationMinutes }
     const d = await apiPost(`/api/messages/groups/${groupId}/members/${member.user_id}/mute/`, {
-      duration_minutes: durationMinutes,
+      ...payload,
     })
     groupPanel.value.detail = d.group
-    ElMessage.success('已禁言')
+    activeMuteMenuUserId.value = null
+    ElMessage.success(durationMinutes === 'permanent' ? '已永久禁言' : '已禁言')
   } catch (e) {
     ElMessage.error(e.message)
   }
@@ -3006,6 +3055,7 @@ async function unmuteGroupMember(member) {
       action: 'unmute',
     })
     groupPanel.value.detail = d.group
+    activeMuteMenuUserId.value = null
     ElMessage.success('已解除禁言')
   } catch (e) {
     ElMessage.error(e.message)
@@ -3213,6 +3263,47 @@ function closeMessageCtxMenu() {
   messageCtxMenu.value.visible = false
 }
 
+// Phase 2: 表情回应处理
+async function handleReactionToggle({ msg, emoji }) {
+  if (!msg || !emoji) return
+
+  try {
+    const conv = selectedConversation.value
+    if (!conv || conv.conversation_type !== 'group') {
+      ElMessage.warning('仅群组消息支持表情回应')
+      return
+    }
+
+    const groupId = conv.group_id
+    const response = await fetch(
+      `/api/messages/groups/${groupId}/messages/${msg.id}/reaction/`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCsrfToken(),
+        },
+        body: JSON.stringify({ emoji }),
+      }
+    )
+
+    const data = await response.json()
+
+    if (data.status === 'success') {
+      // 更新消息的 reactions 字段
+      const messageIndex = messages.value.findIndex(m => m.id === msg.id)
+      if (messageIndex !== -1) {
+        messages.value[messageIndex].reactions = data.reactions
+      }
+    } else {
+      ElMessage.error(data.error || '操作失败')
+    }
+  } catch (error) {
+    console.error('切换表情回应失败:', error)
+    ElMessage.error('操作失败')
+  }
+}
+
 async function messageCtxAction(action) {
   const msg = messageCtxMenu.value.msg
   closeMessageCtxMenu()
@@ -3360,6 +3451,7 @@ function onGlobalClick() {
   if (Date.now() - lastContextMenuOpenedAt < 250) return
   closeCtxMenu()
   closeMessageCtxMenu()
+  activeMuteMenuUserId.value = null
   showChatMenu.value = false
 }
 
@@ -4788,10 +4880,85 @@ watch(
   gap: 6px;
 }
 
+.group-mute-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
 .group-icon-btn {
   width: 34px;
   height: 34px;
   padding: 0;
+}
+
+.group-icon-btn.active,
+.group-icon-btn.muted {
+  border-color: color-mix(in srgb, var(--danger-color, #f56c6c) 42%, transparent);
+  color: var(--danger-color, #f56c6c);
+  background: color-mix(in srgb, var(--danger-color, #f56c6c) 9%, transparent);
+}
+
+.group-mute-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 168px;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+}
+
+.group-mute-menu::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: 13px;
+  width: 8px;
+  height: 8px;
+  border-left: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  transform: rotate(45deg);
+}
+
+.group-mute-menu-title {
+  padding: 5px 8px 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.group-mute-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group-mute-menu-item:hover {
+  background: var(--bg-secondary);
+}
+
+.group-mute-menu-item.primary {
+  color: var(--success-color, #16a34a);
+}
+
+.group-mute-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border-color);
 }
 
 .group-panel-footer {

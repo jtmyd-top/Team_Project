@@ -135,10 +135,24 @@
                         取消管理员
                       </el-dropdown-item>
                       <el-dropdown-item
-                        v-if="canMuteMember(member)"
-                        command="mute"
+                        v-if="canMuteMember(member) && member.is_group_muted"
+                        command="unmute"
                       >
-                        禁言
+                        解除禁言
+                      </el-dropdown-item>
+                      <el-dropdown-item
+                        v-if="canMuteMember(member)"
+                        disabled
+                      >
+                        {{ member.is_group_muted ? '延长禁言' : '禁言时长' }}
+                      </el-dropdown-item>
+                      <el-dropdown-item
+                        v-for="option in muteDurationOptions"
+                        v-if="canMuteMember(member)"
+                        :key="option.value"
+                        :command="`mute:${option.value}`"
+                      >
+                        {{ option.label }}
                       </el-dropdown-item>
                       <el-dropdown-item
                         v-if="canBanMember(member)"
@@ -346,6 +360,15 @@ export default {
     const members = ref([]);
     const inviteLinks = ref([]);
     const currentUserRole = ref('member');
+    const muteDurationOptions = [
+      { label: '10 分钟', value: 10 },
+      { label: '30 分钟', value: 30 },
+      { label: '1 小时', value: 60 },
+      { label: '3 小时', value: 180 },
+      { label: '6 小时', value: 360 },
+      { label: '24 小时', value: 1440 },
+      { label: '永久禁言', value: 'permanent' },
+    ];
 
     const showTransferDialog = ref(false);
     const showBanDialog = ref(false);
@@ -525,9 +548,8 @@ export default {
         case 'demote':
           await updateMemberRole(member.user_id, 'member');
           break;
-        case 'mute':
-          // TODO: Show mute duration dialog
-          ElMessage.info('禁言功能待实现');
+        case 'unmute':
+          await updateMemberMute(member.user_id, null);
           break;
         case 'ban':
           showBanDialog.value = true;
@@ -535,6 +557,39 @@ export default {
         case 'remove':
           await removeMember(member.user_id);
           break;
+        default:
+          if (typeof command === 'string' && command.startsWith('mute:')) {
+            await updateMemberMute(member.user_id, command.slice(5));
+          }
+      }
+    };
+
+    const updateMemberMute = async (userId, duration) => {
+      try {
+        const payload = duration === null
+          ? { action: 'unmute' }
+          : duration === 'permanent'
+            ? { duration: 'permanent' }
+            : { duration_minutes: Number(duration) };
+        const resp = await fetch(`/api/messages/groups/${props.groupId}/members/${userId}/mute/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken(),
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (data.status === 'success') {
+          ElMessage.success(duration === null ? '已解除禁言' : '已禁言');
+          await loadMembers();
+          emit('update');
+        } else {
+          ElMessage.error(data.error || '操作失败');
+        }
+      } catch (error) {
+        console.error('更新禁言状态失败:', error);
+        ElMessage.error('操作失败');
       }
     };
 
@@ -714,6 +769,7 @@ export default {
       members,
       inviteLinks,
       currentUserRole,
+      muteDurationOptions,
       showTransferDialog,
       showBanDialog,
       showInviteDialog,
