@@ -30,6 +30,9 @@
           <div class="policy-progress">
             <span>公开文章 {{ groupPolicy.stats.public_notes }}/{{ groupPolicy.min_public_notes }}</span>
             <span>关注者 {{ groupPolicy.stats.followers }}/{{ groupPolicy.min_followers }}</span>
+            <span :class="{ blocked: groupPolicy.reasons && !groupPolicy.reasons.owned_groups }">
+              已创建群聊 {{ groupPolicy.owned_group_count || 0 }}/{{ groupPolicy.max_owned_groups || 3 }}
+            </span>
           </div>
         </template>
         <div v-else class="policy-line">

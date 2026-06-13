@@ -25,19 +25,67 @@ from ._helpers import (
 
 logger = logging.getLogger(__name__)
 
+MAX_OWNED_MESSAGE_GROUPS = 3
+MAX_MESSAGE_GROUP_MEMBERS = 200
 
-def _policy_payload(policy, user):
-    eligible, stats = policy.can_create_group(user)
+
+def _active_owned_group_count(user, exclude_group_id=None):
+    from ...models import MessageGroup
+    qs = MessageGroup.objects.filter(owner=user, is_active=True)
+    if exclude_group_id is not None:
+        qs = qs.exclude(id=exclude_group_id)
+    return qs.count()
+
+
+def _owned_group_limit_payload(user, exclude_group_id=None):
+    owned_count = _active_owned_group_count(user, exclude_group_id=exclude_group_id)
+    return {
+        'owned_group_count': owned_count,
+        'max_owned_groups': MAX_OWNED_MESSAGE_GROUPS,
+        'within_owned_group_limit': owned_count < MAX_OWNED_MESSAGE_GROUPS,
+    }
+
+
+def _active_group_member_count(group):
+    return group.memberships.filter(left_at__isnull=True).count()
+
+
+def _group_member_limit_payload(group, current_count=None):
+    if current_count is None:
+        current_count = _active_group_member_count(group)
+    return {
+        'member_count': current_count,
+        'max_members': MAX_MESSAGE_GROUP_MEMBERS,
+        'is_full': current_count >= MAX_MESSAGE_GROUP_MEMBERS,
+    }
+
+
+def _group_full_response(group, current_count=None):
+    payload = _group_member_limit_payload(group, current_count=current_count)
+    return JsonResponse({
+        'error': f'群聊人数已达上限，最多 {MAX_MESSAGE_GROUP_MEMBERS} 人',
+        **payload,
+    }, status=409)
+
+
+def _policy_payload(policy, user, exclude_group_id=None):
+    policy_eligible, stats = policy.can_create_group(user)
+    owned_limit = _owned_group_limit_payload(user, exclude_group_id=exclude_group_id)
+    eligible = policy_eligible and owned_limit['within_owned_group_limit']
     return {
         'enabled': policy.enabled,
         'min_public_notes': policy.min_public_notes,
         'min_followers': policy.min_followers,
         'stats': stats,
         'eligible': eligible,
+        'policy_eligible': policy_eligible,
+        'owned_group_count': owned_limit['owned_group_count'],
+        'max_owned_groups': owned_limit['max_owned_groups'],
         'can_manage': user.is_staff or user.is_superuser,
         'reasons': {
             'public_notes': stats['public_notes'] >= policy.min_public_notes,
             'followers': stats['followers'] >= policy.min_followers,
+            'owned_groups': owned_limit['within_owned_group_limit'],
         },
     }
 
@@ -379,6 +427,8 @@ def _group_detail_payload(group, viewer_membership=None):
         'pinned_message': _pinned_group_message_payload(group, viewer_membership.user if viewer_membership else None),
         'owner_id': group.owner_id,
         'member_count': len(members),
+        'max_members': MAX_MESSAGE_GROUP_MEMBERS,
+        'is_full': len(members) >= MAX_MESSAGE_GROUP_MEMBERS,
         'pending_join_request_count': group.join_requests.filter(status='pending').count() if viewer_membership and _is_group_manager(viewer_membership) else 0,
         'created_at': group.created_at.isoformat() if group.created_at else None,
         'updated_at': group.updated_at.isoformat() if group.updated_at else None,
@@ -452,15 +502,15 @@ def create_message_group_api(request):
             return JsonResponse({'error': 'member_ids 必须是数组'}, status=400)
 
         policy = MessageGroupPolicy.get_current()
-        eligible, stats = policy.can_create_group(request.user)
-        if not eligible:
+        policy_payload = _policy_payload(policy, request.user)
+        if not policy_payload['eligible']:
             return JsonResponse({
                 'error': '你暂未满足创建群组条件',
-                'policy': _policy_payload(policy, request.user),
+                'policy': policy_payload,
             }, status=403)
 
         member_ids = []
-        for value in raw_member_ids[:100]:
+        for value in raw_member_ids:
             try:
                 member_id = int(value)
             except (TypeError, ValueError):
@@ -469,12 +519,27 @@ def create_message_group_api(request):
                 member_ids.append(member_id)
         if not member_ids:
             return JsonResponse({'error': '请至少选择一名群成员'}, status=400)
+        if len(member_ids) + 1 > MAX_MESSAGE_GROUP_MEMBERS:
+            return JsonResponse({
+                'error': f'群聊人数已达上限，最多 {MAX_MESSAGE_GROUP_MEMBERS} 人',
+                'member_count': len(member_ids) + 1,
+                'max_members': MAX_MESSAGE_GROUP_MEMBERS,
+            }, status=400)
 
         users = list(User.objects.filter(id__in=member_ids, is_active=True))
         if len(users) != len(member_ids):
             return JsonResponse({'error': '部分群成员不存在或不可用'}, status=400)
 
         with transaction.atomic():
+            User.objects.select_for_update().get(id=request.user.id)
+            owned_limit = _owned_group_limit_payload(request.user)
+            if not owned_limit['within_owned_group_limit']:
+                return JsonResponse({
+                    'error': f'你已创建 {MAX_OWNED_MESSAGE_GROUPS} 个群聊，暂不能继续创建',
+                    'policy': _policy_payload(policy, request.user),
+                    **owned_limit,
+                }, status=403)
+
             group = MessageGroup.objects.create(
                 name=name,
                 owner=request.user,
@@ -493,7 +558,8 @@ def create_message_group_api(request):
                 'id': group.id,
                 'name': group.name,
                 'member_count': len(users) + 1,
-                'policy_stats': stats,
+                'max_members': MAX_MESSAGE_GROUP_MEMBERS,
+                'policy_stats': policy_payload['stats'],
             },
         }, status=201)
     except json.JSONDecodeError:
@@ -639,6 +705,7 @@ def transfer_group_ownership_api(request, group_id):
             )
             if target.user_id == request.user.id:
                 return JsonResponse({'error': '不能转让给自己'}, status=400)
+            User.objects.select_for_update().get(id=target.user_id)
 
             # 【新增】验证新群主是否满足开群条件
             policy = MessageGroupPolicy.get_current()
@@ -651,6 +718,12 @@ def transfer_group_ownership_api(request, group_id):
                     'stats': stats,
                     'message': f'新群主需满足以下任一条件：公开文章数 ≥ {policy.min_public_notes} 或 关注者数 ≥ {policy.min_followers}。'
                                f'当前状态：公开文章 {stats["public_notes"]} 篇，关注者 {stats["followers"]} 人。',
+                }, status=403)
+            owned_limit = _owned_group_limit_payload(target.user, exclude_group_id=group.id)
+            if not owned_limit['within_owned_group_limit']:
+                return JsonResponse({
+                    'error': f'新群主已拥有 {MAX_OWNED_MESSAGE_GROUPS} 个群聊，无法继续接收转让',
+                    **owned_limit,
                 }, status=403)
 
             current_owner.role = 'admin'
@@ -732,7 +805,7 @@ def add_group_members_api(request, group_id):
             return JsonResponse({'error': 'member_ids 必须是数组'}, status=400)
 
         member_ids = []
-        for value in raw_member_ids[:100]:
+        for value in raw_member_ids:
             try:
                 member_id = int(value)
             except (TypeError, ValueError):
@@ -750,9 +823,20 @@ def add_group_members_api(request, group_id):
             return JsonResponse({'error': f"以下用户已被本群封禁，无法加入：{', '.join(banned_users)}"}, status=403)
 
         with transaction.atomic():
+            locked_group = MessageGroup.objects.select_for_update().get(id=group.id)
+            active_member_ids = set(
+                MessageGroupMember.objects
+                .select_for_update()
+                .filter(group=locked_group, left_at__isnull=True)
+                .values_list('user_id', flat=True)
+            )
+            joining_count = sum(1 for user in users if user.id not in active_member_ids)
+            if len(active_member_ids) + joining_count > MAX_MESSAGE_GROUP_MEMBERS:
+                return _group_full_response(locked_group, current_count=len(active_member_ids))
+
             for user in users:
                 member, created = MessageGroupMember.objects.get_or_create(
-                    group=group,
+                    group=locked_group,
                     user=user,
                     defaults={'role': 'member'},
                 )
@@ -761,9 +845,10 @@ def add_group_members_api(request, group_id):
                     member.role = 'member'
                     member.joined_at = timezone.now()
                     member.save(update_fields=['left_at', 'role', 'joined_at'])
-                _create_group_audit_log(group, request.user, 'member_add', target_user=user)
-            group.updated_at = timezone.now()
-            group.save(update_fields=['updated_at'])
+                _create_group_audit_log(locked_group, request.user, 'member_add', target_user=user)
+            locked_group.updated_at = timezone.now()
+            locked_group.save(update_fields=['updated_at'])
+            group = locked_group
 
         return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
     except json.JSONDecodeError:
@@ -1137,9 +1222,12 @@ def preview_group_invite_api(request, token):
         elif not group.is_active:
             reason = 'group_inactive'
 
+        member_limit = _group_member_limit_payload(group)
         membership = MessageGroupMember.objects.filter(group=group, user=request.user, left_at__isnull=True).first()
         ban = _get_active_group_ban(group, request.user)
-        can_join = bool(valid and membership is None and ban is None)
+        if member_limit['is_full'] and not reason:
+            reason = 'group_full'
+        can_join = bool(valid and membership is None and ban is None and not member_limit['is_full'])
         return JsonResponse({
             'status': 'success',
             'valid': valid,
@@ -1150,7 +1238,7 @@ def preview_group_invite_api(request, token):
                 'avatar': _group_avatar_url(group),
                 'description': group.description,
                 'require_approval': group.require_approval,
-                'member_count': group.memberships.filter(left_at__isnull=True).count(),
+                **member_limit,
             },
             'link': {
                 'expires_at': link.expires_at.isoformat() if link.expires_at else None,
@@ -1206,6 +1294,9 @@ def join_group_by_invite_api(request, token):
                 MessageGroupInviteLink.objects.select_for_update().select_related('group'),
                 token=token,
             )
+            locked_group = link.group
+            locked_group = locked_group.__class__.objects.select_for_update().get(id=locked_group.id)
+            link.group = locked_group
             if not link.is_valid():
                 return JsonResponse({'error': '邀请链接已失效'}, status=400)
             active_ban = _get_active_group_ban(link.group, request.user)
@@ -1215,17 +1306,17 @@ def join_group_by_invite_api(request, token):
                     'ban': _active_group_ban_payload(active_ban),
                 }, status=403)
 
-            membership, created = MessageGroupMember.objects.get_or_create(
-                group=link.group,
-                user=request.user,
-                defaults={'role': 'member'},
-            )
-            if membership.left_at is None and not created:
+            membership = MessageGroupMember.objects.filter(group=link.group, user=request.user).first()
+            if membership and membership.left_at is None:
                 return JsonResponse({
                     'status': 'success',
                     'already_member': True,
                     'group': _group_detail_payload(link.group, membership),
                 })
+
+            current_count = _active_group_member_count(link.group)
+            if current_count >= MAX_MESSAGE_GROUP_MEMBERS:
+                return _group_full_response(link.group, current_count=current_count)
 
             if link.group.require_approval:
                 request_message = ''
@@ -1261,11 +1352,13 @@ def join_group_by_invite_api(request, token):
                     },
                 }, status=202)
 
+            if membership is None:
+                membership = MessageGroupMember(group=link.group, user=request.user, role='member')
             membership.left_at = None
             membership.role = 'member'
             membership.muted_until = None
             membership.joined_at = timezone.now()
-            membership.save(update_fields=['left_at', 'role', 'muted_until', 'joined_at'])
+            membership.save()
             link.uses_count += 1
             link.save(update_fields=['uses_count'])
             MessageGroupInviteUse.objects.create(
@@ -1789,20 +1882,26 @@ def check_transfer_eligibility_api(request, group_id, user_id):
 
         # 获取群组创建策略
         policy = MessageGroupPolicy.get_current()
-        eligible, stats = policy.can_create_group(target_membership.user)
+        policy_eligible, stats = policy.can_create_group(target_membership.user)
+        owned_limit = _owned_group_limit_payload(target_membership.user, exclude_group_id=group.id)
+        eligible = policy_eligible and owned_limit['within_owned_group_limit']
 
         return JsonResponse({
             'status': 'success',
             'eligible': eligible,
+            'policy_eligible': policy_eligible,
             'stats': stats,
             'policy': {
                 'enabled': policy.enabled,
                 'min_public_notes': policy.min_public_notes,
                 'min_followers': policy.min_followers,
             },
+            'owned_group_count': owned_limit['owned_group_count'],
+            'max_owned_groups': owned_limit['max_owned_groups'],
             'reasons': {
                 'public_notes': stats['public_notes'] >= policy.min_public_notes,
                 'followers': stats['followers'] >= policy.min_followers,
+                'owned_groups': owned_limit['within_owned_group_limit'],
             },
             'user': {
                 'id': target_membership.user.id,
@@ -1917,6 +2016,10 @@ def request_join_group_api(request, group_id):
 
         if existing_membership:
             return JsonResponse({'error': '你已经是群成员'}, status=400)
+
+        member_limit = _group_member_limit_payload(group)
+        if member_limit['is_full']:
+            return _group_full_response(group, current_count=member_limit['member_count'])
 
         # 检查是否有待处理的申请
         pending_request = GroupJoinRequest.objects.filter(
@@ -2054,8 +2157,18 @@ def review_join_request_api(request, group_id, request_id):
 
         with transaction.atomic():
             if action == 'approve':
+                locked_group = MessageGroup.objects.select_for_update().get(id=group.id)
+                current_count = _active_group_member_count(locked_group)
+                existing_active = MessageGroupMember.objects.filter(
+                    group=locked_group,
+                    user=join_request.user,
+                    left_at__isnull=True,
+                ).exists()
+                if not existing_active and current_count >= MAX_MESSAGE_GROUP_MEMBERS:
+                    return _group_full_response(locked_group, current_count=current_count)
+
                 target_member, created_member = MessageGroupMember.objects.get_or_create(
-                    group=group,
+                    group=locked_group,
                     user=join_request.user,
                     defaults={'role': 'member'},
                 )
@@ -2072,7 +2185,7 @@ def review_join_request_api(request, group_id, request_id):
 
                 # 记录审计日志
                 MessageGroupAuditLog.objects.create(
-                    group=group,
+                    group=locked_group,
                     actor=request.user,
                     target_user=join_request.user,
                     action='member_add',
@@ -2085,7 +2198,7 @@ def review_join_request_api(request, group_id, request_id):
                     'group_join_approved',
                     '入群申请已通过',
                     f'你的加入 {group.name} 的申请已通过',
-                    group_id=group.id,
+                    group_id=locked_group.id,
                 )
 
                 message = '申请已通过'

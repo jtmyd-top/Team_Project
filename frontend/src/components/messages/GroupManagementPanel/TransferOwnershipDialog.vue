@@ -76,8 +76,16 @@
                 <el-icon v-else><CircleClose /></el-icon>
               </span>
             </div>
+            <div class="stat-item">
+              <span class="label">已拥有群聊：</span>
+              <span :class="eligibilityData.reasons.owned_groups ? 'success' : 'error'">
+                {{ eligibilityData.owned_group_count || 0 }} / {{ eligibilityData.max_owned_groups || 3 }}
+                <el-icon v-if="eligibilityData.reasons.owned_groups"><CircleCheck /></el-icon>
+                <el-icon v-else><CircleClose /></el-icon>
+              </span>
+            </div>
             <div class="requirement-note">
-              需满足其中一项条件。
+              需满足公开文章/关注者其中一项，且拥有群聊数不能超过上限。
             </div>
           </div>
         </el-alert>
@@ -97,6 +105,12 @@
             <div class="stat-item">
               <span class="label">关注者数：</span>
               <span class="success">{{ eligibilityData.stats.followers }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">已拥有群聊：</span>
+              <span class="success">
+                {{ eligibilityData.owned_group_count || 0 }} / {{ eligibilityData.max_owned_groups || 3 }}
+              </span>
             </div>
           </div>
         </el-alert>
@@ -175,7 +189,7 @@ export default {
     });
 
     const canTransfer = computed(() => {
-      return form.value.newOwnerId && form.value.password && !eligibilityLoading.value;
+      return form.value.newOwnerId && form.value.password && !eligibilityLoading.value && eligibilityData.value?.eligible;
     });
 
     const getRoleLabel = (role) => {
@@ -224,6 +238,10 @@ export default {
       }
       if (!form.value.password) {
         ElMessage.warning('请输入密码');
+        return;
+      }
+      if (!eligibilityData.value?.eligible) {
+        ElMessage.warning('新群主暂不满足接收群聊条件');
         return;
       }
 
