@@ -2,6 +2,7 @@
 """私信群组：创建资格 / 创建群组 / 群消息读取发送撤回举报。"""
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 
 from django.contrib.auth.decorators import login_required
@@ -194,6 +195,11 @@ def _is_member_muted(membership):
 
 def _invite_link_payload(link, request=None):
     path = f"/messages/?group_invite={link.token}"
+    use_records = getattr(link, 'prefetched_use_records', None)
+    if use_records is None:
+        use_records = list(
+            link.use_records.select_related('user').order_by('-created_at')[:10]
+        ) if getattr(link, 'id', None) else []
     return {
         'id': link.id,
         'token': link.token,
@@ -205,7 +211,33 @@ def _invite_link_payload(link, request=None):
         'uses_count': link.uses_count,
         'revoked_at': link.revoked_at.isoformat() if link.revoked_at else None,
         'is_active': link.is_valid(),
+        'recent_uses': [_invite_use_payload(record) for record in use_records],
     }
+
+
+def _invite_use_payload(record):
+    return {
+        'id': record.id,
+        'user': _user_payload(record.user),
+        'created_at': record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+def _announcement_history_payload(item):
+    return {
+        'id': item.id,
+        'editor': _user_payload(item.editor),
+        'content': item.content,
+        'pinned': item.pinned,
+        'created_at': item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+def _pinned_group_message_payload(group, viewer=None):
+    message = getattr(group, 'pinned_message', None)
+    if not message or getattr(message, 'is_recalled', False):
+        return None
+    return _group_message_payload(message, viewer=viewer)
 
 
 def _group_settings_payload(membership):
@@ -297,6 +329,9 @@ def _group_message_payload(message, viewer=None):
         'forwarded_from': forwarded_from_data,
         'mentions': mentions,
         'reactions': reactions,
+        'is_pinned': bool(
+            getattr(message.group, 'pinned_message_id', None) == message.id
+        ) if getattr(message, 'group_id', None) else False,
     }
 
 
@@ -332,9 +367,19 @@ def _group_detail_payload(group, viewer_membership=None):
         'avatar': _group_avatar_url(group),
         'description': group.description,
         'announcement': group.announcement,
+        'announcement_pinned_at': group.announcement_pinned_at.isoformat() if group.announcement_pinned_at else None,
+        'announcement_updated_by': _user_payload(group.announcement_updated_by),
+        'announcement_history': [
+            _announcement_history_payload(item)
+            for item in group.announcement_history.select_related('editor').order_by('-created_at')[:8]
+        ],
         'mute_mode': group.mute_mode,
+        'require_approval': group.require_approval,
+        'allow_member_mention_all': group.allow_member_mention_all,
+        'pinned_message': _pinned_group_message_payload(group, viewer_membership.user if viewer_membership else None),
         'owner_id': group.owner_id,
         'member_count': len(members),
+        'pending_join_request_count': group.join_requests.filter(status='pending').count() if viewer_membership and _is_group_manager(viewer_membership) else 0,
         'created_at': group.created_at.isoformat() if group.created_at else None,
         'updated_at': group.updated_at.isoformat() if group.updated_at else None,
         'viewer_role': viewer_membership.role if viewer_membership else None,
@@ -349,6 +394,16 @@ def _visible_group_messages_qs(group, membership):
         qs = qs.filter(created_at__gt=membership.cleared_before)
     qs = qs.exclude(deletions__user=membership.user)
     return qs.order_by('created_at')
+
+
+def _extract_links_from_text(text):
+    pattern = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+    links = []
+    for match in pattern.finditer(text or ''):
+        url = match.group(0).rstrip('.,;!?)]}')
+        if url and url not in links:
+            links.append(url)
+    return links
 
 
 @require_http_methods(["GET", "POST"])
@@ -522,6 +577,14 @@ def update_group_profile_api(request, group_id):
         if 'announcement' in data:
             group.announcement = _body_string(data, 'announcement')[:2000]
             changed_fields.append('announcement')
+        if 'require_approval' in data:
+            group.require_approval = bool(data.get('require_approval'))
+            changed_fields.append('require_approval')
+            metadata['require_approval'] = group.require_approval
+        if 'allow_member_mention_all' in data:
+            group.allow_member_mention_all = bool(data.get('allow_member_mention_all'))
+            changed_fields.append('allow_member_mention_all')
+            metadata['allow_member_mention_all'] = group.allow_member_mention_all
         if avatar is not None:
             group.avatar = avatar
             changed_fields.append('avatar')
@@ -1086,6 +1149,7 @@ def preview_group_invite_api(request, token):
                 'name': group.name,
                 'avatar': _group_avatar_url(group),
                 'description': group.description,
+                'require_approval': group.require_approval,
                 'member_count': group.memberships.filter(left_at__isnull=True).count(),
             },
             'link': {
@@ -1136,7 +1200,7 @@ def revoke_group_invite_link_api(request, group_id, invite_id):
 @login_required
 def join_group_by_invite_api(request, token):
     try:
-        from ...models import MessageGroupInviteLink, MessageGroupMember
+        from ...models import GroupJoinRequest, MessageGroupInviteLink, MessageGroupInviteUse, MessageGroupMember
         with transaction.atomic():
             link = get_object_or_404(
                 MessageGroupInviteLink.objects.select_for_update().select_related('group'),
@@ -1163,6 +1227,40 @@ def join_group_by_invite_api(request, token):
                     'group': _group_detail_payload(link.group, membership),
                 })
 
+            if link.group.require_approval:
+                request_message = ''
+                try:
+                    request_message = _body_string(json.loads(request.body or '{}'), 'request_message')[:200]
+                except json.JSONDecodeError:
+                    request_message = ''
+                join_request, created_request = GroupJoinRequest.objects.get_or_create(
+                    group=link.group,
+                    user=request.user,
+                    status='pending',
+                    defaults={'request_message': request_message},
+                )
+                if not created_request and request_message and join_request.request_message != request_message:
+                    join_request.request_message = request_message
+                    join_request.save(update_fields=['request_message'])
+                _create_group_audit_log(
+                    link.group,
+                    request.user,
+                    'join_request_create',
+                    target_user=request.user,
+                    metadata={'via': 'invite', 'invite_id': link.id, 'request_id': join_request.id},
+                )
+                return JsonResponse({
+                    'status': 'pending',
+                    'pending_approval': True,
+                    'message': '入群申请已提交，请等待管理员审批',
+                    'request_id': join_request.id,
+                    'group': {
+                        'id': link.group.id,
+                        'name': link.group.name,
+                        'avatar': _group_avatar_url(link.group),
+                    },
+                }, status=202)
+
             membership.left_at = None
             membership.role = 'member'
             membership.muted_until = None
@@ -1170,6 +1268,11 @@ def join_group_by_invite_api(request, token):
             membership.save(update_fields=['left_at', 'role', 'muted_until', 'joined_at'])
             link.uses_count += 1
             link.save(update_fields=['uses_count'])
+            MessageGroupInviteUse.objects.create(
+                invite=link,
+                group=link.group,
+                user=request.user,
+            )
             link.group.updated_at = timezone.now()
             link.group.save(update_fields=['updated_at'])
             _create_group_audit_log(link.group, request.user, 'member_add', target_user=request.user, metadata={'via': 'invite', 'invite_id': link.id})
@@ -1339,6 +1442,7 @@ def send_group_message_api(request, group_id):
         reply_to_id = data.get('reply_to')
         forwarded_from_id = data.get('forwarded_from')
         mentioned_usernames = data.get('mentions', [])  # @提及的用户名列表
+        mention_everyone = bool(data.get('mention_all')) or '@全体' in content or '@all' in content.lower()
 
         mute = UserSanction.is_muted(request.user)
         if mute is not None:
@@ -1351,6 +1455,8 @@ def send_group_message_api(request, group_id):
         send_error = _can_send_group_message(group, membership)
         if send_error is not None:
             return send_error
+        if mention_everyone and membership.role not in ('owner', 'admin') and not group.allow_member_mention_all:
+            return JsonResponse({'error': '当前群组仅群主或管理员可以 @全体成员'}, status=403)
 
         # Phase 2: 验证回复消息
         reply_to_message = None
@@ -1377,6 +1483,32 @@ def send_group_message_api(request, group_id):
                 reply_to=reply_to_message,
                 forwarded_from=forwarded_message,
             )
+
+            if mention_everyone:
+                mentioned_members = (
+                    MessageGroupMember.objects
+                    .filter(group=group, left_at__isnull=True)
+                    .exclude(user=request.user)
+                    .select_related('user')[:200]
+                )
+                for member in mentioned_members:
+                    try:
+                        notify_user(
+                            member.user,
+                            'group_mention_all',
+                            f'{request.user.username} 在群组中 @全体成员',
+                            f'在 {group.name} 中：{content[:80]}',
+                            group_id=group.id,
+                            message_id=message.id,
+                        )
+                    except Exception as e:
+                        logger.warning(f'发送@全体通知失败: {e}')
+                _create_group_audit_log(
+                    group,
+                    request.user,
+                    'mention_all',
+                    metadata={'message_id': message.id},
+                )
 
             # Phase 2: 创建@提及记录
             if mentioned_usernames:
@@ -1422,6 +1554,91 @@ def send_group_message_api(request, group_id):
         raise
     except Exception as e:
         return _server_error_response('发送群组消息错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def pin_group_message_api(request, group_id, message_id):
+    try:
+        from ...models import GroupMessage, MessageGroup
+        data = json.loads(request.body or '{}')
+        action = data.get('action', 'pin')
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        manager_error = _require_group_manager(membership)
+        if manager_error is not None:
+            return manager_error
+
+        message = get_object_or_404(GroupMessage, id=message_id, group=group, is_recalled=False)
+        if action == 'unpin' or group.pinned_message_id == message.id:
+            group.pinned_message = None
+            audit_action = 'group_message_unpin'
+        else:
+            group.pinned_message = message
+            audit_action = 'group_message_pin'
+        group.updated_at = timezone.now()
+        group.save(update_fields=['pinned_message', 'updated_at'])
+        _create_group_audit_log(
+            group,
+            request.user,
+            audit_action,
+            target_user=message.sender,
+            metadata={'message_id': message.id},
+        )
+        return JsonResponse({
+            'status': 'success',
+            'group': _group_detail_payload(group, membership),
+            'message': _group_message_payload(message, viewer=request.user),
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('更新群消息置顶错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def group_shared_items_api(request, group_id):
+    try:
+        from ...models import MessageGroup
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        links = []
+        seen = set()
+        qs = _visible_group_messages_qs(group, membership).order_by('-created_at')[:200]
+        for message in qs:
+            for url in _extract_links_from_text(message.content):
+                if url in seen:
+                    continue
+                seen.add(url)
+                links.append({
+                    'url': url,
+                    'sender': _user_payload(message.sender),
+                    'message_id': message.id,
+                    'created_at': message.created_at.isoformat() if message.created_at else None,
+                })
+                if len(links) >= 50:
+                    break
+            if len(links) >= 50:
+                break
+
+        return JsonResponse({
+            'status': 'success',
+            'links': links,
+            'files': [],
+            'images': [],
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('获取群资料聚合错误', e)
 
 
 @require_http_methods(["POST"])
@@ -1837,12 +2054,17 @@ def review_join_request_api(request, group_id, request_id):
 
         with transaction.atomic():
             if action == 'approve':
-                # 通过申请，添加为群成员
-                MessageGroupMember.objects.create(
+                target_member, created_member = MessageGroupMember.objects.get_or_create(
                     group=group,
                     user=join_request.user,
-                    role='member'
+                    defaults={'role': 'member'},
                 )
+                if not created_member:
+                    target_member.left_at = None
+                    target_member.role = 'member'
+                    target_member.muted_until = None
+                    target_member.joined_at = timezone.now()
+                    target_member.save(update_fields=['left_at', 'role', 'muted_until', 'joined_at'])
                 join_request.status = 'approved'
                 join_request.reviewed_by = request.user
                 join_request.reviewed_at = timezone.now()
@@ -1886,9 +2108,13 @@ def review_join_request_api(request, group_id, request_id):
 
                 message = '申请已拒绝'
 
+            group.updated_at = timezone.now()
+            group.save(update_fields=['updated_at'])
+
         return JsonResponse({
             'status': 'success',
             'message': message,
+            'group': _group_detail_payload(group, membership),
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
@@ -1905,7 +2131,7 @@ def review_join_request_api(request, group_id, request_id):
 def update_group_announcement_api(request, group_id):
     """更新群公告"""
     try:
-        from ...models import MessageGroup, MessageGroupAuditLog
+        from ...models import MessageGroup, MessageGroupAnnouncementHistory, MessageGroupAuditLog
 
         data = json.loads(request.body)
         announcement = data.get('announcement', '').strip()
@@ -1931,6 +2157,12 @@ def update_group_announcement_api(request, group_id):
             else:
                 group.announcement_pinned_at = None
             group.save(update_fields=['announcement', 'announcement_updated_by', 'announcement_pinned_at', 'updated_at'])
+            MessageGroupAnnouncementHistory.objects.create(
+                group=group,
+                editor=request.user,
+                content=announcement,
+                pinned=bool(pin),
+            )
 
             # 记录审计日志
             MessageGroupAuditLog.objects.create(
@@ -1942,6 +2174,7 @@ def update_group_announcement_api(request, group_id):
 
         return JsonResponse({
             'status': 'success',
+            'group': _group_detail_payload(group, membership),
             'announcement': announcement,
             'pinned_at': group.announcement_pinned_at.isoformat() if group.announcement_pinned_at else None,
         })

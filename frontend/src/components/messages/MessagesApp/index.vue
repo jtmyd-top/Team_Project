@@ -425,10 +425,33 @@
               class="message-input"
               placeholder="输入消息... Enter 发送，Shift+Enter 换行"
               @keydown.enter="handleComposerEnter"
+              @keydown.down="onMentionArrow($event, 1)"
+              @keydown.up="onMentionArrow($event, -1)"
+              @keydown.esc="closeMentionPicker"
               @input="onComposerInput"
               maxlength="5000"
               ref="inputRef"
             ></textarea>
+            <div v-if="mentionPicker.visible" class="mention-picker">
+              <button
+                v-for="(item, index) in mentionSuggestions"
+                :key="item.type === 'all' ? 'mention-all' : item.user_id"
+                class="mention-option"
+                :class="{ active: index === mentionPicker.activeIndex }"
+                type="button"
+                @mousedown.prevent="selectMention(item)"
+              >
+                <span v-if="item.type === 'all'" class="mention-avatar mention-avatar-all">
+                  <i class="fas fa-bullhorn"></i>
+                </span>
+                <img v-else class="mention-avatar" :src="item.avatar" :alt="item.username" />
+                <span class="mention-meta">
+                  <strong>{{ item.label || item.username }}</strong>
+                  <em>{{ item.type === 'all' ? '通知所有群成员' : roleLabel(item.role) }}</em>
+                </span>
+              </button>
+              <div v-if="!mentionSuggestions.length" class="mention-empty">没有匹配的成员</div>
+            </div>
             <span class="char-count" :class="{ warn: newMessage.length > 4500 }">
               {{ newMessage.length }}/5000
             </span>
@@ -496,6 +519,14 @@
       </button>
       <button class="dm-item" @click="messageCtxAction('copy')">
         <i class="fas fa-copy"></i> 复制
+      </button>
+      <button
+        v-if="isCurrentGroup && canManageCurrentGroup"
+        class="dm-item"
+        @click="messageCtxAction('pin_group_message')"
+      >
+        <i class="fas fa-thumbtack"></i>
+        {{ messageCtxMenu.msg?.is_pinned ? '取消置顶消息' : '置顶消息' }}
       </button>
       <button
         v-if="isCurrentGroup && messageCtxMenu.msg?.is_own"
@@ -571,6 +602,22 @@
         </div>
 
         <template v-else-if="groupPanel.detail">
+          <div v-if="groupPanel.detail.pinned_message" class="group-pinned-box">
+            <div class="group-section-title">
+              <span><i class="fas fa-thumbtack"></i> 置顶消息</span>
+              <button
+                v-if="canManageCurrentGroup"
+                class="group-secondary-btn small"
+                @click="togglePinnedGroupMessage(groupPanel.detail.pinned_message)"
+              >
+                取消置顶
+              </button>
+            </div>
+            <button class="group-pinned-message" type="button" @click="closeGroupInfo">
+              {{ groupMessagePreview(groupPanel.detail.pinned_message) || '[消息]' }}
+            </button>
+          </div>
+
           <div class="group-edit-row">
             <input
               v-model="groupPanel.nameDraft"
@@ -582,6 +629,78 @@
             <button class="group-primary-btn" :disabled="!canManageCurrentGroup || !groupPanel.nameDraft.trim()" @click="saveGroupName">
               保存
             </button>
+          </div>
+
+          <div class="group-config-box">
+            <div class="group-section-title">
+              <span><i class="fas fa-bullhorn"></i> 群公告</span>
+              <span v-if="groupPanel.detail.announcement_updated_by" class="group-section-meta">
+                {{ groupPanel.detail.announcement_updated_by.username }} · {{ formatGroupDate(groupPanel.detail.announcement_pinned_at || groupPanel.detail.updated_at) }}
+              </span>
+            </div>
+            <textarea
+              v-model="groupPanel.announcementDraft"
+              class="group-textarea"
+              maxlength="2000"
+              rows="3"
+              :disabled="!canManageCurrentGroup"
+              placeholder="暂无群公告"
+            ></textarea>
+            <div class="group-config-actions">
+              <label class="group-check">
+                <input v-model="groupPanel.announcementPinned" type="checkbox" :disabled="!canManageCurrentGroup" />
+                <span>置顶公告</span>
+              </label>
+              <button v-if="canManageCurrentGroup" class="group-secondary-btn small" @click="saveGroupAnnouncement">
+                保存公告
+              </button>
+            </div>
+            <div v-if="groupPanel.detail.announcement_history?.length" class="group-history-list">
+              <div
+                v-for="item in groupPanel.detail.announcement_history.slice(0, 3)"
+                :key="item.id"
+                class="group-history-row"
+              >
+                <span>{{ item.editor?.username || '系统' }} · {{ formatGroupDate(item.created_at) }}</span>
+                <p>{{ item.content || '清空公告' }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="canManageCurrentGroup" class="group-config-box compact">
+            <div class="group-section-title">
+              <span><i class="fas fa-shield-halved"></i> 权限与入群</span>
+              <button class="group-secondary-btn small" :disabled="groupPanel.savingPermissions" @click="saveGroupPermissions">
+                <i v-if="groupPanel.savingPermissions" class="fas fa-spinner fa-spin"></i>
+                保存
+              </button>
+            </div>
+            <div class="group-toggle-grid">
+              <label class="group-switch-row">
+                <input v-model="groupPanel.detail.require_approval" type="checkbox" />
+                <span>
+                  <strong>入群审批</strong>
+                  <em>邀请链接加入前需管理员同意</em>
+                </span>
+              </label>
+              <label class="group-switch-row">
+                <input v-model="groupPanel.detail.allow_member_mention_all" type="checkbox" />
+                <span>
+                  <strong>成员 @全体</strong>
+                  <em>关闭后仅群主/管理员可 @全体</em>
+                </span>
+              </label>
+              <label class="group-switch-row">
+                <select v-model="groupPanel.detail.mute_mode" class="group-select">
+                  <option value="none">所有成员可发言</option>
+                  <option value="admins_only">仅管理员可发言</option>
+                </select>
+                <span>
+                  <strong>发言模式</strong>
+                  <em>适合公告群或临时管控</em>
+                </span>
+              </label>
+            </div>
           </div>
 
           <div v-if="canManageCurrentGroup" class="group-add-box">
@@ -931,6 +1050,17 @@ const groupPanel = ref({
   inviteLoading: false,
   inviteBusy: false,
   inviteLinks: [],
+  announcementDraft: '',
+  announcementPinned: false,
+  memberSearch: '',
+  memberRoleFilter: 'all',
+  auditLoading: false,
+  auditLogs: [],
+  joinRequestsLoading: false,
+  joinRequests: [],
+  sharedLoading: false,
+  sharedLinks: [],
+  savingPermissions: false,
 })
 const activeMuteMenuUserId = ref(null)
 const muteDurationOptions = [
@@ -962,6 +1092,13 @@ const pendingAttachments = ref([])
 const showEmojiPicker = ref(false)
 const showCodeInput = ref(false)
 const codeDraft = ref('')
+const mentionPicker = ref({
+  visible: false,
+  query: '',
+  start: -1,
+  end: -1,
+  activeIndex: 0,
+})
 const peerProfile = ref({
   visible: false,
   loading: false,
@@ -1028,6 +1165,18 @@ const isCurrentGroupOwner = computed(() =>
   (groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '') === 'owner'
 )
 
+const filteredGroupMembers = computed(() => {
+  const detail = groupPanel.value.detail
+  if (!detail?.members) return []
+  const q = groupPanel.value.memberSearch.trim().toLowerCase()
+  const role = groupPanel.value.memberRoleFilter
+  return detail.members.filter((member) => {
+    const matchesRole = role === 'all' || member.role === role || (role === 'muted' && member.is_group_muted)
+    const matchesText = !q || String(member.username || '').toLowerCase().includes(q)
+    return matchesRole && matchesText
+  })
+})
+
 const isGroupComposerBlocked = computed(() => {
   if (!isCurrentGroup.value) return false
   const conv = selectedConversation.value
@@ -1035,6 +1184,30 @@ const isGroupComposerBlocked = computed(() => {
   if (muteMode !== 'admins_only') return false
   const role = groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || ''
   return !['owner', 'admin'].includes(role)
+})
+
+const mentionMembers = computed(() => {
+  if (!isCurrentGroup.value) return []
+  const detail = groupPanel.value.detail
+  if (!detail || normalizeUserId(detail.id) !== selectedGroupId()) return []
+  const members = detail.members || []
+  return members.filter((member) => !member.is_self)
+})
+
+const mentionSuggestions = computed(() => {
+  if (!mentionPicker.value.visible) return []
+  const query = mentionPicker.value.query.trim().toLowerCase()
+  const suggestions = []
+  if (!query || '全体成员'.includes(query) || 'all'.startsWith(query)) {
+    suggestions.push({ type: 'all', label: '@全体成员', username: '全体成员' })
+  }
+  for (const member of mentionMembers.value) {
+    const username = String(member.username || '')
+    if (!query || username.toLowerCase().includes(query)) {
+      suggestions.push({ ...member, type: 'member', label: `@${username}` })
+    }
+  }
+  return suggestions.slice(0, 8)
 })
 
 const peerBlockedByMe = computed(() => !!selectedConversation.value?.is_blocked)
@@ -1620,6 +1793,7 @@ function selectConversation(conv) {
   applyDraftForConversation(selectedConversationKey.value)
   pendingAttachments.value = []
   showEmojiPicker.value = false
+  closeMentionPicker()
   forwardDraft.value = null
   replyDraft.value = null
   highlightMessageId.value = null
@@ -1647,7 +1821,12 @@ async function sendMessage(turnstileToken = '') {
         ElMessage.warning('群组暂不支持附件消息')
         return
       }
-      const d = await apiPost(`/api/messages/groups/${groupId}/send/`, { content: finalContent })
+      await ensureGroupMembersForMention()
+      const mentionPayload = buildMentionPayload(finalContent)
+      const d = await apiPost(`/api/messages/groups/${groupId}/send/`, {
+        content: finalContent,
+        ...mentionPayload,
+      })
       const sentMessage = normalizeIncomingMessage(d.message)
       if (!messages.value.some((message) => message.id === sentMessage.id)) {
         messages.value.push(sentMessage)
@@ -1656,6 +1835,7 @@ async function sendMessage(turnstileToken = '') {
       newMessage.value = ''
       applyDraftPreviews()
       showEmojiPicker.value = false
+      closeMentionPicker()
       replyDraft.value = null
       forwardDraft.value = null
       resetComposerHeight()
@@ -2162,6 +2342,11 @@ function closeMergedForwardDialog() {
 }
 
 function handleComposerEnter(e) {
+  if (mentionPicker.value.visible && mentionSuggestions.value.length) {
+    e.preventDefault()
+    selectMention(mentionSuggestions.value[mentionPicker.value.activeIndex] || mentionSuggestions.value[0])
+    return
+  }
   if (e.shiftKey) return
   e.preventDefault()
   sendMessage()
@@ -2169,6 +2354,7 @@ function handleComposerEnter(e) {
 
 function onComposerInput() {
   autoGrowComposer()
+  updateMentionPicker()
   saveCurrentDraft()
   applyDraftPreviews()
   const isEmpty = !newMessage.value.trim()
@@ -2178,6 +2364,111 @@ function onComposerInput() {
   }
   composerWasNotEmpty = !isEmpty
   scheduleTypingNotice()
+}
+
+function closeMentionPicker() {
+  mentionPicker.value = {
+    visible: false,
+    query: '',
+    start: -1,
+    end: -1,
+    activeIndex: 0,
+  }
+}
+
+async function ensureGroupMembersForMention() {
+  if (!isCurrentGroup.value) return
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  const detail = groupPanel.value.detail
+  if (normalizeUserId(detail?.id) === groupId && mentionMembers.value.length) return
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) return
+    if (d.group) groupPanel.value.detail = d.group
+    if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
+  } catch {
+    // @候选只是辅助输入，失败时不打断用户继续发消息。
+  }
+}
+
+function updateMentionPicker() {
+  if (!isCurrentGroup.value) {
+    closeMentionPicker()
+    return
+  }
+  const el = inputRef.value
+  if (!el) return
+  const cursor = el.selectionStart ?? newMessage.value.length
+  const before = newMessage.value.slice(0, cursor)
+  const match = before.match(/(?:^|\s)@([^\s@]{0,24})$/)
+  if (!match) {
+    closeMentionPicker()
+    return
+  }
+  const query = match[1] || ''
+  const atIndex = before.lastIndexOf('@')
+  mentionPicker.value = {
+    visible: true,
+    query,
+    start: atIndex,
+    end: cursor,
+    activeIndex: Math.min(mentionPicker.value.activeIndex, Math.max(mentionSuggestions.value.length - 1, 0)),
+  }
+  ensureGroupMembersForMention()
+}
+
+function moveMentionSelection(delta) {
+  if (!mentionPicker.value.visible) return
+  const total = mentionSuggestions.value.length
+  if (!total) return
+  mentionPicker.value.activeIndex = (mentionPicker.value.activeIndex + delta + total) % total
+}
+
+function onMentionArrow(event, delta) {
+  if (!mentionPicker.value.visible) return
+  event.preventDefault()
+  moveMentionSelection(delta)
+}
+
+function selectMention(item) {
+  if (!item || mentionPicker.value.start < 0) return
+  const label = item.type === 'all' ? '@全体成员' : `@${item.username}`
+  const before = newMessage.value.slice(0, mentionPicker.value.start)
+  const after = newMessage.value.slice(mentionPicker.value.end)
+  const needsLeadingSpace = before && !/\s$/.test(before) ? ' ' : ''
+  const needsTrailingSpace = after && !/^\s/.test(after) ? ' ' : ''
+  const insert = `${needsLeadingSpace}${label} `
+  newMessage.value = `${before}${insert}${needsTrailingSpace}${after}`
+  closeMentionPicker()
+  nextTick(() => {
+    const el = inputRef.value
+    if (!el) return
+    const pos = before.length + insert.length
+    el.focus()
+    el.setSelectionRange(pos, pos)
+    autoGrowComposer()
+    saveCurrentDraft()
+  })
+}
+
+function buildMentionPayload(content) {
+  const memberNames = new Set(mentionMembers.value.map((member) => member.username).filter(Boolean))
+  const mentions = []
+  const mentionRegex = /@([^\s@]{1,80})/g
+  let match
+  while ((match = mentionRegex.exec(content || '')) !== null) {
+    const username = match[1]
+    if (memberNames.has(username) && !mentions.includes(username)) {
+      mentions.push(username)
+    }
+  }
+  const mentionAll = /@(全体成员|全体)(?=\s|$)|@all\b/i.test(content || '')
+  return {
+    mentions,
+    mention_all: mentionAll,
+  }
 }
 
 function scheduleTypingNotice() {
@@ -2916,8 +3207,15 @@ async function openGroupInfo() {
     if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群设置失败'))
     groupPanel.value.detail = d.group
     groupPanel.value.nameDraft = d.group?.name || ''
+    groupPanel.value.announcementDraft = d.group?.announcement || ''
+    groupPanel.value.announcementPinned = !!d.group?.announcement_pinned_at
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
-    if (canManageCurrentGroup.value) loadGroupInviteLinks()
+    loadGroupSharedItems()
+    if (canManageCurrentGroup.value) {
+      loadGroupInviteLinks()
+      loadGroupJoinRequests()
+      loadGroupAuditLogs()
+    }
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -2930,6 +3228,11 @@ function closeGroupInfo() {
   groupPanel.value.searchInput = ''
   groupPanel.value.searchResult = null
   groupPanel.value.inviteLinks = []
+  groupPanel.value.auditLogs = []
+  groupPanel.value.joinRequests = []
+  groupPanel.value.sharedLinks = []
+  groupPanel.value.memberSearch = ''
+  groupPanel.value.memberRoleFilter = 'all'
 }
 
 async function saveGroupName() {
@@ -2945,6 +3248,44 @@ async function saveGroupName() {
     ElMessage.success('群名称已保存')
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+async function saveGroupAnnouncement() {
+  const groupId = selectedGroupId()
+  if (!groupId || !canManageCurrentGroup.value) return
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/announcement/`, {
+      announcement: groupPanel.value.announcementDraft,
+      pin: groupPanel.value.announcementPinned,
+    })
+    if (d.group) groupPanel.value.detail = d.group
+    ElMessage.success('群公告已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function saveGroupPermissions() {
+  const groupId = selectedGroupId()
+  if (!groupId || !canManageCurrentGroup.value) return
+  groupPanel.value.savingPermissions = true
+  try {
+    const detail = groupPanel.value.detail || {}
+    const profile = await apiPost(`/api/messages/groups/${groupId}/profile/`, {
+      require_approval: !!detail.require_approval,
+      allow_member_mention_all: !!detail.allow_member_mention_all,
+    })
+    const mode = await apiPost(`/api/messages/groups/${groupId}/mute-mode/`, {
+      mute_mode: detail.mute_mode || 'none',
+    })
+    groupPanel.value.detail = mode.group || profile.group || detail
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('群权限已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.savingPermissions = false
   }
 }
 
@@ -2987,6 +3328,41 @@ function roleLabel(role) {
   if (role === 'owner') return '群主'
   if (role === 'admin') return '管理员'
   return '成员'
+}
+
+function auditActionLabel(action) {
+  const labels = {
+    group_create: '创建群组',
+    group_update_profile: '更新资料',
+    group_rename: '修改群名',
+    group_announcement_update: '更新公告',
+    group_mute_change: '修改发言权限',
+    member_add: '添加成员',
+    member_remove: '移出成员',
+    member_role_change: '调整角色',
+    member_mute: '禁言成员',
+    member_unmute: '解除禁言',
+    invite_link_create: '创建邀请链接',
+    invite_link_revoke: '撤销邀请链接',
+    group_message_pin: '置顶消息',
+    group_message_unpin: '取消置顶消息',
+    mention_all: '@全体成员',
+    group_leave: '退出群组',
+    group_dissolve: '解散群组',
+  }
+  return labels[action] || action || '操作'
+}
+
+function formatGroupDate(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function groupMessagePreview(message) {
+  const text = getReadableMessageText(message || {}).replace(/\s+/g, ' ').trim()
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text
 }
 
 function canManageGroupMember(member) {
@@ -3076,6 +3452,86 @@ async function loadGroupInviteLinks() {
     ElMessage.error(e.message)
   } finally {
     groupPanel.value.inviteLoading = false
+  }
+}
+
+async function loadGroupAuditLogs() {
+  const groupId = selectedGroupId()
+  if (!groupId || !canManageCurrentGroup.value) return
+  groupPanel.value.auditLoading = true
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/audit-logs/?page_size=20`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载管理日志失败'))
+    groupPanel.value.auditLogs = d.results || []
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.auditLoading = false
+  }
+}
+
+async function loadGroupJoinRequests() {
+  const groupId = selectedGroupId()
+  if (!groupId || !canManageCurrentGroup.value) return
+  groupPanel.value.joinRequestsLoading = true
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/join-requests/?status=pending`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载入群申请失败'))
+    groupPanel.value.joinRequests = d.requests || []
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.joinRequestsLoading = false
+  }
+}
+
+async function reviewGroupJoinRequest(requestItem, action) {
+  const groupId = selectedGroupId()
+  if (!groupId || !requestItem?.id) return
+  let rejectionReason = ''
+  if (action === 'reject') {
+    try {
+      const result = await ElMessageBox.prompt('请输入拒绝原因', '拒绝入群申请', {
+        confirmButtonText: '拒绝',
+        cancelButtonText: '取消',
+        inputValue: '暂不符合入群要求',
+        inputValidator: (value) => String(value || '').trim() ? true : '请填写原因',
+      })
+      rejectionReason = String(result?.value || '').trim()
+    } catch {
+      return
+    }
+  }
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/join-requests/${requestItem.id}/review/`, {
+      action,
+      rejection_reason: rejectionReason,
+    })
+    if (d.group) groupPanel.value.detail = d.group
+    groupPanel.value.joinRequests = groupPanel.value.joinRequests.filter((item) => item.id !== requestItem.id)
+    loadGroupAuditLogs()
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success(action === 'approve' ? '已同意入群' : '已拒绝入群')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function loadGroupSharedItems() {
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  groupPanel.value.sharedLoading = true
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/shared/`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群资料失败'))
+    groupPanel.value.sharedLinks = d.links || []
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.sharedLoading = false
   }
 }
 
@@ -3337,6 +3793,10 @@ async function messageCtxAction(action) {
     await copyMessageContent(msg)
     return
   }
+  if (action === 'pin_group_message') {
+    await togglePinnedGroupMessage(msg)
+    return
+  }
   if (action === 'edit') {
     await editGroupMessage(msg)
     return
@@ -3351,6 +3811,26 @@ async function messageCtxAction(action) {
   }
   if (action === 'recall') {
     await recallMessage(msg)
+  }
+}
+
+async function togglePinnedGroupMessage(msg) {
+  const groupId = selectedGroupId()
+  if (!groupId || !msg?.id || !canManageCurrentGroup.value) return
+  const detail = groupPanel.value.detail || selectedConversation.value || {}
+  const isPinned = detail.pinned_message?.id === msg.id || msg.is_pinned
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/messages/${msg.id}/pin/`, {
+      action: isPinned ? 'unpin' : 'pin',
+    })
+    if (d.group) groupPanel.value.detail = d.group
+    messages.value = messages.value.map((item) => ({
+      ...item,
+      is_pinned: !isPinned && item.id === msg.id,
+    }))
+    ElMessage.success(isPinned ? '已取消置顶' : '已置顶消息')
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 
@@ -5169,6 +5649,7 @@ watch(
 }
 
 .composer-shell {
+  position: relative;
   display: grid;
   grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
   align-items: center;
@@ -5250,6 +5731,90 @@ watch(
 
 .emoji-btn:hover {
   background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+}
+
+.mention-picker {
+  position: absolute;
+  left: 156px;
+  right: 118px;
+  bottom: calc(100% + 8px);
+  z-index: 70;
+  max-height: 274px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-primary) 96%, var(--bg-secondary));
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18);
+}
+
+.mention-option {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-option:hover,
+.mention-option.active {
+  background: color-mix(in srgb, var(--primary-color) 9%, var(--bg-secondary));
+}
+
+.mention-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+
+.mention-avatar-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-secondary));
+}
+
+.mention-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mention-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.mention-meta em {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.mention-empty {
+  padding: 12px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-align: center;
 }
 
 .attachment-tray {
@@ -5546,6 +6111,11 @@ watch(
     gap: 4px;
     padding: 7px;
     border-radius: 16px;
+  }
+
+  .mention-picker {
+    left: 8px;
+    right: 8px;
   }
 
   .composer-shell .char-count {

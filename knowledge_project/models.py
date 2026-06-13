@@ -1732,6 +1732,11 @@ class MessageGroup(models.Model):
     )
     # Phase 3: 入群审批
     require_approval = models.BooleanField(default=False, verbose_name="需要入群审批")
+    allow_member_mention_all = models.BooleanField(default=False, verbose_name="Allow members to mention everyone")
+    pinned_message = models.ForeignKey(
+        'GroupMessage', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='pinned_in_groups', verbose_name="Pinned group message"
+    )
     # Phase 3: 自动回复
     auto_reply_enabled = models.BooleanField(default=False, verbose_name="启用自动回复")
     auto_reply_text = models.TextField(max_length=500, blank=True, default='', verbose_name="自动回复文本")
@@ -1849,6 +1854,62 @@ class MessageGroupInviteLink(models.Model):
         if self.max_uses is not None and self.uses_count >= self.max_uses:
             return False
         return self.group.is_active
+
+
+class MessageGroupInviteUse(models.Model):
+    invite = models.ForeignKey(
+        MessageGroupInviteLink, on_delete=models.CASCADE,
+        related_name='use_records', verbose_name="Invite link"
+    )
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE,
+        related_name='invite_use_records', verbose_name="Group"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='message_group_invite_uses', verbose_name="Joined user"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Used at")
+
+    class Meta:
+        verbose_name = "Group invite use"
+        verbose_name_plural = "Group invite uses"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['invite', '-created_at']),
+            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        username = self.user.username if self.user else 'unknown'
+        return f"{username} used invite {self.invite_id}"
+
+
+class MessageGroupAnnouncementHistory(models.Model):
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE,
+        related_name='announcement_history', verbose_name="Group"
+    )
+    editor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='message_group_announcement_edits', verbose_name="Editor"
+    )
+    content = models.TextField(blank=True, default='', verbose_name="Announcement")
+    pinned = models.BooleanField(default=False, verbose_name="Pinned")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Edited at")
+
+    class Meta:
+        verbose_name = "Group announcement history"
+        verbose_name_plural = "Group announcement history"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['editor', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.group.name} announcement @ {self.created_at}"
 
 
 class GroupMessage(models.Model):

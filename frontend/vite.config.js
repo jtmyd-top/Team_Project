@@ -90,7 +90,6 @@ export default defineConfig({
           if (assetInfo.name?.endsWith('.css')) {
             // CSS 鏂囦欢浣跨敤鍥哄畾鍚嶇О锛屽彧鎸?entry 鍒嗙粍
             const legacyNames = {
-              'element-plus.css': 'element.css',
               'knowledge-list.css': 'knowledge.css',
             }
             const name = legacyNames[assetInfo.name] || assetInfo.name.replace(/-[\w\d_-]{8,}\.css$/, '.css')

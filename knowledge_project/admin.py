@@ -490,7 +490,8 @@ from .models import (
     Message, MessagePreference, UserBlocklist,
     ConversationSettings, MessageReport, AttachmentReport,
     NoteReport, CommentReport, MessageGroupPolicy, MessageGroup, MessageGroupMember,
-    MessageGroupInviteLink, MessageGroupBan, MessageGroupAuditLog, GroupMessage,
+    MessageGroupInviteLink, MessageGroupInviteUse, MessageGroupAnnouncementHistory,
+    MessageGroupBan, MessageGroupAuditLog, GroupMessage,
 )
 
 
@@ -561,6 +562,24 @@ class MessageGroupInviteLinkAdmin(admin.ModelAdmin):
     search_fields = ('group__name', 'token', 'created_by__username')
     readonly_fields = ('token', 'created_at', 'uses_count')
     autocomplete_fields = ['group', 'created_by']
+
+
+@admin.register(MessageGroupInviteUse)
+class MessageGroupInviteUseAdmin(admin.ModelAdmin):
+    list_display = ('id', 'group', 'invite', 'user', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('group__name', 'invite__token', 'user__username')
+    autocomplete_fields = ['group', 'invite', 'user']
+    readonly_fields = ('created_at',)
+
+
+@admin.register(MessageGroupAnnouncementHistory)
+class MessageGroupAnnouncementHistoryAdmin(admin.ModelAdmin):
+    list_display = ('id', 'group', 'editor', 'pinned', 'created_at')
+    list_filter = ('pinned', 'created_at')
+    search_fields = ('group__name', 'editor__username', 'content')
+    autocomplete_fields = ['group', 'editor']
+    readonly_fields = ('created_at',)
 
 
 @admin.register(GroupMessage)

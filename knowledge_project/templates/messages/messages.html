@@ -20,7 +20,7 @@ window.currentUserId = {{ user.id }};
 window.currentUsername = "{{ user.username|escapejs }}";
 window.userTheme = JSON.parse(document.getElementById('themeData').textContent);
 window.MESSAGE_REALTIME = {
-  enabled: {{ realtime_enabled|yesno:"true,false" }},
+  enabled: {% if realtime_enabled %}true{% else %}false{% endif %},
   wsPath: "{{ realtime_ws_path|escapejs }}"
 };
 </script>
