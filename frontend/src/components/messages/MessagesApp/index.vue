@@ -397,17 +397,17 @@
             <button
               class="tool-btn"
               :class="{ recording: isRecordingVoice }"
-              :disabled="isCurrentGroup || isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
+              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
               @click="toggleVoiceRecording"
-              :title="isCurrentGroup ? '群组暂不支持语音' : (isRecordingVoice ? '停止录音' : '语音消息')"
+              :title="isRecordingVoice ? '停止录音' : '语音消息'"
             >
               <i :class="isRecordingVoice ? 'fas fa-stop' : 'fas fa-microphone'"></i>
             </button>
             <button
               class="tool-btn"
-              :disabled="isCurrentGroup || isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
+              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
               @click="openFilePicker"
-              :title="isCurrentGroup ? '群组暂不支持附件' : '添加图片或文件'"
+              title="添加图片或文件"
             >
               <i v-if="!isUploadingAttachment" class="fas fa-paperclip"></i>
               <i v-else class="fas fa-spinner fa-spin"></i>
@@ -1817,14 +1817,11 @@ async function sendMessage(turnstileToken = '') {
   try {
     const groupId = selectedGroupId()
     if (groupId) {
-      if (pendingAttachments.value.length > 0) {
-        ElMessage.warning('群组暂不支持附件消息')
-        return
-      }
       await ensureGroupMembersForMention()
       const mentionPayload = buildMentionPayload(finalContent)
       const d = await apiPost(`/api/messages/groups/${groupId}/send/`, {
         content: finalContent,
+        attachment_ids: attachmentIds,
         ...mentionPayload,
       })
       const sentMessage = normalizeIncomingMessage(d.message)
@@ -1834,6 +1831,7 @@ async function sendMessage(turnstileToken = '') {
       clearDraftForConversation(selectedConversationKey.value)
       newMessage.value = ''
       applyDraftPreviews()
+      pendingAttachments.value = []
       showEmojiPicker.value = false
       closeMentionPicker()
       replyDraft.value = null
@@ -2116,10 +2114,6 @@ function formatForwardTime(iso) {
 }
 
 function openFilePicker() {
-  if (isCurrentGroup.value) {
-    ElMessage.info('群组暂不支持附件消息')
-    return
-  }
   if (isUploadingAttachment.value || pendingAttachments.value.length >= maxPendingAttachments) return
   fileInputRef.value?.click()
 }
@@ -2214,10 +2208,6 @@ function getSupportedVoiceMimeType() {
 }
 
 async function toggleVoiceRecording() {
-  if (isCurrentGroup.value) {
-    ElMessage.info('群组暂不支持语音消息')
-    return
-  }
   if (isRecordingVoice.value) {
     stopVoiceRecording()
     return

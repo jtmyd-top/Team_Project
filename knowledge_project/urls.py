@@ -55,6 +55,8 @@ urlpatterns = [
     path('api/security/verify-2fa-setup/', views.verify_2fa_setup, name='verify_2fa_setup'),
     path('api/security/disable-2fa/', views.disable_2fa, name='disable_2fa'),
     path('api/security/regenerate-backup-codes/', views.regenerate_backup_codes, name='regenerate_backup_codes'),
+    path('api/security/devices/', views.security_devices_api, name='security_devices_api'),
+    path('api/security/devices/<int:device_id>/revoke/', views.revoke_security_device_api, name='revoke_security_device_api'),
 
     # ==================== 通知偏好设置 API ====================
     path('api/notification-preferences/', views.notification_preferences, name='notification_preferences'),
@@ -91,6 +93,7 @@ urlpatterns = [
     path('api/messages/groups/<int:group_id>/join-requests/<int:request_id>/review/', views.review_join_request_api, name='review_join_request_api'),
     # Phase 3: 群公告管理
     path('api/messages/groups/<int:group_id>/announcement/', views.update_group_announcement_api, name='update_group_announcement_api'),
+    path('api/messages/groups/<int:group_id>/announcement/reads/', views.group_announcement_reads_api, name='group_announcement_reads_api'),
     path('api/messages/groups/<int:group_id>/mute-mode/', views.set_group_mute_mode_api, name='set_group_mute_mode_api'),
     path('api/messages/groups/<int:group_id>/bans/', views.group_bans_api, name='group_bans_api'),
     path('api/messages/groups/<int:group_id>/bans/<int:ban_id>/revoke/', views.revoke_group_ban_api, name='revoke_group_ban_api'),

@@ -406,6 +406,13 @@ class Profile(models.Model):
     )
 
     # 点赞功能字段
+    email_last_changed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Last email change time",
+    )
+
     likes_count = models.IntegerField(
         default=0,
         verbose_name="获赞数"
@@ -723,6 +730,17 @@ class LoginDevice(models.Model):
     # 信任状态
     is_trusted = models.BooleanField('是否信任', default=False)
     trusted_at = models.DateTimeField('信任时间', null=True, blank=True)
+    session_key = models.CharField('Session key', max_length=40, blank=True, db_index=True)
+    is_active = models.BooleanField('Active session', default=True, db_index=True)
+    revoked_at = models.DateTimeField('Revoked at', null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='revoked_login_devices',
+        verbose_name='Revoked by',
+    )
     
     class Meta:
         verbose_name = '登录设备'
@@ -731,6 +749,7 @@ class LoginDevice(models.Model):
         indexes = [
             models.Index(fields=['user', 'device_fingerprint']),
             models.Index(fields=['user', 'last_login_at']),
+            models.Index(fields=['user', 'is_active']),
         ]
     
     def __str__(self):
@@ -770,6 +789,44 @@ class LoginNotification(models.Model):
     
     def __str__(self):
         return f'{self.user.username} - {self.get_reason_display()} - {self.sent_at.strftime("%Y-%m-%d %H:%M")}'
+
+
+class SecurityAuditLog(models.Model):
+    """Durable audit trail for sensitive account operations."""
+    ACTION_EMAIL_CHANGED = 'email_changed'
+    ACTION_DEVICE_REVOKED = 'device_revoked'
+    ACTION_CHOICES = [
+        (ACTION_EMAIL_CHANGED, 'Email changed'),
+        (ACTION_DEVICE_REVOKED, 'Login device revoked'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='security_audit_logs')
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='security_audit_actions',
+    )
+    action = models.CharField(max_length=64, choices=ACTION_CHOICES, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Security audit log'
+        verbose_name_plural = 'Security audit logs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['actor', '-created_at']),
+            models.Index(fields=['action', '-created_at']),
+        ]
+
+    def __str__(self):
+        actor = self.actor.username if self.actor_id else 'system'
+        return f'{actor} -> {self.user.username}: {self.action}'
 
 
 class AccessLog(models.Model):
@@ -1228,6 +1285,14 @@ class MessageAttachment(models.Model):
     )
     file = models.FileField(upload_to=message_attachment_path, verbose_name="附件文件")
     original_name = models.CharField(max_length=255, verbose_name="原始文件名")
+    group_message = models.ForeignKey(
+        'GroupMessage',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+        verbose_name="关联群组消息",
+    )
     attachment_type = models.CharField(
         max_length=10,
         choices=ATTACHMENT_TYPE_CHOICES,
@@ -1246,6 +1311,8 @@ class MessageAttachment(models.Model):
         indexes = [
             models.Index(fields=['uploader', 'message']),
             models.Index(fields=['message', 'created_at']),
+            models.Index(fields=['uploader', 'group_message']),
+            models.Index(fields=['group_message', 'created_at']),
             models.Index(fields=['was_reported']),
         ]
 
@@ -1519,11 +1586,27 @@ class MessagePreference(models.Model):
     )
     notify_new_message = models.BooleanField(default=True, verbose_name="邮件通知新私信")
     browser_new_message = models.BooleanField(default=False, verbose_name="浏览器通知新私信")
+    notify_group_mentions_email = models.BooleanField(default=False, verbose_name="邮件通知群@提及")
+    email_mention_groups = models.ManyToManyField(
+        'MessageGroup',
+        blank=True,
+        related_name='email_mention_preferences',
+        verbose_name="群@邮件通知群组",
+    )
+    quiet_hours_enabled = models.BooleanField(default=False, verbose_name="Quiet hours enabled")
+    quiet_hours_start = models.TimeField(null=True, blank=True, verbose_name="Quiet hours start")
+    quiet_hours_end = models.TimeField(null=True, blank=True, verbose_name="Quiet hours end")
     last_email_notified_at = models.DateTimeField(
         null=True,
         blank=True,
         verbose_name="最后邮件通知时间",
         help_text="用于聚合邮件（同一对话 15 分钟内最多一封）"
+    )
+    last_group_mention_email_notified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="最后群@邮件通知时间",
+        help_text="用于抑制群@邮件通知频率",
     )
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -1910,6 +1993,42 @@ class MessageGroupAnnouncementHistory(models.Model):
 
     def __str__(self):
         return f"{self.group.name} announcement @ {self.created_at}"
+
+
+class MessageGroupAnnouncementRead(models.Model):
+    group = models.ForeignKey(
+        MessageGroup,
+        on_delete=models.CASCADE,
+        related_name='announcement_reads',
+        verbose_name='Group',
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='group_announcement_reads',
+        verbose_name='User',
+    )
+    announcement = models.ForeignKey(
+        MessageGroupAnnouncementHistory,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='read_receipts',
+        verbose_name='Announcement',
+    )
+    read_at = models.DateTimeField(auto_now=True, verbose_name='Read at')
+
+    class Meta:
+        verbose_name = 'Group announcement read'
+        verbose_name_plural = 'Group announcement reads'
+        unique_together = ('group', 'user', 'announcement')
+        indexes = [
+            models.Index(fields=['group', 'announcement']),
+            models.Index(fields=['user', '-read_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} read announcement {self.announcement_id} in {self.group.name}'
 
 
 class GroupMessage(models.Model):

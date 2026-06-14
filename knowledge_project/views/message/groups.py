@@ -17,9 +17,13 @@ from django.views.decorators.http import require_http_methods
 from ...moderation_utils import message_report_snapshot, notify_user
 from ._constants import MESSAGE_CONTENT_MAX_LENGTH, RECALL_WINDOW_SECONDS
 from ._helpers import (
+    _attachment_payload,
     _body_string,
     _get_avatar_url,
+    _load_message_attachments,
+    _maybe_send_group_mention_email,
     _message_searchable_text,
+    _normalize_attachment_ids,
     _server_error_response,
 )
 
@@ -66,6 +70,47 @@ def _group_full_response(group, current_count=None):
         'error': f'群聊人数已达上限，最多 {MAX_MESSAGE_GROUP_MEMBERS} 人',
         **payload,
     }, status=409)
+
+
+def _announcement_read_payload(group, announcement=None):
+    from ...models import MessageGroupAnnouncementRead
+
+    if announcement is None:
+        announcement = group.announcement_history.order_by('-created_at').first()
+
+    total_members = group.memberships.filter(left_at__isnull=True).count()
+    if not announcement:
+        return {
+            'announcement_id': None,
+            'read_count': 0,
+            'unread_count': total_members,
+            'total_members': total_members,
+            'read_users': [],
+        }
+
+    read_qs = (
+        MessageGroupAnnouncementRead.objects
+        .filter(group=group, announcement=announcement)
+        .select_related('user')
+        .order_by('-read_at')
+    )
+    read_users = [
+        {
+            'id': item.user_id,
+            'username': item.user.username,
+            'avatar': _get_avatar_url(item.user),
+            'read_at': item.read_at.isoformat() if item.read_at else None,
+        }
+        for item in read_qs[:50]
+    ]
+    read_count = read_qs.count()
+    return {
+        'announcement_id': announcement.id,
+        'read_count': read_count,
+        'unread_count': max(total_members - read_count, 0),
+        'total_members': total_members,
+        'read_users': read_users,
+    }
 
 
 def _policy_payload(policy, user, exclude_group_id=None):
@@ -371,7 +416,7 @@ def _group_message_payload(message, viewer=None):
         'is_read': True,
         'read_at': None,
         'is_own': (viewer is not None and viewer.id == message.sender_id),
-        'attachments': [],
+        'attachments': [_attachment_payload(a) for a in message.attachments.all()],
         # Phase 2: 新增字段
         'reply_to': reply_to_data,
         'forwarded_from': forwarded_from_data,
@@ -439,7 +484,7 @@ def _group_detail_payload(group, viewer_membership=None):
 
 def _visible_group_messages_qs(group, membership):
     from ...models import GroupMessage
-    qs = GroupMessage.objects.filter(group=group, is_recalled=False).select_related('sender')
+    qs = GroupMessage.objects.filter(group=group, is_recalled=False).select_related('sender', 'group').prefetch_related('attachments')
     if membership.cleared_before:
         qs = qs.filter(created_at__gt=membership.cleared_before)
     qs = qs.exclude(deletions__user=membership.user)
@@ -1521,14 +1566,18 @@ def get_group_messages_api(request, group_id):
 @login_required
 def send_group_message_api(request, group_id):
     try:
-        from ...models import GroupMessage, GroupMessageMention, MessageGroup, MessageGroupMember, UserSanction
+        from ...models import GroupMessage, GroupMessageMention, MessageAttachment, MessageGroup, MessageGroupMember, UserSanction
         data = json.loads(request.body)
         content = _body_string(data, 'content')
-        if not content:
+        try:
+            attachment_ids = _normalize_attachment_ids(data.get('attachment_ids'))
+        except ValueError as exc:
+            return JsonResponse({'error': str(exc)}, status=400)
+        if not content and not attachment_ids:
             return JsonResponse({'error': '消息内容不能为空'}, status=400)
         if len(content) > MESSAGE_CONTENT_MAX_LENGTH:
             return JsonResponse({'error': f'消息内容不能超过{MESSAGE_CONTENT_MAX_LENGTH}字'}, status=400)
-        if data.get('attachment_ids'):
+        if False and data.get('attachment_ids'):
             return JsonResponse({'error': '群组暂不支持阅后即焚或附件消息'}, status=400)
 
         # Phase 2: 获取回复和转发参数
@@ -1561,6 +1610,10 @@ def send_group_message_api(request, group_id):
 
         # Phase 2: 验证转发消息
         forwarded_message = None
+        try:
+            attachments = _load_message_attachments(request.user, attachment_ids)
+        except ValueError as exc:
+            return JsonResponse({'error': str(exc)}, status=400)
         if forwarded_from_id:
             try:
                 forwarded_message = GroupMessage.objects.get(id=forwarded_from_id, is_recalled=False)
@@ -1572,10 +1625,19 @@ def send_group_message_api(request, group_id):
                 group=group,
                 sender=request.user,
                 content=content,
-                searchable_text=_message_searchable_text(content),
+                searchable_text=_message_searchable_text(content, attachments),
                 reply_to=reply_to_message,
                 forwarded_from=forwarded_message,
             )
+            if attachments:
+                updated_count = MessageAttachment.objects.filter(
+                    id__in=attachment_ids,
+                    uploader=request.user,
+                    message__isnull=True,
+                    group_message__isnull=True,
+                ).update(group_message=message)
+                if updated_count != len(attachment_ids):
+                    raise ValueError('附件不存在、已发送或无权使用')
 
             if mention_everyone:
                 mentioned_members = (
@@ -1596,6 +1658,14 @@ def send_group_message_api(request, group_id):
                         )
                     except Exception as e:
                         logger.warning(f'发送@全体通知失败: {e}')
+                    transaction.on_commit(
+                        lambda recipient=member.user, group=group, content=content: _maybe_send_group_mention_email(
+                            request.user,
+                            recipient,
+                            group,
+                            content,
+                        )
+                    )
                 _create_group_audit_log(
                     group,
                     request.user,
@@ -1630,6 +1700,14 @@ def send_group_message_api(request, group_id):
                             )
                         except Exception as e:
                             logger.warning(f'发送提及通知失败: {e}')
+                        transaction.on_commit(
+                            lambda recipient=member.user, group=group, content=content: _maybe_send_group_mention_email(
+                                request.user,
+                                recipient,
+                                group,
+                                content,
+                            )
+                        )
 
             group.updated_at = timezone.now()
             group.save(update_fields=['updated_at'])
@@ -1637,6 +1715,7 @@ def send_group_message_api(request, group_id):
             membership.last_read_at = timezone.now()
             membership.save(update_fields=['force_unread', 'last_read_at'])
 
+        message = GroupMessage.objects.select_related('sender', 'group').prefetch_related('attachments').get(id=message.id)
         return JsonResponse({
             'status': 'success',
             'message': _group_message_payload(message, viewer=request.user),
@@ -2244,7 +2323,12 @@ def review_join_request_api(request, group_id, request_id):
 def update_group_announcement_api(request, group_id):
     """更新群公告"""
     try:
-        from ...models import MessageGroup, MessageGroupAnnouncementHistory, MessageGroupAuditLog
+        from ...models import (
+            MessageGroup,
+            MessageGroupAnnouncementHistory,
+            MessageGroupAnnouncementRead,
+            MessageGroupAuditLog,
+        )
 
         data = json.loads(request.body)
         announcement = data.get('announcement', '').strip()
@@ -2270,11 +2354,17 @@ def update_group_announcement_api(request, group_id):
             else:
                 group.announcement_pinned_at = None
             group.save(update_fields=['announcement', 'announcement_updated_by', 'announcement_pinned_at', 'updated_at'])
-            MessageGroupAnnouncementHistory.objects.create(
+            history = MessageGroupAnnouncementHistory.objects.create(
                 group=group,
                 editor=request.user,
                 content=announcement,
                 pinned=bool(pin),
+            )
+            MessageGroupAnnouncementRead.objects.update_or_create(
+                group=group,
+                user=request.user,
+                announcement=history,
+                defaults={'read_at': timezone.now()},
             )
 
             # 记录审计日志
@@ -2290,6 +2380,7 @@ def update_group_announcement_api(request, group_id):
             'group': _group_detail_payload(group, membership),
             'announcement': announcement,
             'pinned_at': group.announcement_pinned_at.isoformat() if group.announcement_pinned_at else None,
+            'read_stats': _announcement_read_payload(group, history),
         })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
@@ -2297,3 +2388,33 @@ def update_group_announcement_api(request, group_id):
         raise
     except Exception as e:
         return _server_error_response('更新群公告错误', e)
+
+
+@require_http_methods(["GET", "POST"])
+@login_required
+def group_announcement_reads_api(request, group_id):
+    try:
+        from ...models import MessageGroup, MessageGroupAnnouncementRead
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        announcement = group.announcement_history.order_by('-created_at').first()
+        if request.method == "POST" and announcement:
+            MessageGroupAnnouncementRead.objects.update_or_create(
+                group=group,
+                user=request.user,
+                announcement=announcement,
+                defaults={'read_at': timezone.now()},
+            )
+
+        return JsonResponse({
+            'status': 'success',
+            'read_stats': _announcement_read_payload(group, announcement),
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('Group announcement read status error', e)

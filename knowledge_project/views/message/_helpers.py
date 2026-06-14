@@ -607,6 +607,7 @@ def _load_message_attachments(user, attachment_ids):
             id__in=attachment_ids,
             uploader=user,
             message__isnull=True,
+            group_message__isnull=True,
         )
     )
     if len(attachments) != len(attachment_ids):
@@ -694,12 +695,28 @@ def _update_conversation_state(sender, recipient):
     return sender_settings
 
 
+def _is_in_quiet_hours(pref):
+    if not pref.quiet_hours_enabled or not pref.quiet_hours_start or not pref.quiet_hours_end:
+        return False
+    now_time = timezone.localtime(timezone.now()).time().replace(second=0, microsecond=0)
+    start = pref.quiet_hours_start
+    end = pref.quiet_hours_end
+    if start == end:
+        return True
+    if start < end:
+        return start <= now_time < end
+    return now_time >= start or now_time < end
+
+
 def _maybe_send_new_message_email(sender, recipient, content):
     """低频私信邮件通知：只在用户明显离站时发送。"""
     try:
         from ...models import MessagePreference
         pref, _ = MessagePreference.objects.get_or_create(user=recipient)
         if not pref.notify_new_message:
+            return
+        if _is_in_quiet_hours(pref):
+            logger.info("Skip private message email: recipient=%s quiet hours", recipient.id)
             return
         if not recipient.email:
             return
@@ -748,6 +765,66 @@ def _maybe_send_new_message_email(sender, recipient, content):
 # ------------------------------------------------------------------
 # 在线状态(用于邮件抑制)
 # ------------------------------------------------------------------
+def _maybe_send_group_mention_email(sender, recipient, group, content):
+    """Low-frequency email notification for group mentions when the user opted in."""
+    if sender.id == recipient.id:
+        return
+    try:
+        from ...models import MessagePreference
+        pref, _ = MessagePreference.objects.get_or_create(user=recipient)
+        if not pref.notify_group_mentions_email:
+            return
+        if _is_in_quiet_hours(pref):
+            logger.info("Skip group mention email: recipient=%s quiet hours", recipient.id)
+            return
+        if not recipient.email:
+            return
+        if not pref.email_mention_groups.filter(id=group.id).exists():
+            return
+        if _has_recent_active_session(recipient):
+            logger.info("Skip group mention email: recipient=%s recently active", recipient.id)
+            return
+        if _has_recent_messages_page_session(recipient):
+            logger.info("Skip group mention email: recipient=%s on messages page", recipient.id)
+            return
+
+        now = timezone.now()
+        cutoff = now - timedelta(seconds=EMAIL_NOTIFY_WINDOW_SECONDS)
+        claimed = MessagePreference.objects.filter(
+            Q(last_group_mention_email_notified_at__isnull=True) |
+            Q(last_group_mention_email_notified_at__lte=cutoff),
+            pk=pref.pk,
+            notify_group_mentions_email=True,
+        ).update(last_group_mention_email_notified_at=now)
+        if not claimed:
+            return
+
+        from ...utils.smart_email_sender import SmartEmailSender
+        subject = f"你在群组 {group.name} 中被 @{sender.username} 提到了"
+        snippet = (content or '').strip().replace('\n', ' ')
+        if len(snippet) > 80:
+            snippet = snippet[:77] + '...'
+        body = (
+            f"你好 {recipient.username}：\n\n"
+            f"{sender.username} 在群组「{group.name}」中提到了你：\n\n"
+            f"    {snippet}\n\n"
+            f"登录后前往「私信」查看完整群聊。\n\n"
+            f"---\n"
+            f"如不希望再收到此类通知，可在「设置 -> 通知设置」中调整群 @ 邮件提醒。"
+        )
+
+        def send_email_notification():
+            success, method = SmartEmailSender().send_email(subject, body, [recipient.email])
+            if not success:
+                logger.warning("Group mention email notification failed: recipient=%s", recipient.id)
+            else:
+                logger.info("Group mention email notification sent: recipient=%s, method=%s", recipient.id, method)
+
+        threading.Thread(target=send_email_notification, daemon=True).start()
+    except Exception as e:
+        logger.warning("Group mention email notification failed: %s", e, exc_info=True)
+
+
 def _has_recent_active_session(user):
     return has_recent_user_activity(user.id, ONLINE_SKIP_EMAIL_WINDOW_SECONDS)
 

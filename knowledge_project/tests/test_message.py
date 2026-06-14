@@ -26,6 +26,7 @@ import json
 from datetime import timedelta
 from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -37,6 +38,7 @@ from knowledge_project.models import (
     Message,
     MessageAttachment,
     MessageGroup,
+    MessageGroupAnnouncementRead,
     MessageGroupAuditLog,
     MessageGroupBan,
     MessageGroupInviteLink,
@@ -379,6 +381,44 @@ class MessageGroupTests(_MessageTestBase):
         message.refresh_from_db()
         self.assertTrue(message.is_recalled)
 
+    def test_group_message_can_send_and_serve_attachments(self):
+        owner = make_user('grp_attach_owner')
+        member = make_user('grp_attach_member')
+        outsider = make_user('grp_attach_outsider')
+        group = self._create_group_directly(owner, [member])
+        attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            file=SimpleUploadedFile('group-note.txt', b'hello group file', content_type='text/plain'),
+            original_name='group-note.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=16,
+        )
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': '',
+            'attachment_ids': [attachment.id],
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['message']['attachments'][0]['id'], attachment.id)
+        attachment.refresh_from_db()
+        self.assertIsNone(attachment.message_id)
+        self.assertIsNotNone(attachment.group_message_id)
+
+        self.client.logout()
+        login(self.client, member)
+        list_body = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))
+        self.assertEqual(list_body['messages'][0]['attachments'][0]['id'], attachment.id)
+        file_response = self.client.get(reverse('message_attachment_file_api', args=[attachment.id]))
+        self.assertEqual(file_response.status_code, 200)
+
+        self.client.logout()
+        login(self.client, outsider)
+        forbidden = self.client.get(reverse('message_attachment_file_api', args=[attachment.id]))
+        self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
     def test_group_owner_can_manage_members_and_group_name(self):
         owner = make_user('grp_manage_owner')
         member = make_user('grp_manage_member')
@@ -624,6 +664,32 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(MessageGroupMember.objects.get(group=group, user=member).role, 'owner')
         self.assertEqual(MessageGroupMember.objects.get(group=group, user=owner).role, 'admin')
         self.assertTrue(MessageGroupAuditLog.objects.filter(group=group, action='ownership_transfer').exists())
+
+    def test_group_announcement_read_receipts(self):
+        owner = make_user('grp_ann_owner')
+        member = make_user('grp_ann_member')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, owner)
+
+        update_response = post_json(self.client, reverse('update_group_announcement_api', args=[group.id]), {
+            'announcement': 'read this',
+            'pin': True,
+        })
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        body = parse(update_response)
+        self.assertEqual(body['read_stats']['read_count'], 1)
+        self.assertEqual(body['read_stats']['total_members'], 2)
+        self.assertTrue(MessageGroupAnnouncementRead.objects.filter(group=group, user=owner).exists())
+
+        self.client.logout()
+        login(self.client, member)
+        status_response = self.client.get(reverse('group_announcement_reads_api', args=[group.id]))
+        self.assertEqual(status_response.status_code, 200, status_response.content)
+        self.assertEqual(parse(status_response)['read_stats']['read_count'], 1)
+
+        mark_response = post_json(self.client, reverse('group_announcement_reads_api', args=[group.id]), {})
+        self.assertEqual(mark_response.status_code, 200, mark_response.content)
+        self.assertEqual(parse(mark_response)['read_stats']['read_count'], 2)
 
     def test_group_ban_blocks_invite_join_and_unban_allows_rejoin(self):
         owner = make_user('grp_ban_owner')
@@ -1651,6 +1717,9 @@ class MessagePreferenceTests(_MessageTestBase):
         body = parse(self.client.get(reverse('get_message_preference_api')))
         self.assertIn(body['preference']['message_mode'],
                       ['all', 'followers_only', 'following_only', 'disabled'])
+        self.assertIn('notify_group_mentions_email', body['preference'])
+        self.assertIn('email_mention_group_ids', body['preference'])
+        self.assertIn('available_email_mention_groups', body['preference'])
 
     def test_update_preference(self):
         user = make_user('mp02')
@@ -1663,6 +1732,24 @@ class MessagePreferenceTests(_MessageTestBase):
         pref = MessagePreference.objects.get(user=user)
         self.assertEqual(pref.message_mode, 'followers_only')
         self.assertFalse(pref.show_read_status)
+
+    def test_update_quiet_hours(self):
+        user = make_user('mp02_quiet')
+        login(self.client, user)
+        response = post_json(self.client, reverse('update_message_preference_api'), {
+            'quiet_hours_enabled': True,
+            'quiet_hours_start': '22:30',
+            'quiet_hours_end': '07:15',
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        pref = MessagePreference.objects.get(user=user)
+        self.assertTrue(pref.quiet_hours_enabled)
+        self.assertEqual(pref.quiet_hours_start.strftime('%H:%M'), '22:30')
+        self.assertEqual(pref.quiet_hours_end.strftime('%H:%M'), '07:15')
+
+        body = parse(self.client.get(reverse('get_message_preference_api')))
+        self.assertEqual(body['preference']['quiet_hours_start'], '22:30')
+        self.assertEqual(body['preference']['quiet_hours_end'], '07:15')
 
     def test_update_rejects_invalid_mode(self):
         user = make_user('mp03')
@@ -1683,6 +1770,35 @@ class MessagePreferenceTests(_MessageTestBase):
         })
         pref = MessagePreference.objects.get(user=user)
         self.assertEqual(len(pref.auto_reply_text), 500)
+
+    def test_update_group_mention_email_groups(self):
+        user = make_user('mp05')
+        group = MessageGroup.objects.create(name='mention group', owner=user, created_by=user)
+        MessageGroupMember.objects.create(group=group, user=user, role='owner')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('update_message_preference_api'), {
+            'notify_group_mentions_email': True,
+            'email_mention_group_ids': [group.id],
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        pref = MessagePreference.objects.get(user=user)
+        self.assertTrue(pref.notify_group_mentions_email)
+        self.assertEqual(list(pref.email_mention_groups.values_list('id', flat=True)), [group.id])
+
+    def test_update_rejects_unavailable_group_mention_email_group(self):
+        user = make_user('mp06')
+        owner = make_user('mp06_owner')
+        group = MessageGroup.objects.create(name='unrelated group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('update_message_preference_api'), {
+            'email_mention_group_ids': [group.id],
+        })
+
+        self.assertEqual(response.status_code, 400)
 
 
 # =========================================================================

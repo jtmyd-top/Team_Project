@@ -103,6 +103,7 @@ def send_message_api(request):
                     id__in=attachment_ids,
                     uploader=request.user,
                     message__isnull=True,
+                    group_message__isnull=True,
                 ).update(message=message)
                 if updated_count != len(attachment_ids):
                     raise ValueError('附件不存在、已发送或无权使用')

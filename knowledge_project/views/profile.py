@@ -6,21 +6,63 @@ import json
 import logging
 import os
 import re
+from datetime import time, timedelta
 
+from django.contrib.sessions.models import Session
 from django.contrib.staticfiles import finders
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from ..models import MessagePreference, Note, Profile, ProfileLike, ProfileVisit
+from ..models import (
+    LoginDevice,
+    MessageGroup,
+    MessagePreference,
+    Note,
+    Profile,
+    ProfileLike,
+    ProfileVisit,
+    SecurityAuditLog,
+)
 from ..utils.request_utils import get_client_ip
 from .upload import _delayed_delete_file
 
 logger = logging.getLogger(__name__)
 USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
+
+
+def _available_email_mention_groups(user):
+    return (
+        MessageGroup.objects
+        .filter(is_active=True)
+        .filter(
+            Q(owner=user) |
+            Q(memberships__user=user, memberships__left_at__isnull=True)
+        )
+        .distinct()
+        .order_by('name', 'id')
+    )
+
+
+def _email_mention_group_payload(group):
+    return {
+        "id": group.id,
+        "name": group.name,
+    }
+
+
+def _parse_quiet_time(value):
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str):
+        raise ValueError('time must be a string')
+    parsed = time.fromisoformat(value)
+    return parsed.replace(second=0, microsecond=0)
 
 
 def _static_asset_version(*paths):
@@ -46,6 +88,74 @@ def _record_profile_visit(request, profile):
         ip_address=get_client_ip(request),
         user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:255],
     )
+
+
+def _device_payload(device, current_session_key=''):
+    return {
+        'id': device.id,
+        'device_info': device.device_info,
+        'ip_address': device.ip_address,
+        'ip_location': device.ip_location,
+        'user_agent': device.user_agent,
+        'first_login_at': device.first_login_at.isoformat() if device.first_login_at else None,
+        'last_login_at': device.last_login_at.isoformat() if device.last_login_at else None,
+        'login_count': device.login_count,
+        'is_trusted': device.is_trusted,
+        'is_active': device.is_active,
+        'revoked_at': device.revoked_at.isoformat() if device.revoked_at else None,
+        'is_current': bool(current_session_key and device.session_key == current_session_key),
+    }
+
+
+@login_required
+@require_http_methods(["GET"])
+def security_devices_api(request):
+    if not request.session.session_key:
+        request.session.save()
+    current_session_key = request.session.session_key or ''
+    devices = (
+        LoginDevice.objects
+        .filter(user=request.user)
+        .select_related('revoked_by')
+        .order_by('-last_login_at', '-id')[:50]
+    )
+    return JsonResponse({
+        'status': 'success',
+        'devices': [_device_payload(device, current_session_key) for device in devices],
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def revoke_security_device_api(request, device_id):
+    if not request.session.session_key:
+        request.session.save()
+    current_session_key = request.session.session_key or ''
+    try:
+        device = LoginDevice.objects.get(id=device_id, user=request.user)
+    except LoginDevice.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': 'Device not found'}, status=404)
+
+    if current_session_key and device.session_key == current_session_key:
+        return JsonResponse({'status': 'error', 'message': 'Cannot revoke current session'}, status=400)
+
+    now = timezone.now()
+    if device.session_key:
+        Session.objects.filter(session_key=device.session_key).delete()
+    device.is_active = False
+    device.revoked_at = now
+    device.revoked_by = request.user
+    device.save(update_fields=['is_active', 'revoked_at', 'revoked_by'])
+
+    SecurityAuditLog.objects.create(
+        user=request.user,
+        actor=request.user,
+        action=SecurityAuditLog.ACTION_DEVICE_REVOKED,
+        ip_address=get_client_ip(request),
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        metadata={'device_id': device.id, 'device_info': device.device_info},
+    )
+    return JsonResponse({'status': 'success', 'device': _device_payload(device, current_session_key)})
 
 
 @login_required
@@ -301,7 +411,15 @@ def update_email(request):
         return JsonResponse({"status": "error", "message": "该邮箱已被绑定"}, status=400)
 
     # 4) 检查并执行 2FA 验证
-    profile = getattr(request.user, 'profile', None)
+    profile, _ = Profile.objects.get_or_create(user=request.user)
+    if profile.email_last_changed_at:
+        cooldown_until = profile.email_last_changed_at + timedelta(hours=24)
+        if cooldown_until > timezone.now():
+            return JsonResponse({
+                "status": "error",
+                "message": "Email can only be changed once every 24 hours",
+                "cooldown_until": cooldown_until.isoformat(),
+            }, status=429)
     if profile and profile.two_fa_enabled:
         if not two_fa_code:
             # 如果需要 2FA 但未提供验证码，则要求输入
@@ -326,8 +444,20 @@ def update_email(request):
 
     # 5) 所有验证通过，更新邮箱
     user = request.user
+    old_email = user.email
     user.email = new_email
     user.save(update_fields=["email"])
+    profile.email_last_changed_at = timezone.now()
+    profile.save(update_fields=["email_last_changed_at"])
+
+    SecurityAuditLog.objects.create(
+        user=user,
+        actor=user,
+        action=SecurityAuditLog.ACTION_EMAIL_CHANGED,
+        ip_address=get_client_ip(request),
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        metadata={'old_email': old_email, 'new_email': new_email},
+    )
 
     # 作废新邮箱的验证码 session
     if "email_change_verification" in request.session:
@@ -394,6 +524,13 @@ def notification_preferences(request):
         profile = Profile.objects.create(user=user)
         logger.info(f"Created profile for user {user.id} in notification_preferences")
     message_pref, _ = MessagePreference.objects.get_or_create(user=user)
+    available_groups = list(_available_email_mention_groups(user))
+    available_group_ids = [group.id for group in available_groups]
+    selected_group_ids = list(
+        message_pref.email_mention_groups
+        .filter(id__in=available_group_ids)
+        .values_list('id', flat=True)
+    )
 
     if request.method == "GET":
         # 返回当前的通知偏好设置
@@ -406,6 +543,15 @@ def notification_preferences(request):
                 "notify_note_activities": profile.notify_note_activities,
                 "notify_profile_likes": profile.notify_profile_likes,
                 "email_messages": message_pref.notify_new_message,
+                "notify_group_mentions_email": message_pref.notify_group_mentions_email,
+                "email_mention_group_ids": selected_group_ids,
+                "available_email_mention_groups": [
+                    _email_mention_group_payload(group)
+                    for group in available_groups
+                ],
+                "quiet_hours_enabled": message_pref.quiet_hours_enabled,
+                "quiet_hours_start": message_pref.quiet_hours_start.strftime('%H:%M') if message_pref.quiet_hours_start else '',
+                "quiet_hours_end": message_pref.quiet_hours_end.strftime('%H:%M') if message_pref.quiet_hours_end else '',
                 "browser_enabled": message_pref.browser_new_message,
                 "browser_messages": message_pref.browser_new_message,
             }
@@ -442,6 +588,8 @@ def notification_preferences(request):
             update_fields.append("notify_profile_likes")
 
         message_update_fields = []
+        group_ids_changed = False
+        group_ids = set()
         if "email_messages" in data:
             message_pref.notify_new_message = bool(data["email_messages"])
             message_update_fields.append("notify_new_message")
@@ -456,6 +604,35 @@ def notification_preferences(request):
             message_pref.browser_new_message = bool(data["browser_messages"])
             if "browser_new_message" not in message_update_fields:
                 message_update_fields.append("browser_new_message")
+        if "notify_group_mentions_email" in data:
+            message_pref.notify_group_mentions_email = bool(data["notify_group_mentions_email"])
+            message_update_fields.append("notify_group_mentions_email")
+        if "quiet_hours_enabled" in data:
+            message_pref.quiet_hours_enabled = bool(data["quiet_hours_enabled"])
+            message_update_fields.append("quiet_hours_enabled")
+        if "quiet_hours_start" in data:
+            try:
+                message_pref.quiet_hours_start = _parse_quiet_time(data.get("quiet_hours_start"))
+            except ValueError:
+                return JsonResponse({"status": "error", "message": "quiet_hours_start must be HH:MM"}, status=400)
+            message_update_fields.append("quiet_hours_start")
+        if "quiet_hours_end" in data:
+            try:
+                message_pref.quiet_hours_end = _parse_quiet_time(data.get("quiet_hours_end"))
+            except ValueError:
+                return JsonResponse({"status": "error", "message": "quiet_hours_end must be HH:MM"}, status=400)
+            message_update_fields.append("quiet_hours_end")
+        if "email_mention_group_ids" in data:
+            raw_group_ids = data.get("email_mention_group_ids") or []
+            if not isinstance(raw_group_ids, list):
+                return JsonResponse({"status": "error", "message": "email_mention_group_ids must be a list"}, status=400)
+            try:
+                group_ids = {int(group_id) for group_id in raw_group_ids}
+            except (TypeError, ValueError):
+                return JsonResponse({"status": "error", "message": "email_mention_group_ids contains invalid group ids"}, status=400)
+            if not group_ids.issubset(available_group_ids):
+                return JsonResponse({"status": "error", "message": "Only joined or owned groups can be selected"}, status=400)
+            group_ids_changed = True
 
         # 保存更新
         if update_fields:
@@ -464,12 +641,18 @@ def notification_preferences(request):
         if message_update_fields:
             message_pref.save(update_fields=message_update_fields + ["updated_at"])
             logger.info(f"Updated message notification preferences for user {user.id}: {message_update_fields}")
+        if group_ids_changed:
+            message_pref.email_mention_groups.set(group_ids)
+            logger.info(f"Updated group mention email groups for user {user.id}: {sorted(group_ids)}")
 
-        if update_fields or message_update_fields:
+        if update_fields or message_update_fields or group_ids_changed:
+            updated_fields = update_fields + message_update_fields
+            if group_ids_changed:
+                updated_fields.append("email_mention_group_ids")
             return JsonResponse({
                 "status": "success",
                 "message": "通知偏好设置已更新",
-                "updated_fields": update_fields + message_update_fields
+                "updated_fields": updated_fields
             })
         return JsonResponse({
             "status": "warning",

@@ -7,6 +7,9 @@ export function useSettingsNotifications() {
     email_system: true,
     email_security: true,
     email_messages: true,
+    notify_group_mentions_email: false,
+    email_mention_group_ids: [],
+    available_email_mention_groups: [],
     email_updates: false,
     browser_enabled: false,
     browser_messages: false,
@@ -25,6 +28,12 @@ export function useSettingsNotifications() {
       if (data.status === 'success' && data.preferences) {
         Object.assign(notifications, data.preferences);
         notifications.browser_messages = !!notifications.browser_enabled;
+        notifications.email_mention_group_ids = Array.isArray(notifications.email_mention_group_ids)
+          ? notifications.email_mention_group_ids
+          : [];
+        notifications.available_email_mention_groups = Array.isArray(notifications.available_email_mention_groups)
+          ? notifications.available_email_mention_groups
+          : [];
       }
     } catch (error) {
       console.error('加载通知设置失败:', error);

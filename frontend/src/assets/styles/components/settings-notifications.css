@@ -24,6 +24,27 @@
   margin-top: 4px;
 }
 
+.message-email-suboptions {
+  width: min(520px, 100%);
+  margin-top: 12px;
+  padding-left: 16px;
+  border-left: 2px solid #ebeef5;
+}
+
+.suboption-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  color: #606266;
+  font-size: 14px;
+}
+
+.group-mention-select {
+  width: 100%;
+}
+
 .notification-center-header,
 .notification-center-title,
 .notification-center-item {

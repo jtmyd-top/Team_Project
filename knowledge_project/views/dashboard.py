@@ -469,7 +469,31 @@ def dashboard_stats_api(request):
                 'model': log.content_type.model if log.content_type else '未知',
                 'time': log.action_time.isoformat(),
                 'message': log.change_message,
+                'source': 'admin',
             } for log in admin_logs]
+
+            from ..models import SecurityAuditLog
+            security_logs = (
+                SecurityAuditLog.objects
+                .filter(created_at__gte=seven_days_ago)
+                .select_related('user', 'actor')
+                .order_by('-created_at')[:50]
+            )
+            security_log_list = [{
+                'user': log.actor.username if log.actor else 'system',
+                'action': log.action,
+                'action_flag': 0,
+                'target': log.user.username if log.user else '',
+                'model': 'security',
+                'time': log.created_at.isoformat(),
+                'message': log.metadata,
+                'source': 'security',
+            } for log in security_logs]
+            combined_logs = sorted(
+                admin_log_list + security_log_list,
+                key=lambda item: item['time'],
+                reverse=True,
+            )[:50]
 
             # 补充：最近永久删除的笔记/文件夹（通过回收站清空时间推断）
             # 统计各类操作数量
@@ -486,11 +510,12 @@ def dashboard_stats_api(request):
                     summary['change'] = item['count']
                 elif item['action_flag'] == 3:
                     summary['delete'] = item['count']
+            summary['security'] = SecurityAuditLog.objects.filter(created_at__gte=seven_days_ago).count()
 
             data['audit_log'] = {
-                'logs': admin_log_list,
+                'logs': combined_logs,
                 'summary': summary,
-                'total': len(admin_log_list),
+                'total': len(combined_logs),
             }
         except Exception as e:
             logger.error(f"Dashboard audit_log error: {e}")
@@ -525,6 +550,27 @@ def dashboard_stats_api(request):
             services['database'] = {'status': 'ok'}
         else:
             services['database'] = {'status': 'error', 'detail': database_health['detail']}
+
+        email_backend = getattr(settings, 'EMAIL_BACKEND', '')
+        email_host = getattr(settings, 'EMAIL_HOST', '')
+        email_user = getattr(settings, 'EMAIL_HOST_USER', '')
+        email_configured = bool(email_backend) and (
+            'locmem' in email_backend
+            or 'console' in email_backend
+            or (bool(email_host) and bool(email_user))
+        )
+        services['email'] = {
+            'status': 'ok' if email_configured else 'warning',
+            'backend': email_backend,
+            'host_configured': bool(email_host),
+            'user_configured': bool(email_user),
+            'timeout': getattr(settings, 'EMAIL_TIMEOUT', None),
+        }
+        services['email_queue'] = {
+            'status': 'ok',
+            'mode': 'threaded',
+            'detail': 'message notifications are dispatched asynchronously in-process',
+        }
 
         data['service_health'] = services
 

@@ -88,12 +88,28 @@ def upload_message_attachment_api(request):
 @login_required
 def message_attachment_file_api(request, attachment_id):
     """受控访问私信附件，仅会话双方或待发送附件上传者可访问。"""
-    from ...models import MessageAttachment
+    from ...models import GroupMessageDeletion, MessageAttachment, MessageGroupMember
 
-    attachment = get_object_or_404(MessageAttachment.objects.select_related('message'), id=attachment_id)
+    attachment = get_object_or_404(
+        MessageAttachment.objects.select_related('message', 'group_message', 'group_message__group'),
+        id=attachment_id,
+    )
     message = attachment.message
-    if message is None:
+    group_message = attachment.group_message
+    if message is None and group_message is None:
         if attachment.uploader_id != request.user.id:
+            return HttpResponse('无权访问此附件', status=403)
+    elif group_message is not None:
+        is_member = MessageGroupMember.objects.filter(
+            group=group_message.group,
+            user=request.user,
+            left_at__isnull=True,
+        ).exists()
+        is_deleted_for_user = GroupMessageDeletion.objects.filter(
+            message=group_message,
+            user=request.user,
+        ).exists()
+        if not is_member or group_message.is_recalled or is_deleted_for_user:
             return HttpResponse('无权访问此附件', status=403)
     elif request.user.id not in (message.sender_id, message.recipient_id) or not message.visible_to(request.user):
         return HttpResponse('无权访问此附件', status=403)

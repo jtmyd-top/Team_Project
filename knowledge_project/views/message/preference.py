@@ -1,14 +1,47 @@
 # knowledge_project/views/message/preference.py
 """私信偏好 / 屏蔽 / 账户可发现性"""
 import json
+from datetime import time
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
 from ._helpers import _get_avatar_url, _server_error_response
+
+
+def _parse_quiet_time(value):
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str):
+        raise ValueError('time must be a string')
+    parsed = time.fromisoformat(value)
+    return parsed.replace(second=0, microsecond=0)
+
+
+def _available_email_mention_groups(user):
+    from ...models import MessageGroup
+
+    return (
+        MessageGroup.objects
+        .filter(is_active=True)
+        .filter(
+            Q(owner=user) |
+            Q(memberships__user=user, memberships__left_at__isnull=True)
+        )
+        .distinct()
+        .order_by('name', 'id')
+    )
+
+
+def _email_mention_group_payload(group):
+    return {
+        'id': group.id,
+        'name': group.name,
+    }
 
 
 @require_http_methods(["GET"])
@@ -25,17 +58,38 @@ def get_message_preference_api(request):
         else:
             pref, _ = MessagePreference.objects.get_or_create(user=request.user)
 
+        preference = {
+            'allow_messages': pref.allow_messages,
+            'message_mode': pref.message_mode,
+            'show_read_status': pref.show_read_status,
+            'auto_reply_enabled': pref.auto_reply_enabled,
+            'auto_reply_text': pref.auto_reply_text,
+            'notify_new_message': pref.notify_new_message,
+            'browser_new_message': pref.browser_new_message,
+            'quiet_hours_enabled': pref.quiet_hours_enabled,
+            'quiet_hours_start': pref.quiet_hours_start.strftime('%H:%M') if pref.quiet_hours_start else '',
+            'quiet_hours_end': pref.quiet_hours_end.strftime('%H:%M') if pref.quiet_hours_end else '',
+        }
+        if pref.user_id == request.user.id:
+            available_groups = list(_available_email_mention_groups(request.user))
+            available_group_ids = [group.id for group in available_groups]
+            selected_ids = list(
+                pref.email_mention_groups
+                .filter(id__in=available_group_ids)
+                .values_list('id', flat=True)
+            )
+            preference.update({
+                'notify_group_mentions_email': pref.notify_group_mentions_email,
+                'email_mention_group_ids': selected_ids,
+                'available_email_mention_groups': [
+                    _email_mention_group_payload(group)
+                    for group in available_groups
+                ],
+            })
+
         return JsonResponse({
             'status': 'success',
-            'preference': {
-                'allow_messages': pref.allow_messages,
-                'message_mode': pref.message_mode,
-                'show_read_status': pref.show_read_status,
-                'auto_reply_enabled': pref.auto_reply_enabled,
-                'auto_reply_text': pref.auto_reply_text,
-                'notify_new_message': pref.notify_new_message,
-                'browser_new_message': pref.browser_new_message,
-            }
+            'preference': preference,
         })
     except Http404:
         raise
@@ -65,7 +119,33 @@ def update_message_preference_api(request):
             pref.notify_new_message = bool(data['notify_new_message'])
         if 'browser_new_message' in data:
             pref.browser_new_message = bool(data['browser_new_message'])
+        if 'notify_group_mentions_email' in data:
+            pref.notify_group_mentions_email = bool(data['notify_group_mentions_email'])
+        if 'quiet_hours_enabled' in data:
+            pref.quiet_hours_enabled = bool(data['quiet_hours_enabled'])
+        if 'quiet_hours_start' in data:
+            try:
+                pref.quiet_hours_start = _parse_quiet_time(data.get('quiet_hours_start'))
+            except ValueError:
+                return JsonResponse({'error': 'quiet_hours_start must be HH:MM'}, status=400)
+        if 'quiet_hours_end' in data:
+            try:
+                pref.quiet_hours_end = _parse_quiet_time(data.get('quiet_hours_end'))
+            except ValueError:
+                return JsonResponse({'error': 'quiet_hours_end must be HH:MM'}, status=400)
         pref.save()
+        if 'email_mention_group_ids' in data:
+            raw_group_ids = data.get('email_mention_group_ids') or []
+            if not isinstance(raw_group_ids, list):
+                return JsonResponse({'error': 'email_mention_group_ids 必须是数组'}, status=400)
+            try:
+                group_ids = {int(group_id) for group_id in raw_group_ids}
+            except (TypeError, ValueError):
+                return JsonResponse({'error': '群组选择参数无效'}, status=400)
+            available_ids = set(_available_email_mention_groups(request.user).values_list('id', flat=True))
+            if not group_ids.issubset(available_ids):
+                return JsonResponse({'error': '只能选择你加入或创建的群组'}, status=400)
+            pref.email_mention_groups.set(group_ids)
         return JsonResponse({'status': 'success', 'message': '设置已更新'})
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)

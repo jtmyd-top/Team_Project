@@ -42,6 +42,35 @@
         <el-form-item label="新消息邮件提醒">
           <el-switch v-model="notifications.email_messages" @change="saveNotifications" />
           <div class="form-hint">收到新私信时发送邮件提醒，同一用户短时间内会自动合并。</div>
+          <div class="message-email-suboptions">
+            <div class="suboption-row">
+              <span>群组聊天被 @ 时发送邮件通知</span>
+              <el-switch
+                v-model="notifications.notify_group_mentions_email"
+                :disabled="!notifications.email_messages"
+                @change="saveNotifications"
+              />
+            </div>
+            <el-select
+              v-model="notifications.email_mention_group_ids"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              placeholder="选择需要提醒的群组"
+              :disabled="!notifications.email_messages || !notifications.notify_group_mentions_email"
+              class="group-mention-select"
+              @change="saveNotifications"
+            >
+              <el-option
+                v-for="group in notifications.available_email_mention_groups"
+                :key="group.id"
+                :label="group.name"
+                :value="group.id"
+              />
+            </el-select>
+            <div class="form-hint">下拉框仅显示你已加入或创建的群组，可多选。</div>
+          </div>
         </el-form-item>
 
         <el-divider style="margin: 24px 0;" />

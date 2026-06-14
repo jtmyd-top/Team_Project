@@ -11,17 +11,25 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from knowledge_project.models import (
+    LoginDevice,
+    MessageGroup,
+    MessageGroupMember,
     MessagePreference,
     Note,
     Profile,
     ProfileLike,
     ProfileVisit,
+    SecurityAuditLog,
     UserBlocklist,
     UserFollow,
     UserNotification,
@@ -184,6 +192,31 @@ class UpdateEmailTests(_ProfileTestBase):
         self.assertEqual(response.status_code, 200)
         user.refresh_from_db()
         self.assertEqual(user.email, 'brand_new@example.com')
+        user.profile.refresh_from_db()
+        self.assertIsNotNone(user.profile.email_last_changed_at)
+        audit = SecurityAuditLog.objects.get(
+            user=user,
+            action=SecurityAuditLog.ACTION_EMAIL_CHANGED,
+        )
+        self.assertEqual(audit.actor, user)
+        self.assertEqual(audit.metadata['old_email'], 'ue06@example.com')
+        self.assertEqual(audit.metadata['new_email'], 'brand_new@example.com')
+
+    def test_update_email_cooldown_blocks_second_change(self):
+        user = make_user('ue08')
+        user.profile.email_last_changed_at = timezone.now()
+        user.profile.save(update_fields=['email_last_changed_at'])
+        login(self.client, user)
+        self._seed_email_change_verification('cooldown@example.com')
+        response = post_json(self.client, reverse('update_email'), {
+            'password': 'pass-word-123!',
+            'new_email': 'cooldown@example.com',
+            'code': '123456',
+        })
+        body = parse(response)
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('cooldown_until', body)
 
     def test_invalid_json(self):
         user = make_user('ue07')
@@ -192,6 +225,77 @@ class UpdateEmailTests(_ProfileTestBase):
             reverse('update_email'), data='not-json', content_type='application/json'
         )
         self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# security devices
+# =========================================================================
+class SecurityDeviceTests(_ProfileTestBase):
+    def _create_device(self, user, *, session_key='', fingerprint='device-fp'):
+        return LoginDevice.objects.create(
+            user=user,
+            device_fingerprint=fingerprint,
+            ip_address='127.0.0.1',
+            user_agent='Test browser',
+            device_info='Test browser on Windows',
+            session_key=session_key,
+            is_active=True,
+        )
+
+    def test_security_devices_marks_current_session(self):
+        user = make_user('sd01')
+        login(self.client, user)
+        current_session_key = self.client.session.session_key
+        self._create_device(user, session_key=current_session_key, fingerprint='sd01-current')
+        self._create_device(user, session_key='other-session', fingerprint='sd01-other')
+
+        body = parse(self.client.get(reverse('security_devices_api')))
+
+        self.assertEqual(body['status'], 'success')
+        current_devices = [device for device in body['devices'] if device['is_current']]
+        self.assertEqual(len(current_devices), 1)
+        self.assertEqual(current_devices[0]['device_info'], 'Test browser on Windows')
+
+    def test_revoke_security_device_deletes_session_and_writes_audit_log(self):
+        user = make_user('sd02')
+        login(self.client, user)
+        other_session_key = 'sd02-other-session-key'
+        Session.objects.create(
+            session_key=other_session_key,
+            session_data='',
+            expire_date=timezone.now() + timedelta(days=1),
+        )
+        device = self._create_device(user, session_key=other_session_key, fingerprint='sd02-other')
+
+        response = self.client.post(reverse('revoke_security_device_api', args=[device.id]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        device.refresh_from_db()
+        self.assertFalse(device.is_active)
+        self.assertEqual(device.revoked_by, user)
+        self.assertIsNotNone(device.revoked_at)
+        self.assertFalse(Session.objects.filter(session_key=other_session_key).exists())
+        self.assertTrue(SecurityAuditLog.objects.filter(
+            user=user,
+            actor=user,
+            action=SecurityAuditLog.ACTION_DEVICE_REVOKED,
+            metadata__device_id=device.id,
+        ).exists())
+
+    def test_revoke_current_security_device_is_rejected(self):
+        user = make_user('sd03')
+        login(self.client, user)
+        device = self._create_device(
+            user,
+            session_key=self.client.session.session_key,
+            fingerprint='sd03-current',
+        )
+
+        response = self.client.post(reverse('revoke_security_device_api', args=[device.id]))
+
+        self.assertEqual(response.status_code, 400)
+        device.refresh_from_db()
+        self.assertTrue(device.is_active)
 
 
 # =========================================================================
@@ -238,6 +342,9 @@ class NotificationPreferencesTests(_ProfileTestBase):
         prefs = body['preferences']
         self.assertIn('notify_login', prefs)
         self.assertIn('email_messages', prefs)
+        self.assertIn('notify_group_mentions_email', prefs)
+        self.assertIn('email_mention_group_ids', prefs)
+        self.assertIn('available_email_mention_groups', prefs)
 
     def test_update_profile_pref(self):
         user = make_user('np02')
@@ -262,6 +369,62 @@ class NotificationPreferencesTests(_ProfileTestBase):
         pref = MessagePreference.objects.get(user=user)
         self.assertFalse(pref.notify_new_message)
         self.assertTrue(pref.browser_new_message)
+
+    def test_update_quiet_hours(self):
+        user = make_user('np08')
+        login(self.client, user)
+        response = post_json(self.client, reverse('notification_preferences'), {
+            'quiet_hours_enabled': True,
+            'quiet_hours_start': '22:30',
+            'quiet_hours_end': '07:15',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        pref = MessagePreference.objects.get(user=user)
+        self.assertTrue(pref.quiet_hours_enabled)
+        self.assertEqual(pref.quiet_hours_start.strftime('%H:%M'), '22:30')
+        self.assertEqual(pref.quiet_hours_end.strftime('%H:%M'), '07:15')
+        body = parse(self.client.get(reverse('notification_preferences')))
+        self.assertTrue(body['preferences']['quiet_hours_enabled'])
+        self.assertEqual(body['preferences']['quiet_hours_start'], '22:30')
+        self.assertEqual(body['preferences']['quiet_hours_end'], '07:15')
+
+    def test_reject_invalid_quiet_hours(self):
+        user = make_user('np09')
+        login(self.client, user)
+        response = post_json(self.client, reverse('notification_preferences'), {
+            'quiet_hours_start': 'not-a-time',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_group_mention_email_groups(self):
+        user = make_user('np06')
+        group = MessageGroup.objects.create(name='notify group', owner=user, created_by=user)
+        MessageGroupMember.objects.create(group=group, user=user, role='owner')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('notification_preferences'), {
+            'notify_group_mentions_email': True,
+            'email_mention_group_ids': [group.id],
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        pref = MessagePreference.objects.get(user=user)
+        self.assertTrue(pref.notify_group_mentions_email)
+        self.assertEqual(list(pref.email_mention_groups.values_list('id', flat=True)), [group.id])
+
+    def test_reject_unavailable_group_mention_email_group(self):
+        user = make_user('np07')
+        owner = make_user('np07_owner')
+        group = MessageGroup.objects.create(name='other group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('notification_preferences'), {
+            'email_mention_group_ids': [group.id],
+        })
+
+        self.assertEqual(response.status_code, 400)
 
     def test_empty_payload_returns_warning(self):
         user = make_user('np04')

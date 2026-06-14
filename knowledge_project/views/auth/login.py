@@ -355,6 +355,12 @@ class CustomLoginView(View):
         from ...models import LoginDevice
 
         device_info = self.parse_user_agent(user_agent)
+        request = getattr(self, 'request', None)
+        session_key = ''
+        if request is not None:
+            if not request.session.session_key:
+                request.session.save()
+            session_key = request.session.session_key or ''
 
         device, created = LoginDevice.objects.get_or_create(
             user=user,
@@ -363,7 +369,9 @@ class CustomLoginView(View):
                 'ip_address': ip_address,
                 'user_agent': user_agent,
                 'device_info': device_info,
-                'login_count': 1
+                'login_count': 1,
+                'session_key': session_key,
+                'is_active': True
             }
         )
 
@@ -374,6 +382,10 @@ class CustomLoginView(View):
             device.device_info = device_info
             device.login_count += 1
             device.last_login_at = timezone.now()
+            device.session_key = session_key
+            device.is_active = True
+            device.revoked_at = None
+            device.revoked_by = None
 
             # 自动信任：如果登录次数 >= 5次，自动设为信任设备
             if device.login_count >= 5 and not device.is_trusted:
