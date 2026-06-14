@@ -227,8 +227,6 @@ def dashboard_stats_api(request):
         from ..models import AccessLog
         from ..decorators import get_vault_user_lock_key, get_vault_user_fail_key, VAULT_USER_FAIL_THRESHOLD
         from django.db.models import Sum, Max
-        from datetime import timedelta
-
         alerts = []
         try:
             now = timezone.now()
@@ -390,7 +388,6 @@ def dashboard_stats_api(request):
     if section in ('login_monitor', 'all'):
         try:
             from ..models import LoginDevice, LoginNotification
-            from datetime import timedelta
             now = timezone.now()
             seven_days_ago = now - timedelta(days=7)
 
@@ -451,7 +448,6 @@ def dashboard_stats_api(request):
     if section in ('audit_log', 'all'):
         try:
             from django.contrib.admin.models import LogEntry
-            from datetime import timedelta
             now = timezone.now()
             seven_days_ago = now - timedelta(days=7)
 

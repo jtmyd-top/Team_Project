@@ -618,6 +618,8 @@ class MessageGroupTests(_MessageTestBase):
         member = make_user('grp_ext_member')
         admin_user = make_user('grp_ext_admin')
         group = self._create_group_directly(owner, [member, admin_user])
+        for i in range(10):
+            Note.objects.create(author=member, title=f'public note {i}', content='', is_public=True)
         MessageGroupMember.objects.filter(group=group, user=admin_user).update(role='admin')
         login(self.client, owner)
 

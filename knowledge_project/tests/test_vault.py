@@ -49,6 +49,12 @@ class _VaultTestBase(TestCase):
     """每个用例前清 LocMem cache(失败计数 / 锁存 / 解锁授权都在 cache 里)。"""
 
     def setUp(self):
+        self._vault_kek_env = patch.dict(
+            'os.environ',
+            {'VAULT_KEK': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='},
+        )
+        self._vault_kek_env.start()
+        self.addCleanup(self._vault_kek_env.stop)
         cache.clear()
 
 
