@@ -1980,14 +1980,20 @@ class MessageGroupAnnouncementHistory(models.Model):
     )
     content = models.TextField(blank=True, default='', verbose_name="Announcement")
     pinned = models.BooleanField(default=False, verbose_name="Pinned")
+    message = models.OneToOneField(
+        'GroupMessage', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='announcement_record', verbose_name="Announcement message"
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Edited at")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated at")
+    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name="Deleted at")
 
     class Meta:
         verbose_name = "Group announcement history"
         verbose_name_plural = "Group announcement history"
-        ordering = ['-created_at']
+        ordering = ['-pinned', '-updated_at', '-created_at']
         indexes = [
-            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['group', 'deleted_at', '-pinned', '-updated_at']),
             models.Index(fields=['editor', '-created_at']),
         ]
 

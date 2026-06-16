@@ -322,8 +322,59 @@ def _announcement_history_payload(item):
         'editor': _user_payload(item.editor),
         'content': item.content,
         'pinned': item.pinned,
+        'message_id': item.message_id,
         'created_at': item.created_at.isoformat() if item.created_at else None,
+        'updated_at': item.updated_at.isoformat() if getattr(item, 'updated_at', None) else None,
+        'deleted_at': item.deleted_at.isoformat() if getattr(item, 'deleted_at', None) else None,
     }
+
+
+def _announcement_message_content(content):
+    return f"@全体成员 - {content.strip()}"
+
+
+def _sync_group_announcement_summary(group):
+    latest = (
+        group.announcement_history
+        .filter(deleted_at__isnull=True)
+        .order_by('-pinned', '-updated_at', '-created_at')
+        .first()
+    )
+    group.announcement = latest.content if latest else ''
+    group.announcement_updated_by = latest.editor if latest else None
+    group.announcement_pinned_at = timezone.now() if latest and latest.pinned else None
+    return latest
+
+
+def _notify_announcement_everyone(group, sender, message, content):
+    from ...models import MessageGroupMember
+
+    mentioned_members = (
+        MessageGroupMember.objects
+        .filter(group=group, left_at__isnull=True)
+        .exclude(user=sender)
+        .select_related('user')[:200]
+    )
+    for member in mentioned_members:
+        try:
+            notify_user(
+                member.user,
+                'group_mention_all',
+                f'{sender.username} 发布了群公告',
+                f'在 {group.name} 中：{content[:80]}',
+                group_id=group.id,
+                message_id=message.id,
+            )
+        except Exception as e:
+            logger.warning('发送群公告 @全体通知失败: %s', e)
+        transaction.on_commit(
+            lambda recipient=member.user, group=group, content=content: _maybe_send_group_mention_email(
+                sender,
+                recipient,
+                group,
+                content,
+            )
+        )
 
 
 def _pinned_group_message_payload(group, viewer=None):
@@ -464,7 +515,10 @@ def _group_detail_payload(group, viewer_membership=None):
         'announcement_updated_by': _user_payload(group.announcement_updated_by),
         'announcement_history': [
             _announcement_history_payload(item)
-            for item in group.announcement_history.select_related('editor').order_by('-created_at')[:8]
+            for item in group.announcement_history
+            .filter(deleted_at__isnull=True)
+            .select_related('editor', 'message')
+            .order_by('-pinned', '-updated_at', '-created_at')[:20]
         ],
         'mute_mode': group.mute_mode,
         'require_approval': group.require_approval,

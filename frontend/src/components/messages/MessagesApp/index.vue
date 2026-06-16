@@ -587,9 +587,14 @@
     <div v-if="groupPanel.visible" class="group-panel-overlay" @click.self="closeGroupInfo">
       <section class="group-panel">
         <header class="group-panel-header">
-          <div>
-            <h3>群设置</h3>
-            <p>{{ groupPanel.detail?.member_count || 0 }} 名成员</p>
+          <div class="group-panel-heading">
+            <span class="group-panel-mark" aria-hidden="true">
+              <i class="fas fa-users-gear"></i>
+            </span>
+            <div>
+              <h3>群设置</h3>
+              <p>{{ groupPanel.detail?.member_count || 0 }} 名成员</p>
+            </div>
           </div>
           <button class="close-btn" type="button" title="关闭" @click="closeGroupInfo">
             <i class="fas fa-times"></i>
@@ -602,6 +607,7 @@
         </div>
 
         <template v-else-if="groupPanel.detail">
+          <div class="group-panel-content">
           <div v-if="groupPanel.detail.pinned_message" class="group-pinned-box">
             <div class="group-section-title">
               <span><i class="fas fa-thumbtack"></i> 置顶消息</span>
@@ -651,7 +657,13 @@
                 <input v-model="groupPanel.announcementPinned" type="checkbox" :disabled="!canManageCurrentGroup" />
                 <span>置顶公告</span>
               </label>
-              <button v-if="canManageCurrentGroup" class="group-secondary-btn small" @click="saveGroupAnnouncement">
+              <button
+                v-if="canManageCurrentGroup"
+                class="group-secondary-btn small"
+                :disabled="!hasGroupAnnouncementChanges || groupPanel.savingAnnouncement"
+                @click="saveGroupAnnouncement"
+              >
+                <i v-if="groupPanel.savingAnnouncement" class="fas fa-spinner fa-spin"></i>
                 保存公告
               </button>
             </div>
@@ -690,20 +702,23 @@
                   <em>关闭后仅群主/管理员可 @全体</em>
                 </span>
               </label>
-              <label class="group-switch-row">
-                <select v-model="groupPanel.detail.mute_mode" class="group-select">
-                  <option value="none">所有成员可发言</option>
-                  <option value="admins_only">仅管理员可发言</option>
-                </select>
+              <label class="group-switch-row select-row">
                 <span>
                   <strong>发言模式</strong>
                   <em>适合公告群或临时管控</em>
                 </span>
+                <select v-model="groupPanel.detail.mute_mode" class="group-select">
+                  <option value="none">所有成员可发言</option>
+                  <option value="admins_only">仅管理员可发言</option>
+                </select>
               </label>
             </div>
           </div>
 
           <div v-if="canManageCurrentGroup" class="group-add-box">
+            <div class="group-section-title subtle">
+              <span><i class="fas fa-user-plus"></i> 添加成员</span>
+            </div>
             <div class="group-add-search">
               <input
                 v-model="groupPanel.searchInput"
@@ -730,7 +745,7 @@
 
           <div v-if="canManageCurrentGroup" class="group-invite-box">
             <div class="group-section-title">
-              <span>邀请链接</span>
+              <span><i class="fas fa-link"></i> 邀请链接</span>
               <button
                 class="group-secondary-btn small"
                 :disabled="groupPanel.inviteBusy || groupPanel.inviteLoading || groupPanel.inviteLinks.length > 0"
@@ -773,6 +788,9 @@
           </div>
 
           <div class="group-members">
+            <div class="group-section-title subtle member-title">
+              <span><i class="fas fa-user-group"></i> 成员</span>
+            </div>
             <div
               v-for="member in groupPanel.detail.members"
               :key="member.user_id"
@@ -849,6 +867,7 @@
                 <i class="fas fa-user-minus"></i>
               </button>
             </div>
+          </div>
           </div>
 
           <footer class="group-panel-footer">
@@ -1052,6 +1071,9 @@ const groupPanel = ref({
   inviteLinks: [],
   announcementDraft: '',
   announcementPinned: false,
+  announcementOriginal: '',
+  announcementPinnedOriginal: false,
+  savingAnnouncement: false,
   memberSearch: '',
   memberRoleFilter: 'all',
   auditLoading: false,
@@ -1160,6 +1182,14 @@ const isCurrentGroup = computed(() => selectedConversation.value?.conversation_t
 const canManageCurrentGroup = computed(() =>
   ['owner', 'admin'].includes(groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '')
 )
+
+const hasGroupAnnouncementChanges = computed(() => {
+  if (!canManageCurrentGroup.value) return false
+  return (
+    groupPanel.value.announcementDraft !== groupPanel.value.announcementOriginal ||
+    !!groupPanel.value.announcementPinned !== !!groupPanel.value.announcementPinnedOriginal
+  )
+})
 
 const isCurrentGroupOwner = computed(() =>
   (groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '') === 'owner'
@@ -3199,6 +3229,8 @@ async function openGroupInfo() {
     groupPanel.value.nameDraft = d.group?.name || ''
     groupPanel.value.announcementDraft = d.group?.announcement || ''
     groupPanel.value.announcementPinned = !!d.group?.announcement_pinned_at
+    groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
+    groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
     loadGroupSharedItems()
     if (canManageCurrentGroup.value) {
@@ -3223,6 +3255,7 @@ function closeGroupInfo() {
   groupPanel.value.sharedLinks = []
   groupPanel.value.memberSearch = ''
   groupPanel.value.memberRoleFilter = 'all'
+  groupPanel.value.savingAnnouncement = false
 }
 
 async function saveGroupName() {
@@ -3243,16 +3276,25 @@ async function saveGroupName() {
 
 async function saveGroupAnnouncement() {
   const groupId = selectedGroupId()
-  if (!groupId || !canManageCurrentGroup.value) return
+  if (!groupId || !canManageCurrentGroup.value || !hasGroupAnnouncementChanges.value || groupPanel.value.savingAnnouncement) return
+  groupPanel.value.savingAnnouncement = true
   try {
     const d = await apiPost(`/api/messages/groups/${groupId}/announcement/`, {
       announcement: groupPanel.value.announcementDraft,
       pin: groupPanel.value.announcementPinned,
     })
-    if (d.group) groupPanel.value.detail = d.group
+    if (d.group) {
+      groupPanel.value.detail = d.group
+      groupPanel.value.announcementDraft = d.group.announcement || ''
+      groupPanel.value.announcementPinned = !!d.group.announcement_pinned_at
+    }
+    groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
+    groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
     ElMessage.success('群公告已保存')
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.savingAnnouncement = false
   }
 }
 
@@ -5105,7 +5147,7 @@ watch(
 }
 
 .group-panel {
-  width: min(560px, 100%);
+  width: min(632px, 100%);
   max-height: min(760px, 88vh);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 98%, #f8fafc 2%), var(--bg-primary));
@@ -5123,27 +5165,66 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 18px;
+  min-height: 86px;
+  padding: 22px 24px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
-  background: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-secondary) 8%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 96%, var(--bg-secondary) 4%), var(--bg-primary));
+}
+
+.group-panel-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.group-panel-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent-color) 88%, #2563eb 12%);
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary) 88%);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color) 82%);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.08);
+}
+
+.group-panel-mark i {
+  font-size: 18px;
 }
 
 .group-panel-header h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 700;
 }
 
 .group-panel-header p {
-  margin: 3px 0 0;
+  margin: 6px 0 0;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.group-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 28%, transparent), transparent 160px);
 }
 
 .group-panel .close-btn {
   appearance: none;
   -webkit-appearance: none;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   border-radius: 9px;
@@ -5186,6 +5267,8 @@ watch(
 }
 
 .group-edit-row,
+.group-config-box,
+.group-pinned-box,
 .group-add-box,
 .group-invite-box,
 .group-members,
@@ -5196,19 +5279,26 @@ watch(
 .group-edit-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
 }
 
+.group-config-box,
 .group-add-box {
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
 }
 
+.group-pinned-box,
+.group-config-box,
 .group-invite-box {
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+.group-config-box.compact {
+  gap: 14px;
 }
 
 .group-section-title {
@@ -5221,10 +5311,52 @@ watch(
   color: var(--text-primary);
 }
 
+.group-section-title span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.group-section-title i {
+  color: var(--primary-color, #2563eb);
+}
+
+.group-section-title.subtle {
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+}
+
+.group-section-meta {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.group-pinned-message {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--primary-color, #2563eb) 18%, var(--border-color));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 6%, var(--bg-primary));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
 .group-add-search {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  gap: 10px;
 }
 
 .group-input {
@@ -5244,6 +5376,191 @@ watch(
   border-color: var(--primary-color, #2563eb);
   background: var(--bg-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 14%, transparent);
+}
+
+.group-textarea {
+  width: 100%;
+  min-height: 86px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-textarea:focus {
+  border-color: var(--primary-color, #2563eb);
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 14%, transparent);
+}
+
+.group-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.group-check {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.group-check input,
+.group-switch-row input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-check input::after,
+.group-switch-row input[type='checkbox']::after {
+  content: '';
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) scale(0);
+  transform-origin: center;
+  transition: transform 0.14s ease;
+}
+
+.group-check input:checked,
+.group-switch-row input[type='checkbox']:checked {
+  border-color: var(--primary-color, #2563eb);
+  background: var(--primary-color, #2563eb);
+}
+
+.group-check input:checked::after,
+.group-switch-row input[type='checkbox']:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+
+.group-check input:focus-visible,
+.group-switch-row input[type='checkbox']:focus-visible,
+.group-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 16%, transparent);
+}
+
+.group-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group-history-row {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-secondary) 56%, transparent);
+}
+
+.group-history-row span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.group-history-row p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.group-switch-row {
+  min-width: 0;
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 58%, var(--bg-primary));
+  cursor: pointer;
+}
+
+.group-switch-row:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 20%, var(--border-color));
+  background: var(--bg-primary);
+}
+
+.group-switch-row span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.group-switch-row strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.group-switch-row em {
+  color: var(--text-tertiary);
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.group-switch-row.select-row {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 210px);
+}
+
+.group-select {
+  width: 100%;
+  height: 36px;
+  min-width: 0;
+  padding: 0 34px 0 11px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 9px;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--text-tertiary) 50%) calc(100% - 17px) 15px / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--text-tertiary) 50%, transparent 50%) calc(100% - 12px) 15px / 6px 6px no-repeat,
+    color-mix(in srgb, var(--bg-primary) 86%, var(--bg-secondary));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .group-primary-btn,
@@ -5333,15 +5650,19 @@ watch(
 }
 
 .group-add-search .group-secondary-btn {
-  width: 48px;
+  width: 52px;
   padding: 0;
   flex: 0 0 auto;
 }
 
 .group-members {
-  overflow-y: auto;
-  min-height: 180px;
-  max-height: 360px;
+  overflow: visible;
+  min-height: 0;
+  max-height: none;
+}
+
+.member-title {
+  margin-bottom: 8px;
 }
 
 .group-inline-state {
@@ -6115,6 +6436,107 @@ watch(
   .tool-btn {
     width: 34px;
     height: 34px;
+  }
+
+  .group-panel-overlay {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .group-panel {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+  }
+
+  .group-panel-header,
+  .group-edit-row,
+  .group-config-box,
+  .group-pinned-box,
+  .group-add-box,
+  .group-invite-box,
+  .group-members,
+  .group-panel-footer {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .group-panel-header {
+    min-height: 78px;
+    padding-top: 18px;
+    padding-bottom: 18px;
+  }
+
+  .group-panel-heading {
+    gap: 12px;
+  }
+
+  .group-panel-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+  }
+
+  .group-edit-row {
+    grid-template-columns: 1fr;
+  }
+
+  .group-edit-row .group-primary-btn {
+    width: 100%;
+  }
+
+  .group-toggle-grid,
+  .group-switch-row.select-row {
+    grid-template-columns: 1fr;
+  }
+
+  .group-switch-row.select-row {
+    gap: 10px;
+  }
+
+  .group-config-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .group-config-actions .group-secondary-btn {
+    width: 100%;
+  }
+
+  .group-add-search {
+    grid-template-columns: minmax(0, 1fr) 46px;
+  }
+
+  .group-add-search .group-secondary-btn {
+    width: 46px;
+  }
+
+  .group-member-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .group-member-row img {
+    width: 34px;
+    height: 34px;
+  }
+
+  .group-member-actions,
+  .group-member-row > .group-icon-btn {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-left: 44px;
+  }
+
+  .group-invite-row {
+    grid-template-columns: minmax(0, 1fr) 34px 34px;
+  }
+
+  .group-panel-footer {
+    flex-direction: column;
+  }
+
+  .group-panel-footer .group-secondary-btn,
+  .group-panel-footer .group-danger-btn {
+    width: 100%;
   }
 
   .send-btn {
