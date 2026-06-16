@@ -347,15 +347,40 @@ def _sync_group_announcement_summary(group):
 
 
 def _notify_announcement_everyone(group, sender, message, content):
+    """
+    通知群组所有成员关于新公告
+
+    改进：
+    - 分批处理通知，避免大群组性能问题
+    - 记录跳过的成员数量
+    - 改进错误处理和日志
+    """
     from ...models import MessageGroupMember
 
-    mentioned_members = (
+    # 获取所有活跃成员（排除发送者）
+    all_members = (
         MessageGroupMember.objects
         .filter(group=group, left_at__isnull=True)
         .exclude(user=sender)
-        .select_related('user')[:200]
+        .select_related('user')
     )
-    for member in mentioned_members:
+
+    total_count = all_members.count()
+    batch_size = 200
+    notified_count = 0
+    failed_count = 0
+
+    # 分批处理
+    members_to_notify = all_members[:batch_size]
+    skipped_count = max(0, total_count - batch_size)
+
+    if skipped_count > 0:
+        logger.warning(
+            f'群公告通知: 群组 {group.id} ({group.name}) 有 {total_count} 名成员，'
+            f'仅通知前 {batch_size} 名，跳过 {skipped_count} 名'
+        )
+
+    for member in members_to_notify:
         try:
             notify_user(
                 member.user,
@@ -365,16 +390,25 @@ def _notify_announcement_everyone(group, sender, message, content):
                 group_id=group.id,
                 message_id=message.id,
             )
-        except Exception as e:
-            logger.warning('发送群公告 @全体通知失败: %s', e)
-        transaction.on_commit(
-            lambda recipient=member.user, group=group, content=content: _maybe_send_group_mention_email(
-                sender,
-                recipient,
-                group,
-                content,
+            notified_count += 1
+
+            # 邮件通知
+            transaction.on_commit(
+                lambda recipient=member.user, group=group, content=content: _maybe_send_group_mention_email(
+                    sender,
+                    recipient,
+                    group,
+                    content,
+                )
             )
-        )
+        except Exception as e:
+            failed_count += 1
+            logger.warning(f'发送群公告通知失败 (用户 {member.user_id}): {e}')
+
+    logger.info(
+        f'群公告通知完成: 群组 {group.id} ({group.name}), '
+        f'成功 {notified_count}/{total_count}, 失败 {failed_count}, 跳过 {skipped_count}'
+    )
 
 
 def _pinned_group_message_payload(group, viewer=None):

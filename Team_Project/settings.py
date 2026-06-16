@@ -214,12 +214,25 @@ CSRF_COOKIE_HTTPONLY = env_bool('CSRF_COOKIE_HTTPONLY', False)
 CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Lax')
 
 SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', IS_PRODUCTION)
-SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0' if not IS_PRODUCTION else '31536000'))
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000' if IS_PRODUCTION else '0'))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', IS_PRODUCTION)
 SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
 SECURE_REFERRER_POLICY = os.getenv('SECURE_REFERRER_POLICY', 'same-origin')
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
+
+# Security warnings for development
+if DEBUG and not IS_PRODUCTION:
+    import warnings
+    warnings.warn(
+        "运行在开发模式 (DEBUG=True)。生产环境部署前请:\n"
+        "1. 设置 DJANGO_ENV=production\n"
+        "2. 设置 DEBUG=False\n"
+        "3. 配置 ALLOWED_HOSTS\n"
+        "4. 启用 HTTPS 相关安全选项\n"
+        "详见 DEPLOYMENT.md",
+        RuntimeWarning
+    )
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST')
