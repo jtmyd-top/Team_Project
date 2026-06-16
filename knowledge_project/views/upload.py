@@ -24,79 +24,6 @@ from ..utils.accelerated_media import media_file_response
 
 logger = logging.getLogger(__name__)
 
-# 文件上传限制配置
-MAX_UPLOAD_SIZE = int(os.getenv('MAX_UPLOAD_SIZE', 10 * 1024 * 1024))  # 默认10MB
-ALLOWED_IMAGE_TYPES = {
-    'image/jpeg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/svg+xml',
-}
-ALLOWED_FILE_EXTENSIONS = {
-    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg',
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-    '.txt', '.md', '.csv', '.zip', '.rar',
-}
-
-
-def validate_upload_file(uploaded_file, allowed_types=None, max_size=None):
-    """
-    验证上传文件的大小和类型
-
-    Args:
-        uploaded_file: Django UploadedFile 对象
-        allowed_types: 允许的MIME类型集合，None表示允许所有图片类型
-        max_size: 最大文件大小（字节），None表示使用默认值
-
-    Returns:
-        tuple: (is_valid: bool, error_message: str)
-    """
-    if max_size is None:
-        max_size = MAX_UPLOAD_SIZE
-
-    if allowed_types is None:
-        allowed_types = ALLOWED_IMAGE_TYPES
-
-    # 1. 检查文件大小
-    if uploaded_file.size > max_size:
-        max_size_mb = max_size / (1024 * 1024)
-        return False, f'文件大小超过限制（最大 {max_size_mb:.1f}MB）'
-
-    # 2. 检查 MIME 类型
-    content_type = uploaded_file.content_type
-    if content_type not in allowed_types:
-        return False, f'不支持的文件类型：{content_type}'
-
-    # 3. 检查文件扩展名
-    file_name = uploaded_file.name.lower()
-    file_ext = os.path.splitext(file_name)[1]
-    if file_ext not in ALLOWED_FILE_EXTENSIONS:
-        return False, f'不支持的文件扩展名：{file_ext}'
-
-    # 4. 基本的文件头验证（防止恶意文件伪装）
-    try:
-        uploaded_file.seek(0)
-        file_header = uploaded_file.read(12)
-        uploaded_file.seek(0)
-
-        # 验证常见图片格式的文件头
-        if content_type == 'image/jpeg' and not file_header.startswith(b'\xff\xd8\xff'):
-            return False, '文件内容与声明的JPEG格式不符'
-        elif content_type == 'image/png' and not file_header.startswith(b'\x89PNG\r\n\x1a\n'):
-            return False, '文件内容与声明的PNG格式不符'
-        elif content_type == 'image/gif' and not file_header.startswith((b'GIF87a', b'GIF89a')):
-            return False, '文件内容与声明的GIF格式不符'
-        elif content_type == 'image/webp' and not (b'RIFF' in file_header and b'WEBP' in uploaded_file.read(4)):
-            uploaded_file.seek(0)
-            return False, '文件内容与声明的WebP格式不符'
-
-    except Exception as e:
-        logger.warning(f"文件头验证失败: {e}")
-        # 验证失败不阻止上传，但记录日志
-
-    return True, ''
-
 
 def _delayed_delete_file(file_path, delay=3):
     """
@@ -142,12 +69,6 @@ def image_upload_view(request):
 
     image_file = request.FILES['file']
     current_user = request.user
-
-    # 0. 验证文件
-    is_valid, error_msg = validate_upload_file(image_file)
-    if not is_valid:
-        logger.warning(f"用户 {current_user.id} 上传验证失败: {error_msg}")
-        return JsonResponse({'error': error_msg}, status=400)
 
     # 1. 计算文件哈希值 (这部分逻辑与您原来的一样)
     try:
@@ -261,31 +182,25 @@ def public_profile_media_view(request, file_path):
 
 
 @login_required
-@require_http_methods([“POST”])
+@require_http_methods(["POST"])
 def ckeditor_image_upload_view(request):
-    “””
+    """
     处理 django-ckeditor-5 的图片上传请求。
     【最终修复版】：
-    - 强制使用”两阶段保存”，确保用户文件夹路径正确。
+    - 强制使用“两阶段保存”，确保用户文件夹路径正确。
     - 返回受保护的 URL (get_protected_url)，确保前端能正确显示。
-    “””
+    """
     if 'upload' not in request.FILES:
         return JsonResponse({'error': {'message': '没有找到上传的文件。'}}, status=400)
 
     image_file = request.FILES['upload']
     current_user = request.user
 
-    # 0. 验证文件
-    is_valid, error_msg = validate_upload_file(image_file)
-    if not is_valid:
-        logger.warning(f”[CKEditor] 用户 {current_user.id} 上传验证失败: {error_msg}”)
-        return JsonResponse({'error': {'message': error_msg}}, status=400)
-
     # 1. 计算哈希值 (逻辑不变)
     try:
         file_hash = calculate_file_hash(image_file)
     except Exception as e:
-        logger.error(f”[CKEditor] 为用户 {current_user.id} 计算哈希值时出错: {e}”, exc_info=True)
+        logger.error(f"[CKEditor] 为用户 {current_user.id} 计算哈希值时出错: {e}", exc_info=True)
         return JsonResponse({'error': {'message': '无法处理该文件。'}}, status=500)
 
     # 2. 检查重复 (逻辑不变，但返回的 URL 需要修改)
