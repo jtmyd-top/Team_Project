@@ -346,7 +346,7 @@ def _sync_group_announcement_summary(group):
     return latest
 
 
-def _notify_announcement_everyone(group, sender, message, content):
+def _notify_announcement_everyone(group, sender, content, message=None):
     """
     通知群组所有成员关于新公告
 
@@ -354,6 +354,12 @@ def _notify_announcement_everyone(group, sender, message, content):
     - 分批处理通知，避免大群组性能问题
     - 记录跳过的成员数量
     - 改进错误处理和日志
+
+    Args:
+        group: MessageGroup 实例
+        sender: 发送者 User 实例
+        content: 公告内容
+        message: GroupMessage 实例（可选，用于关联通知）
     """
     from ...models import MessageGroupMember
 
@@ -388,7 +394,7 @@ def _notify_announcement_everyone(group, sender, message, content):
                 f'{sender.username} 发布了群公告',
                 f'在 {group.name} 中：{content[:80]}',
                 group_id=group.id,
-                message_id=message.id,
+                message_id=message.id if message else None,
             )
             notified_count += 1
 
@@ -2462,6 +2468,14 @@ def update_group_announcement_api(request, group_id):
                 action='group_announcement_update',
                 metadata={'pinned': pin}
             )
+
+        # 发送通知（在事务外执行，避免阻塞）
+        if announcement:  # 只有非空公告才发送通知
+            try:
+                _notify_announcement_everyone(group, request.user, announcement)
+            except Exception as e:
+                logger.error(f'群公告通知发送失败: {e}', exc_info=True)
+                # 不影响公告保存成功的响应
 
         return JsonResponse({
             'status': 'success',
