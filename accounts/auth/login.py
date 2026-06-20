@@ -1,6 +1,8 @@
 """登录视图：CustomLoginView(表单) + login_api(JSON)。"""
 from ._shared import *
+from accounts.models import LoginDevice, LoginNotification, TrustedDevice
 from core.utils.request_utils import get_client_ip
+from moderation.models import UserSanction
 
 
 LOGIN_2FA_EMAIL_CODE_SESSION_KEY = 'login_2fa_email_code'
@@ -24,8 +26,6 @@ def store_login_2fa_email_code(request, email_code):
 
 
 def _login_ban_response(user):
-    from knowledge_project.models import UserSanction
-
     login_ban = UserSanction.is_login_banned(user)
     if login_ban is None:
         return None
@@ -227,7 +227,6 @@ class CustomLoginView(View):
             )
 
             # 记录通知发送（防止重复发送）
-            from knowledge_project.models import LoginNotification
             LoginNotification.objects.create(
                 user=user,
                 device=device,
@@ -267,7 +266,6 @@ class CustomLoginView(View):
 
         返回: (should_notify: bool, reason: str)
         """
-        from knowledge_project.models import LoginDevice, LoginNotification
         from datetime import timedelta
 
         now = timezone.now()
@@ -352,8 +350,6 @@ class CustomLoginView(View):
         """
         记录或更新登录设备信息
         """
-        from knowledge_project.models import LoginDevice
-
         device_info = self.parse_user_agent(user_agent)
         request = getattr(self, 'request', None)
         session_key = ''
@@ -615,7 +611,6 @@ def login_api(request):
         profile = getattr(user, 'profile', None)
         if profile and profile.two_fa_enabled:
             # === 检查信任设备令牌 ===
-            from knowledge_project.models import TrustedDevice
             trust_token = request.COOKIES.get('trust_device_token')
             if trust_token:
                 device = TrustedDevice.get_by_token(trust_token)

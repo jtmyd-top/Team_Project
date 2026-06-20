@@ -202,7 +202,7 @@ class Note(models.Model):
             )
 
             # 提取目录并注入 ID 到标题
-            from knowledge_project.utils.toc_extractor import extract_toc_from_html
+            from notes.toc import extract_toc_from_html
             toc_list, updated_html = extract_toc_from_html(self.content)
             self.toc = toc_list
             self.content = updated_html

@@ -1,5 +1,6 @@
 """两因素认证 (2FA) 相关端点：启用/禁用/验证/备用码。"""
 from ._shared import *
+from accounts.models import TrustedDevice
 from .login import (
     CustomLoginView,
     LOGIN_2FA_EMAIL_CODE_SESSION_KEY,
@@ -448,7 +449,6 @@ def verify_2fa_login(request):
 
     # 处理信任设备请求
     if trust_device and not use_backup:  # 使用备用码时不允许创建信任设备
-        from knowledge_project.models import TrustedDevice
         device = TrustedDevice.create_device(user, request)
         response = JsonResponse(response_data)
         response.set_cookie(

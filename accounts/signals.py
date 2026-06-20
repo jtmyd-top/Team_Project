@@ -7,17 +7,11 @@ from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+from accounts.avatar import fetch_avatar_async
 from accounts.models import Profile
 
 
 logger = logging.getLogger(__name__)
-
-
-def _fetch_avatar_async(user_id):
-    # Keep the legacy patch path working during the app split.
-    from knowledge_project import models as legacy_models
-
-    legacy_models.fetch_avatar_async(user_id)
 
 
 def _assign_search_code(profile):
@@ -56,7 +50,7 @@ def create_user_profile(sender, instance, created, **kwargs):
         return
 
     profile = Profile.objects.create(user=instance)
-    transaction.on_commit(lambda: _fetch_avatar_async(instance.id))
+    transaction.on_commit(lambda: fetch_avatar_async(instance.id))
 
     try:
         updated = _assign_search_code(profile)

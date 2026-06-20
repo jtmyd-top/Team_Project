@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from ._shared import *
+from accounts.models import PasswordResetAttempt
 from .login import CustomLoginView
 from .rate_limit import get_client_fingerprint, get_client_ip, check_rate_limit
 
@@ -180,7 +181,6 @@ def password_reset_api(request):
     if not is_allowed:
         return JsonResponse({"status": "error", "message": rate_limit_message}, status=429)
 
-    from knowledge_project.models import PasswordResetAttempt
     reset_attempt = PasswordResetAttempt.objects.create(
         email=email,
         ip_address=client_ip,

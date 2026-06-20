@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from ._shared import *
+from accounts.models import PasswordResetAttempt
 from core.utils.request_utils import get_client_ip as resolve_client_ip
 
 
@@ -19,8 +20,6 @@ def get_client_ip(request):
 
 
 def check_rate_limit(email, ip_address, fingerprint, limit=3):
-    from knowledge_project.models import PasswordResetAttempt
-
     now = timezone.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 

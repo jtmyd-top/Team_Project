@@ -254,6 +254,8 @@ class VaultLockMiddleware:
         '/api/check-username/',
         '/api/send-email-code/',
         '/api/password-reset/',
+        '/api/public-notes/',
+        '/api/home-stats/',
         '/api/turnstile/config/',
         '/healthz',
         '/readyz',
@@ -274,6 +276,7 @@ class VaultLockMiddleware:
         '/admin/',
         '/healthz',
         '/readyz',
+        '/notes/public/',
         '/protected_uploads/',
     )
 

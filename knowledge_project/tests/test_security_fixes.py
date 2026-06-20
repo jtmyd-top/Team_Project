@@ -223,7 +223,7 @@ class SessionTimeoutMiddlewareTests(TestCase):
 
 
 class CreateUserProfileFixTests(TestCase):
-    @patch('knowledge_project.models.fetch_avatar_async')
+    @patch('accounts.signals.fetch_avatar_async')
     def test_user_creation_uses_async_avatar_fetch(self, mocked_fetch_avatar_async):
         with self.captureOnCommitCallbacks(execute=True):
             create_user_kwargs = {

@@ -35,7 +35,7 @@ from notes.models import Asset, Folder, Note, NoteComment, Tag
 from django.shortcuts import render, redirect
 from django.contrib import messages
 import subprocess
-from knowledge_project.utils.avatars import save_user_avatar
+from accounts.avatar import save_user_avatar
 from django.conf import settings
 from django.http import JsonResponse, HttpResponseForbidden, Http404, HttpResponse
 from django.contrib.auth.decorators import login_required

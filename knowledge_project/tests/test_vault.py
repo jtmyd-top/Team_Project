@@ -233,6 +233,28 @@ class VaultLockMiddlewareWhitelistTests(_VaultTestBase):
         # 未登录用户不拦截
         self.assertEqual(response.status_code, 200)
 
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
+    def test_locked_public_notes_api_passes(self, _m):
+        user = make_user('vmw03')
+        request = self._build_request('/api/public-notes/', user)
+        response = VaultLockMiddleware(lambda req: _ok_response())(request)
+        self.assertEqual(response.status_code, 200)
+
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
+    def test_locked_home_stats_api_passes(self, _m):
+        user = make_user('vmw03b')
+        request = self._build_request('/api/home-stats/', user)
+        response = VaultLockMiddleware(lambda req: _ok_response())(request)
+        self.assertEqual(response.status_code, 200)
+
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
+    def test_locked_public_note_page_passes(self, _m):
+        user = make_user('vmw03c')
+        request = self.factory.get('/notes/public/123e4567-e89b-12d3-a456-426614174000/')
+        request.user = user
+        response = VaultLockMiddleware(lambda req: _ok_response())(request)
+        self.assertEqual(response.status_code, 200)
+
     @patch('vault.services.check_vault_locked', return_value=(False, 0, 0))
     def test_unlocked_user_passes(self, _m):
         user = make_user('vmw04')

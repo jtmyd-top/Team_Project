@@ -29,6 +29,17 @@ def _md5(email):
     return hashlib.md5(email.strip().lower().encode()).hexdigest()
 
 
+def get_gravatar_url(email, size=128):
+    return f"https://www.gravatar.com/avatar/{_md5(email)}?s={size}&d=404"
+
+
+def get_qq_avatar_url(email):
+    if email.endswith("@qq.com"):
+        qq = email.split("@")[0]
+        return f"https://q1.qlogo.cn/g?b=qq&nk={qq}&s=100"
+    return None
+
+
 def generate_initial_avatar(text, size=128):
     img = Image.new(
         "RGB",
@@ -98,3 +109,35 @@ def fetch_avatar_async(user_id):
             logger.exception("Failed to fetch avatar asynchronously for user %s", user_id)
 
     threading.Thread(target=_runner, daemon=True).start()
+
+
+def _signup_avatar_dir():
+    avatar_dir = os.path.join(settings.MEDIA_ROOT, "_signup_avatars")
+    os.makedirs(avatar_dir, exist_ok=True)
+    return avatar_dir
+
+
+def _save_avatar_file(username, data):
+    filename = f"{username}.png"
+    filepath = os.path.join(_signup_avatar_dir(), filename)
+    with open(filepath, "wb") as avatar_file:
+        avatar_file.write(data)
+    return filepath
+
+
+def save_user_avatar(email, username):
+    email = (email or "").strip().lower()
+
+    qq_url = get_qq_avatar_url(email)
+    if qq_url:
+        data = _http_get(qq_url)
+        if data:
+            return _save_avatar_file(username, data), "qq"
+
+    if email:
+        data = _http_get(get_gravatar_url(email))
+        if data:
+            return _save_avatar_file(username, data), "gravatar"
+
+    data = generate_initial_avatar(username or email)
+    return _save_avatar_file(username, data), "default"

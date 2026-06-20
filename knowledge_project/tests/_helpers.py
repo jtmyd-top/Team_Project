@@ -17,7 +17,9 @@ def patched_avatar_fetch():
 
     同时拦掉 PIL 字体生成（kumo.ttf 路径在某些环境读不到也无所谓）。
     """
-    with patch('knowledge_project.models.fetch_avatar', lambda *a, **kw: None), \
+    with patch('accounts.avatar.fetch_avatar', lambda *a, **kw: None), \
+         patch('accounts.signals.fetch_avatar_async', lambda *a, **kw: None), \
+         patch('knowledge_project.models.fetch_avatar', lambda *a, **kw: None), \
          patch('knowledge_project.models.fetch_avatar_async', lambda *a, **kw: None):
         yield
 

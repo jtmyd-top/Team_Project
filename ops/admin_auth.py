@@ -26,6 +26,7 @@ from accounts.models import Profile
 from core.utils.request_utils import get_client_ip
 from knowledge_project.admin_nav import split_admin_app_list
 from core.utils.turnstile import verify_turnstile_token
+from moderation.models import UserSanction
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,6 @@ class SecureAdminSite(AdminSite):
             return self._login_error(request, '账户已被禁用')
 
         # 4.1 检查登录封禁处置（限时/永久）
-        from knowledge_project.models import UserSanction
         login_ban = UserSanction.is_login_banned(user)
         if login_ban is not None:
             if login_ban.expires_at is None:

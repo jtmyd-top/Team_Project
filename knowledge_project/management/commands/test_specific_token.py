@@ -1,8 +1,9 @@
 from django.core.management.base import BaseCommand
 from django.test import RequestFactory
-from knowledge_project.views import reset_password_view
 from django.contrib.auth.models import User
-from knowledge_project.models import PasswordResetToken
+
+from accounts.auth import reset_password_view
+from accounts.models import PasswordResetToken
 
 class Command(BaseCommand):
     help = '测试特定的密码重置令牌'
