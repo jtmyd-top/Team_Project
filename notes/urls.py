@@ -1,0 +1,47 @@
+from django.urls import path
+
+from .views import comment, folder, note
+
+
+urlpatterns = [
+    path('', note.home_view, name='home'),
+    path('knowledge/', note.knowledge_list, name='knowledge_list'),
+    path('api/toggle-note-like/', note.toggle_note_like, name='toggle_note_like'),
+    path('api/notes/search/', note.search_notes_api, name='api_search_notes'),
+    path('api/notes/<int:note_id>/', note.note_detail_api, name='api_note_detail'),
+    path('api/notes/all/', note.get_all_notes_api, name='get_all_notes_api'),
+    path('api/notes/create/', note.create_note_api, name='create_note_api'),
+    path('api/notes/<int:note_id>/update/', note.update_note_api, name='update_note_api'),
+    path('api/notes/<int:note_id>/delete/', note.delete_note_api, name='delete_note_api'),
+    path('api/notes/<int:note_id>/toggle-secret/', note.toggle_secret_api, name='toggle_secret_api'),
+    path('notes/public/<uuid:public_id>/', note.public_note_view, name='public_note_view'),
+    path('api/public-notes/', note.public_notes_api, name='public_notes_api'),
+    path('api/notes/history/', note.note_history_api, name='note_history_api'),
+    path('api/notes/record-history/', note.record_note_history_api, name='record_note_history_api'),
+
+    path('api/notes/<int:note_id>/comments/', comment.note_comments_api, name='note_comments_api'),
+    path('api/notes/<int:note_id>/comments/create/', comment.note_comment_create_api, name='note_comment_create_api'),
+    path('api/notes/<int:note_id>/report/', comment.note_report_api, name='note_report_api'),
+    path('api/comments/<int:comment_id>/delete/', comment.note_comment_delete_api, name='note_comment_delete_api'),
+    path('api/comments/<int:comment_id>/report/', comment.note_comment_report_api, name='note_comment_report_api'),
+    path('api/ubb/resolve-qqmusic/', comment.resolve_qqmusic_share_api, name='resolve_qqmusic_share_api'),
+
+    path('api/folders/', folder.folder_list_api, name='folder_list_api'),
+    path('api/folders/<int:folder_id>/', folder.folder_detail_api, name='folder_detail_api'),
+    path('api/folders/<int:folder_id>/notes/', folder.folder_notes_api, name='folder_notes_api'),
+    path('api/folders/<int:folder_id>/breadcrumb/', folder.folder_breadcrumb_api, name='folder_breadcrumb_api'),
+    path('api/folders/inbox/notes/', folder.inbox_notes_api, name='inbox_notes_api'),
+    path('api/notes/flat/', folder.all_notes_flat_api, name='all_notes_flat_api'),
+    path('api/notes/favorited/', folder.favorited_notes_api, name='favorited_notes_api'),
+    path('api/notes/trashed/', folder.trashed_notes_api, name='trashed_notes_api'),
+    path('api/notes/<int:note_id>/move/', folder.move_note_api, name='move_note_api'),
+    path('api/notes/<int:note_id>/copy/', folder.copy_note_api, name='copy_note_api'),
+    path('api/notes/<int:note_id>/favorite/', folder.toggle_note_favorite_api, name='toggle_note_favorite_api'),
+    path('api/notes/<int:note_id>/trash/', folder.trash_note_api, name='trash_note_api'),
+    path('api/notes/<int:note_id>/restore/', folder.restore_note_api, name='restore_note_api'),
+    path('api/notes/<int:note_id>/permanent-delete/', folder.permanent_delete_note_api, name='permanent_delete_note_api'),
+    path('api/folders/trashed-items/', folder.trashed_items_api, name='trashed_items_api'),
+    path('api/folders/trashed/<int:folder_id>/contents/', folder.trashed_folder_contents_api, name='trashed_folder_contents_api'),
+    path('api/folders/<int:folder_id>/restore/', folder.restore_folder_api, name='restore_folder_api'),
+    path('api/folders/<int:folder_id>/permanent-delete/', folder.permanent_delete_folder_api, name='permanent_delete_folder_api'),
+]

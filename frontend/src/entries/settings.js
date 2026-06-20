@@ -14,8 +14,10 @@ import {
   ElFormItem,
   ElInput,
   ElInputNumber,
+  ElOption,
   ElRadio,
   ElRadioGroup,
+  ElSelect,
   ElSkeleton,
   ElSlider,
   ElStep,
@@ -39,8 +41,10 @@ import 'element-plus/es/components/input/style/css';
 import 'element-plus/es/components/input-number/style/css';
 import 'element-plus/es/components/message/style/css';
 import 'element-plus/es/components/message-box/style/css';
+import 'element-plus/es/components/option/style/css';
 import 'element-plus/es/components/radio/style/css';
 import 'element-plus/es/components/radio-group/style/css';
+import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/skeleton/style/css';
 import 'element-plus/es/components/slider/style/css';
 import 'element-plus/es/components/step/style/css';
@@ -126,8 +130,10 @@ registerElementComponents(app, [
   ElFormItem,
   ElInput,
   ElInputNumber,
+  ElOption,
   ElRadio,
   ElRadioGroup,
+  ElSelect,
   ElSkeleton,
   ElSlider,
   ElStep,

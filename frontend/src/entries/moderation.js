@@ -31,7 +31,7 @@ import 'element-plus/es/components/radio-group/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/tag/style/css'
 
-import ModerationApp from '@components/moderation/ModerationApp/index.vue'
+import ModerationApp from '@/features/moderation/ModerationApp/index.vue'
 import { registerElementComponents } from './element-plus-components'
 
 const app = createApp(ModerationApp)

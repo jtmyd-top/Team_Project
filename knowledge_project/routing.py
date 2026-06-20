@@ -1,8 +1,3 @@
-from django.urls import re_path
+"""Compatibility exports for the migrated messaging websocket routes."""
 
-from . import consumers
-
-
-websocket_urlpatterns = [
-    re_path(r'^ws/messages/$', consumers.ChatConsumer.as_asgi()),
-]
+from messaging.routing import websocket_urlpatterns  # noqa: F401

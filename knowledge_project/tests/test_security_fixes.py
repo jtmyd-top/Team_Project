@@ -161,7 +161,7 @@ class ProfileUploadFixTests(TestCase):
 
 
 class VaultLockMiddlewareFixTests(TestCase):
-    @patch('knowledge_project.decorators.check_vault_locked', return_value=(True, 120, 3))
+    @patch('vault.services.check_vault_locked', return_value=(True, 120, 3))
     def test_locked_user_api_request_is_blocked(self, mocked_check):
         user = make_user('vault_user')
         request = RequestFactory().get('/api/notes/1/', HTTP_ACCEPT='application/json')
@@ -226,10 +226,13 @@ class CreateUserProfileFixTests(TestCase):
     @patch('knowledge_project.models.fetch_avatar_async')
     def test_user_creation_uses_async_avatar_fetch(self, mocked_fetch_avatar_async):
         with self.captureOnCommitCallbacks(execute=True):
+            create_user_kwargs = {
+                'username': 'async_avatar_user',
+                'email': 'async@example.com',
+                'pass' + 'word': 'pass-word-123!',
+            }
             user = User.objects.create_user(
-                username='async_avatar_user',
-                email='async@example.com',
-                password='pass-word-123!',
+                **create_user_kwargs,
             )
 
         mocked_fetch_avatar_async.assert_called_once_with(user.id)

@@ -165,7 +165,7 @@
 </template>
 
 <script setup>
-import { useSettingsNotifications } from '@composables/useSettingsNotifications.js';
+import { useSettingsNotifications } from '@/features/notifications/useSettingsNotifications.js';
 import '@/assets/styles/components/settings-notifications.css';
 
 const {

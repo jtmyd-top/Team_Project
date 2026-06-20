@@ -24,7 +24,8 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.decorators import (
+from accounts.services import verify_2fa_for_request
+from vault.services import (
     VAULT_DEVICE_FAIL_THRESHOLD,
     VAULT_DEVICE_LOCK_SECONDS,
     VAULT_USER_FAIL_THRESHOLD,
@@ -208,7 +209,7 @@ class VaultLockMiddlewareWhitelistTests(_VaultTestBase):
         request.user = user
         return request
 
-    @patch('knowledge_project.decorators.check_vault_locked', return_value=(True, 60, 3))
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
     def test_locked_allowed_path_passes(self, _m):
         user = make_user('vmw01')
         request = self._build_request('/', user)
@@ -216,7 +217,7 @@ class VaultLockMiddlewareWhitelistTests(_VaultTestBase):
         # ALLOWED_PATHS 包含 '/' → 应放行
         self.assertEqual(response.status_code, 200)
 
-    @patch('knowledge_project.decorators.check_vault_locked', return_value=(True, 60, 3))
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
     def test_locked_safe_prefix_passes(self, _m):
         user = make_user('vmw02')
         request = self._build_request('/static/css/main.css', user)
@@ -224,7 +225,7 @@ class VaultLockMiddlewareWhitelistTests(_VaultTestBase):
         # SAFE_PREFIXES 包含 '/static/' → 应放行
         self.assertEqual(response.status_code, 200)
 
-    @patch('knowledge_project.decorators.check_vault_locked', return_value=(True, 60, 3))
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
     def test_anonymous_user_passes_even_when_locked(self, _m):
         from django.contrib.auth.models import AnonymousUser
         request = self._build_request('/api/notes/1/', AnonymousUser())
@@ -232,14 +233,14 @@ class VaultLockMiddlewareWhitelistTests(_VaultTestBase):
         # 未登录用户不拦截
         self.assertEqual(response.status_code, 200)
 
-    @patch('knowledge_project.decorators.check_vault_locked', return_value=(False, 0, 0))
+    @patch('vault.services.check_vault_locked', return_value=(False, 0, 0))
     def test_unlocked_user_passes(self, _m):
         user = make_user('vmw04')
         request = self._build_request('/api/notes/1/', user)
         response = VaultLockMiddleware(lambda req: _ok_response())(request)
         self.assertEqual(response.status_code, 200)
 
-    @patch('knowledge_project.decorators.check_vault_locked', return_value=(True, 60, 3))
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
     def test_locked_non_api_html_redirects_home(self, _m):
         user = make_user('vmw05')
         # 不带 application/json,模拟浏览器导航
@@ -318,7 +319,7 @@ class VaultFailureCountAndLockTests(_VaultTestBase):
         self.assertTrue(check_vault_access(request))
         self.assertTrue(is_vault_access_session_scoped(request))
 
-    @patch('knowledge_project.decorators.verify_2fa_for_request', return_value=(True, ''))
+    @patch('vault.services.verify_2fa_for_request', return_value=(True, ''))
     def test_verify_duration_zero_marks_session_scoped(self, _verify):
         user = make_user('vfc06')
         user.profile.two_fa_enabled = True

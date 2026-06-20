@@ -18,13 +18,13 @@ folder_views.py / management 命令等外部对 `views.xxx` 的引用继续有�
 """
 from .auth import *  # noqa: F401, F403
 from .captcha import *  # noqa: F401, F403
-from .comment import *  # noqa: F401, F403
-from .dashboard import *  # noqa: F401, F403
-from .follow import *  # noqa: F401, F403
-from .message import *  # noqa: F401, F403
-from .note import *  # noqa: F401, F403
+from ops.dashboard_views import *  # noqa: F401, F403
+from accounts.follow_views import *  # noqa: F401, F403
+from messaging.views import *  # noqa: F401, F403
+from notes.views.comment import *  # noqa: F401, F403
+from notes.views.note import *  # noqa: F401, F403
 from .notifications import *  # noqa: F401, F403
-from .profile import *  # noqa: F401, F403
-from .stats import *  # noqa: F401, F403
-from .upload import *  # noqa: F401, F403
-from .vault import *  # noqa: F401, F403
+from accounts.profile_views import *  # noqa: F401, F403
+from ops.stats_views import *  # noqa: F401, F403
+from notes.views.upload import *  # noqa: F401, F403
+from vault.views import *  # noqa: F401, F403

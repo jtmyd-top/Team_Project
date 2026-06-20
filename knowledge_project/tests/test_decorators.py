@@ -21,9 +21,8 @@ from django.core import mail
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 
-from knowledge_project.decorators import (
-    IP_FAIL_THRESHOLD,
-    check_and_ban_ip,
+from accounts.models import AccessLog, Profile
+from accounts.services import (
     get_param,
     get_request_data,
     send_operation_2fa_email,
@@ -32,7 +31,7 @@ from knowledge_project.decorators import (
     verify_email_code_from_cache,
     verify_totp_with_replay_protection,
 )
-from knowledge_project.models import AccessLog, Profile
+from vault.services import IP_FAIL_THRESHOLD, check_and_ban_ip
 
 from ._helpers import make_user
 

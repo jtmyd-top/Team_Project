@@ -12,6 +12,8 @@ playwright==1.55.0
 pyee==13.0.0
 greenlet==3.2.4
 
+django-debug-toolbar==4.4.6
+
 # 键盘控制
 keyboard==0.13.5
 

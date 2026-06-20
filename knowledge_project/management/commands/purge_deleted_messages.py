@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from knowledge_project.models import Message
+from messaging.models import Message
 
 
 class Command(BaseCommand):

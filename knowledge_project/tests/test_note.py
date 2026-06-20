@@ -197,6 +197,73 @@ class NoteAssetSyncTests(_NoteTestBase):
 
         self.assertFalse(NoteAsset.objects.filter(note=note, asset=asset).exists())
 
+    def test_note_save_with_title_only_update_fields_skips_asset_sync(self):
+        user = make_user('assetlink03')
+        note = Note.objects.create(author=user, title='original', content='<p>body</p>')
+
+        with patch('notes.models.sync_note_asset_links') as sync_mock:
+            note.title = 'renamed'
+            note.save(update_fields=['title'])
+
+        sync_mock.assert_not_called()
+
+    def test_note_save_with_content_update_fields_runs_asset_sync(self):
+        user = make_user('assetlink04')
+        note = Note.objects.create(author=user, title='original', content='<p>body</p>')
+
+        with patch('notes.models.sync_note_asset_links') as sync_mock:
+            note.content = '<p>updated</p>'
+            note.save(update_fields=['content'])
+
+        sync_mock.assert_called_once_with(note)
+
+    def test_note_save_without_content_change_skips_asset_sync(self):
+        user = make_user('assetlink05')
+        note = Note.objects.create(author=user, title='original', content='<p>body</p>')
+
+        with patch('notes.models.sync_note_asset_links') as sync_mock:
+            note.title = 'renamed again'
+            note.save()
+
+        sync_mock.assert_not_called()
+
+
+class TrashedFolderApiTests(_NoteTestBase):
+    def test_trashed_items_api_reports_children_count_from_annotations(self):
+        user = make_user('trash01')
+        login(self.client, user)
+
+        root = Folder.objects.create(name='root', owner=user, is_trashed=True)
+        Folder.objects.create(name='child', owner=user, parent=root, is_trashed=True)
+        Note.objects.create(author=user, folder=root, title='root note', content='', is_trashed=True)
+
+        response = self.client.get(reverse('trashed_items_api'))
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        root_entry = next(item for item in body['items'] if item['type'] == 'folder' and item['id'] == root.id)
+        self.assertEqual(root_entry['children_count'], 2)
+        self.assertTrue(root_entry['has_children'])
+
+    def test_trashed_folder_contents_api_reports_subfolder_children_count(self):
+        user = make_user('trash02')
+        login(self.client, user)
+
+        root = Folder.objects.create(name='root', owner=user, is_trashed=True)
+        child = Folder.objects.create(name='child', owner=user, parent=root, is_trashed=True)
+        Folder.objects.create(name='grandchild', owner=user, parent=child, is_trashed=True)
+        Note.objects.create(author=user, folder=child, title='child note', content='', is_trashed=True)
+        Note.objects.create(author=user, folder=root, title='root note', content='', is_trashed=True)
+
+        response = self.client.get(reverse('trashed_folder_contents_api', args=[root.id]))
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        self.assertEqual({note['title'] for note in body['notes']}, {'root note'})
+        child_entry = next(item for item in body['subfolders'] if item['id'] == child.id)
+        self.assertEqual(child_entry['children_count'], 2)
+        self.assertTrue(child_entry['has_children'])
+
 
 # =========================================================================
 # note_detail_api

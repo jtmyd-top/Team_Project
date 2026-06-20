@@ -51,7 +51,6 @@
         />
       </div>
 
-      <!-- 精准搜索区 -->
       <div class="search-section">
         <div class="search-row">
           <input
@@ -62,7 +61,8 @@
             class="search-input"
             autocomplete="off"
             @keydown.enter.prevent="doSearch"
-            @input="searchError = ''">
+            @input="searchError = ''"
+          >
           <button class="search-btn" :disabled="isSearching || !canSearch" @click="doSearch">
             <i :class="isSearching ? 'fas fa-spinner fa-spin' : 'fas fa-search'"></i>
             <span>{{ isSearching ? '搜索中' : '搜索' }}</span>
@@ -74,7 +74,6 @@
         </div>
       </div>
 
-      <!-- 结果区 -->
       <div class="users-list">
         <template v-if="hasSearched">
           <div v-if="isSearching" class="loading">
@@ -96,6 +95,11 @@
             <i :class="mode === 'group' ? 'fas fa-plus' : 'fas fa-chevron-right'"></i>
           </div>
 
+          <div v-else-if="searchError" class="empty-search">
+            <i class="fas fa-triangle-exclamation"></i>
+            <p>{{ searchError }}</p>
+          </div>
+
           <div v-else class="empty-search">
             <i class="fas fa-user-slash"></i>
             <p>未找到用户</p>
@@ -104,12 +108,13 @@
         </template>
 
         <template v-else>
-          <div class="recent-title" v-if="recentUsers.length">最近联系人</div>
+          <div v-if="recentUsers.length" class="recent-title">最近联系人</div>
           <div
             v-for="user in recentUsers"
             :key="user.id"
             class="user-item"
-            @click="handleUserClick(user)">
+            @click="handleUserClick(user)"
+          >
             <img :src="user.avatar" :alt="user.username" class="user-avatar">
             <div class="user-details">
               <h4>{{ user.username }}</h4>
@@ -191,18 +196,22 @@ const doSearch = async () => {
   isSearching.value = true
   hasSearched.value = true
   searchResult.value = null
+  searchError.value = ''
+
   try {
     const response = await fetch(`/api/users/search/?q=${encodeURIComponent(q)}`)
-    if (response.ok) {
-      const data = await response.json()
-      const users = data.users || []
-      searchResult.value = users.length ? users[0] : null
-    } else {
-      searchResult.value = null
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      searchError.value = data.error || data.message || '搜索失败，请稍后重试'
+      return
     }
+
+    const data = await response.json()
+    const users = data.users || []
+    searchResult.value = users.length ? users[0] : null
   } catch (error) {
     console.error('搜索用户失败:', error)
-    searchResult.value = null
+    searchError.value = '网络错误，请稍后重试'
   } finally {
     isSearching.value = false
   }
@@ -285,11 +294,11 @@ const loadRecentUsers = async () => {
         .filter(conv => conv.conversation_type !== 'group' && conv.user_id)
         .slice(0, 5)
         .map(conv => ({
-        id: conv.user_id,
-        username: conv.username,
-        avatar: conv.avatar,
-        bio: '',
-      }))
+          id: conv.user_id,
+          username: conv.username,
+          avatar: conv.avatar,
+          bio: '',
+        }))
     }
   } catch (error) {
     console.error('加载最近联系人失败:', error)
@@ -322,6 +331,7 @@ onMounted(() => {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -344,6 +354,7 @@ onMounted(() => {
     transform: translateY(20px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;
@@ -619,7 +630,7 @@ onMounted(() => {
 .user-details h4 {
   font-size: 14px;
   font-weight: 500;
-  margin: 0 0 4px 0;
+  margin: 0 0 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

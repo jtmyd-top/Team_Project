@@ -93,7 +93,7 @@
           <i class="fas fa-circle-info"></i>
           <span>新消息到达时将自动恢复到全部会话</span>
         </div>
-        <div v-if="loadingConversations" class="empty-state">
+        <div v-if="loadingConversations && filteredConversations.length === 0" class="empty-state">
           <i class="fas fa-spinner fa-spin"></i>
         </div>
         <div v-else-if="filteredConversations.length === 0" class="empty-state">
@@ -236,6 +236,23 @@
         <div v-if="!isCurrentGroup && currentSettings.disappearing_enabled" class="disappearing-banner">
           <i class="fas fa-fire-alt"></i>
           已开启阅后即焚 · {{ formatTtl(currentSettings.disappearing_ttl_seconds) }}内消息将自动销毁        </div>
+
+        <button
+          v-if="activeGroupAnnouncement"
+          class="group-announcement-banner"
+          type="button"
+          @click="jumpToGroupAnnouncement(activeGroupAnnouncement)"
+        >
+          <span class="announcement-banner-icon"><i class="fas fa-bullhorn"></i></span>
+          <span class="announcement-banner-main">
+            <strong>
+              群公告
+              <em v-if="activeGroupAnnouncement.pinned">置顶</em>
+            </strong>
+            <span>{{ activeGroupAnnouncement.content }}</span>
+          </span>
+          <i class="fas fa-location-crosshairs"></i>
+        </button>
 
         <div v-if="selectionMode" class="selection-banner">
           <div class="selection-summary">
@@ -669,12 +686,65 @@
             </div>
             <div v-if="groupPanel.detail.announcement_history?.length" class="group-history-list">
               <div
-                v-for="item in groupPanel.detail.announcement_history.slice(0, 3)"
+                v-for="item in groupPanel.detail.announcement_history"
                 :key="item.id"
                 class="group-history-row"
+                :class="{ pinned: item.pinned }"
               >
-                <span>{{ item.editor?.username || '系统' }} · {{ formatGroupDate(item.created_at) }}</span>
-                <p>{{ item.content || '清空公告' }}</p>
+                <template v-if="groupPanel.editingAnnouncementId === item.id">
+                  <textarea
+                    v-model="groupPanel.announcementEditDraft"
+                    class="group-textarea small"
+                    maxlength="2000"
+                    rows="3"
+                  ></textarea>
+                  <div class="group-history-actions">
+                    <label class="group-check">
+                      <input v-model="groupPanel.announcementEditPinned" type="checkbox" />
+                      <span>置顶公告</span>
+                    </label>
+                    <span class="group-history-action-spacer"></span>
+                    <button class="group-secondary-btn small" type="button" @click="cancelEditGroupAnnouncement">取消</button>
+                    <button
+                      class="group-primary-btn small"
+                      type="button"
+                      :disabled="!canSaveEditingAnnouncement(item)"
+                      @click="updateGroupAnnouncement(item)"
+                    >
+                      <i v-if="groupPanel.savingAnnouncement" class="fas fa-spinner fa-spin"></i>
+                      保存
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="group-history-head">
+                    <button class="group-history-jump" type="button" @click="jumpToGroupAnnouncement(item)">
+                      <span>
+                        {{ item.editor?.username || '系统' }} · {{ formatGroupDate(item.updated_at || item.created_at) }}
+                      </span>
+                      <strong v-if="item.pinned"><i class="fas fa-thumbtack"></i> 置顶</strong>
+                    </button>
+                    <div v-if="canManageCurrentGroup" class="group-history-actions compact">
+                      <button class="group-icon-btn" type="button" title="编辑公告" @click="startEditGroupAnnouncement(item)">
+                        <i class="fas fa-pen"></i>
+                      </button>
+                      <button
+                        class="group-icon-btn"
+                        type="button"
+                        :title="item.pinned ? '取消置顶' : '置顶公告'"
+                        @click="toggleGroupAnnouncementPin(item)"
+                      >
+                        <i class="fas fa-thumbtack"></i>
+                      </button>
+                      <button class="group-icon-btn danger" type="button" title="删除公告" @click="deleteGroupAnnouncement(item)">
+                        <i class="fas fa-trash-alt"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <button class="group-history-content" type="button" @click="jumpToGroupAnnouncement(item)">
+                    {{ item.content || '清空公告' }}
+                  </button>
+                </template>
               </div>
             </div>
           </div>
@@ -1073,6 +1143,9 @@ const groupPanel = ref({
   announcementPinned: false,
   announcementOriginal: '',
   announcementPinnedOriginal: false,
+  editingAnnouncementId: null,
+  announcementEditDraft: '',
+  announcementEditPinned: false,
   savingAnnouncement: false,
   memberSearch: '',
   memberRoleFilter: 'all',
@@ -1110,6 +1183,7 @@ const blockedPanelRef = ref(null)
 const replyDraft = ref(null)
 const forwardDraft = ref(null)
 const browserNotificationsEnabled = ref(false)
+let suppressConversationRefreshUntil = 0
 const pendingAttachments = ref([])
 const showEmojiPicker = ref(false)
 const showCodeInput = ref(false)
@@ -1182,6 +1256,31 @@ const isCurrentGroup = computed(() => selectedConversation.value?.conversation_t
 const canManageCurrentGroup = computed(() =>
   ['owner', 'admin'].includes(groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '')
 )
+
+const activeGroupAnnouncement = computed(() => {
+  if (!isCurrentGroup.value) return null
+  const groupId = selectedGroupId()
+  const detail = groupPanel.value.detail?.id === groupId ? groupPanel.value.detail : null
+  const detailAnnouncement = detail?.announcement_history?.find((item) => item.pinned) || detail?.announcement_history?.[0]
+  if (detailAnnouncement?.content) {
+    return {
+      id: detailAnnouncement.id,
+      content: detailAnnouncement.content,
+      pinned: !!detailAnnouncement.pinned,
+      message_id: detailAnnouncement.message_id,
+      updated_at: detailAnnouncement.updated_at || detailAnnouncement.created_at,
+    }
+  }
+  const conv = selectedConversation.value
+  if (!conv?.announcement) return null
+  return {
+    id: null,
+    content: conv.announcement,
+    pinned: !!conv.announcement_pinned,
+    message_id: conv.announcement_message_id,
+    updated_at: conv.announcement_updated_at,
+  }
+})
 
 const hasGroupAnnouncementChanges = computed(() => {
   if (!canManageCurrentGroup.value) return false
@@ -1382,6 +1481,18 @@ function findConversationByKey(key) {
   return conversations.value.find((c) => conversationKey(c) === key) || null
 }
 
+function patchConversationByKey(key, patch) {
+  const conv = findConversationByKey(key)
+  if (!conv) return null
+  Object.assign(conv, patch)
+  conversations.value = [...conversations.value]
+  return conv
+}
+
+function suppressNextConversationRefresh(ms = 4000) {
+  suppressConversationRefreshUntil = Date.now() + ms
+}
+
 function conversationVersion(conv) {
   if (!conv) return ''
   return [
@@ -1426,14 +1537,19 @@ function eventBelongsToSelectedConversation(event, message) {
 }
 
 async function apiPost(url, body) {
-  const r = await fetch(url, {
-    method: 'POST',
+  return apiRequest(url, { method: 'POST', body })
+}
+
+async function apiRequest(url, { method = 'GET', body = null } = {}) {
+  const options = {
+    method,
     headers: {
       'Content-Type': 'application/json',
       'X-CSRFToken': csrfToken.value,
     },
-    body: JSON.stringify(body || {}),
-  })
+  }
+  if (body !== null && body !== undefined) options.body = JSON.stringify(body || {})
+  const r = await fetch(url, options)
   const d = await r.json().catch(() => ({}))
   if (!r.ok) {
     const err = new Error(extractApiErrorMessage(d, '请求失败'))
@@ -1740,6 +1856,7 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
     conversations.value = []
     return
   }
+  if (silent && Date.now() < suppressConversationRefreshUntil) return
   if (!silent) loadingConversations.value = true
   try {
     const selectedId = normalizeUserId(selectedUserId.value)
@@ -1796,6 +1913,7 @@ async function loadMessages({ silent = false } = {}) {
           conv.mute_mode = d.group.mute_mode
           conv.description = d.group.description
           conv.announcement = d.group.announcement
+          syncConversationAnnouncementFromGroup(d.group)
         }
       }
       scrollToBottomSoon()
@@ -2711,6 +2829,23 @@ function scrollToMessage(messageId) {
   })
 }
 
+async function jumpToGroupAnnouncement(announcement) {
+  closeGroupInfo()
+  const messageId = announcement?.message_id
+  if (!messageId) {
+    ElMessage.info('这条公告暂无可定位的群消息')
+    return
+  }
+  highlightMessageId.value = messageId
+  if (!messages.value.some((message) => message.id === messageId)) {
+    await loadMessages({ silent: true })
+  }
+  scrollToMessage(messageId)
+  setTimeout(() => {
+    if (highlightMessageId.value === messageId) highlightMessageId.value = null
+  }, 2500)
+}
+
 // ==== 消息操作 ====
 function toggleSelectionMode() {
   selectionMode.value = !selectionMode.value
@@ -3070,7 +3205,8 @@ async function toggleMute() {
       value: v,
     })
     currentSettings.value.is_muted = v
-    loadConversations()
+    patchConversationByKey(selectedConversationKey.value, { is_muted: v })
+    suppressNextConversationRefresh()
     ElMessage.success(v ? '已开启免打扰' : '已关闭免打扰')
   } catch (e) {
     ElMessage.error(e.message)
@@ -3173,7 +3309,8 @@ async function toggleGroupMute() {
   try {
     await postGroupSetting('mute', { value: v })
     currentSettings.value.is_muted = v
-    loadConversations()
+    patchConversationByKey(selectedConversationKey.value, { is_muted: v })
+    suppressNextConversationRefresh()
     ElMessage.success(v ? '已开启免打扰' : '已关闭免打扰')
   } catch (e) {
     ElMessage.error(e.message)
@@ -3231,6 +3368,8 @@ async function openGroupInfo() {
     groupPanel.value.announcementPinned = !!d.group?.announcement_pinned_at
     groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
     groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
+    cancelEditGroupAnnouncement()
+    syncConversationAnnouncementFromGroup(d.group)
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
     loadGroupSharedItems()
     if (canManageCurrentGroup.value) {
@@ -3256,6 +3395,30 @@ function closeGroupInfo() {
   groupPanel.value.memberSearch = ''
   groupPanel.value.memberRoleFilter = 'all'
   groupPanel.value.savingAnnouncement = false
+  cancelEditGroupAnnouncement()
+}
+
+function currentGroupAnnouncementFromDetail(detail) {
+  const item = detail?.announcement_history?.find((entry) => entry.pinned) || detail?.announcement_history?.[0]
+  if (item?.content) return item
+  if (!detail?.announcement) return null
+  return {
+    content: detail.announcement,
+    pinned: !!detail.announcement_pinned_at,
+    message_id: detail.announcement_message_id || null,
+    updated_at: detail.announcement_updated_at || detail.updated_at,
+  }
+}
+
+function syncConversationAnnouncementFromGroup(group) {
+  if (!group?.id) return
+  const item = currentGroupAnnouncementFromDetail(group)
+  patchConversationByKey(`group:${group.id}`, {
+    announcement: item?.content || '',
+    announcement_pinned: !!item?.pinned,
+    announcement_message_id: item?.message_id || null,
+    announcement_updated_at: item?.updated_at || null,
+  })
 }
 
 async function saveGroupName() {
@@ -3287,10 +3450,103 @@ async function saveGroupAnnouncement() {
       groupPanel.value.detail = d.group
       groupPanel.value.announcementDraft = d.group.announcement || ''
       groupPanel.value.announcementPinned = !!d.group.announcement_pinned_at
+      syncConversationAnnouncementFromGroup(d.group)
     }
     groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
     groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
+    cancelEditGroupAnnouncement()
+    loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('群公告已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.savingAnnouncement = false
+  }
+}
+
+function startEditGroupAnnouncement(item) {
+  if (!canManageCurrentGroup.value || !item) return
+  groupPanel.value.editingAnnouncementId = item.id
+  groupPanel.value.announcementEditDraft = item.content || ''
+  groupPanel.value.announcementEditPinned = !!item.pinned
+}
+
+function cancelEditGroupAnnouncement() {
+  groupPanel.value.editingAnnouncementId = null
+  groupPanel.value.announcementEditDraft = ''
+  groupPanel.value.announcementEditPinned = false
+}
+
+function canSaveEditingAnnouncement(item) {
+  if (!canManageCurrentGroup.value || !item || groupPanel.value.savingAnnouncement) return false
+  const content = groupPanel.value.announcementEditDraft.trim()
+  if (!content) return false
+  return content !== (item.content || '') || !!groupPanel.value.announcementEditPinned !== !!item.pinned
+}
+
+async function updateGroupAnnouncement(item) {
+  const groupId = selectedGroupId()
+  const content = groupPanel.value.announcementEditDraft.trim()
+  if (!groupId || !item?.id || !canSaveEditingAnnouncement(item)) return
+  groupPanel.value.savingAnnouncement = true
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/announcement/${item.id}/`, {
+      announcement: content,
+      pin: groupPanel.value.announcementEditPinned,
+    })
+    if (d.group) {
+      groupPanel.value.detail = d.group
+      groupPanel.value.announcementDraft = d.group.announcement || ''
+      groupPanel.value.announcementPinned = !!d.group.announcement_pinned_at
+      groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
+      groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
+      syncConversationAnnouncementFromGroup(d.group)
+    }
+    cancelEditGroupAnnouncement()
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('历史公告已更新')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    groupPanel.value.savingAnnouncement = false
+  }
+}
+
+async function toggleGroupAnnouncementPin(item) {
+  if (!item) return
+  groupPanel.value.editingAnnouncementId = item.id
+  groupPanel.value.announcementEditDraft = item.content || ''
+  groupPanel.value.announcementEditPinned = !item.pinned
+  await updateGroupAnnouncement(item)
+}
+
+async function deleteGroupAnnouncement(item) {
+  const groupId = selectedGroupId()
+  if (!groupId || !item?.id || !canManageCurrentGroup.value || groupPanel.value.savingAnnouncement) return
+  try {
+    await ElMessageBox.confirm('删除后对应的公告消息会被撤回，确认删除这条公告？', '删除公告', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  groupPanel.value.savingAnnouncement = true
+  try {
+    const d = await apiRequest(`/api/messages/groups/${groupId}/announcement/${item.id}/`, { method: 'DELETE' })
+    if (d.group) {
+      groupPanel.value.detail = d.group
+      groupPanel.value.announcementDraft = d.group.announcement || ''
+      groupPanel.value.announcementPinned = !!d.group.announcement_pinned_at
+      groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
+      groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
+      syncConversationAnnouncementFromGroup(d.group)
+    }
+    messages.value = messages.value.filter((message) => message.id !== item.message_id)
+    cancelEditGroupAnnouncement()
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('公告已删除')
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -3899,7 +4155,14 @@ async function ctxAction(action) {
       if (action === 'pin') {
         await apiPost(`/api/messages/groups/${groupId}/settings/pin/`, { value: !conv.is_pinned })
       } else if (action === 'mute') {
-        await apiPost(`/api/messages/groups/${groupId}/settings/mute/`, { value: !conv.is_muted })
+        const value = !conv.is_muted
+        await apiPost(`/api/messages/groups/${groupId}/settings/mute/`, { value })
+        conv.is_muted = value
+        patchConversationByKey(`group:${groupId}`, { is_muted: value })
+        if (selectedConversationKey.value === `group:${groupId}`) currentSettings.value.is_muted = value
+        suppressNextConversationRefresh()
+        ElMessage.success(value ? '已开启免打扰' : '已关闭免打扰')
+        return
       } else if (action === 'archive') {
         await apiPost(`/api/messages/groups/${groupId}/settings/archive/`, { value: !conv.is_archived })
       } else if (action === 'mark_read_toggle') {
@@ -3927,10 +4190,19 @@ async function ctxAction(action) {
         value: !conv.is_pinned,
       })
     } else if (action === 'mute') {
+      const value = !conv.is_muted
       await apiPost('/api/messages/conversation/mute/', {
         user_id: conv.user_id,
-        value: !conv.is_muted,
+        value,
       })
+      conv.is_muted = value
+      patchConversationByKey(`user:${normalizeUserId(conv.user_id)}`, { is_muted: value })
+      if (selectedConversationKey.value === `user:${normalizeUserId(conv.user_id)}`) {
+        currentSettings.value.is_muted = value
+      }
+      suppressNextConversationRefresh()
+      ElMessage.success(value ? '已开启免打扰' : '已关闭免打扰')
+      return
     } else if (action === 'archive') {
       await apiPost('/api/messages/conversation/archive/', {
         user_id: conv.user_id,
@@ -4391,6 +4663,7 @@ watch(
 .chat-area {
   display: flex;
   flex-direction: column;
+  position: relative;
   background: var(--bg-primary);
   overflow: hidden;
 }
@@ -5121,6 +5394,68 @@ watch(
   padding: 14px 22px 10px;
 }
 
+.scroll-bottom-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 108px;
+  z-index: 18;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+  color: var(--primary-color);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.scroll-bottom-btn i {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.scroll-bottom-btn:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--primary-color) 34%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18);
+}
+
+.scroll-bottom-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary-color) 45%, transparent);
+  outline-offset: 3px;
+}
+
+.scroll-bottom-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--bg-primary);
+  border-radius: 999px;
+  background: #f56c6c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 6px 14px rgba(245, 108, 108, 0.28);
+}
+
 .message-stream {
   display: flex;
   flex-direction: column;
@@ -5327,6 +5662,87 @@ watch(
   color: var(--text-secondary);
 }
 
+.group-announcement-banner {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 54px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary-color, #2563eb) 18%, var(--border-color));
+  padding: 10px 20px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 11px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #f59e0b 16%, var(--bg-primary)) 0%, var(--bg-primary) 70%),
+    var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-announcement-banner:hover {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #f59e0b 22%, var(--bg-primary)) 0%, var(--bg-primary) 74%),
+    var(--bg-primary);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, #f59e0b 18%, transparent);
+}
+
+.announcement-banner-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, #f59e0b 18%, var(--bg-primary));
+  color: #b45309;
+  flex-shrink: 0;
+}
+
+.announcement-banner-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.announcement-banner-main strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.announcement-banner-main em {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #f59e0b 18%, var(--bg-primary));
+  color: #92400e;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.announcement-banner-main span {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-announcement-banner > i {
+  color: color-mix(in srgb, var(--text-tertiary) 82%, transparent);
+  font-size: 13px;
+}
+
 .group-section-meta {
   flex: 0 1 auto;
   overflow: hidden;
@@ -5401,6 +5817,12 @@ watch(
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 14%, transparent);
 }
 
+.group-textarea.small {
+  min-height: 74px;
+  max-height: 140px;
+  font-size: 12.5px;
+}
+
 .group-config-actions {
   display: flex;
   align-items: center;
@@ -5472,15 +5894,97 @@ watch(
 }
 
 .group-history-row {
-  padding: 9px 10px;
+  padding: 10px;
   border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
   border-radius: 9px;
   background: color-mix(in srgb, var(--bg-secondary) 56%, transparent);
+  transition: border-color 0.16s ease, background 0.16s ease;
 }
 
-.group-history-row span {
+.group-history-row.pinned {
+  border-color: color-mix(in srgb, #f59e0b 38%, var(--border-color));
+  background: color-mix(in srgb, #f59e0b 8%, var(--bg-primary));
+}
+
+.group-history-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-history-jump,
+.group-history-content {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.group-history-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.group-history-jump span {
+  margin: 0;
+}
+
+.group-history-jump strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #f59e0b 16%, var(--bg-primary));
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.group-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.group-history-actions.compact {
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.group-history-action-spacer {
+  flex: 1 1 auto;
+}
+
+.group-history-content {
+  width: 100%;
+  margin-top: 7px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-history-content:hover,
+.group-history-jump:hover {
+  color: var(--primary-color, #2563eb);
+}
+
+.group-history-jump > span {
   display: block;
-  margin-bottom: 4px;
+  margin: 0;
   color: var(--text-tertiary);
   font-size: 11px;
 }
@@ -5614,6 +6118,12 @@ watch(
 }
 
 .group-secondary-btn.small {
+  height: 34px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.group-primary-btn.small {
   height: 34px;
   padding: 0 11px;
   font-size: 12px;
@@ -6390,6 +6900,25 @@ watch(
     padding: 10px 12px;
   }
 
+  .group-announcement-banner {
+    min-height: 58px;
+    grid-template-columns: 32px minmax(0, 1fr) 18px;
+    padding: 10px 12px;
+    gap: 9px;
+  }
+
+  .announcement-banner-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .announcement-banner-main span {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
   .selection-actions {
     width: 100%;
     justify-content: flex-start;
@@ -6398,6 +6927,13 @@ watch(
   .selection-actions .toolbar-btn {
     flex: 1 1 auto;
     min-width: 96px;
+  }
+
+  .scroll-bottom-btn {
+    right: 16px;
+    bottom: 94px;
+    width: 40px;
+    height: 40px;
   }
 
   .code-input-actions {
@@ -6496,6 +7032,26 @@ watch(
   .group-config-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .group-history-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .group-history-actions.compact {
+    justify-content: flex-start;
+  }
+
+  .group-history-actions {
+    align-items: stretch;
+  }
+
+  .group-history-actions .group-check {
+    width: 100%;
+  }
+
+  .group-history-action-spacer {
+    display: none;
   }
 
   .group-config-actions .group-secondary-btn {

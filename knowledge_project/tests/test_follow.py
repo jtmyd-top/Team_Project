@@ -12,7 +12,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import UserBlocklist, UserFollow
+from messaging.models import UserBlocklist, UserFollow
 
 from ._helpers import login, make_user, parse, post_json
 

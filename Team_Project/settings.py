@@ -61,20 +61,35 @@ INSTALLED_APPS = []
 if DAPHNE_AVAILABLE and CHANNELS_AVAILABLE:
     INSTALLED_APPS.append('daphne')
 
+# 注意：Django 内置 apps 通常应该在自定义 apps 之前
+# 但由于某些自定义 apps 可能依赖特定的加载顺序，这里保持原顺序
 INSTALLED_APPS += [
-    'knowledge_project.apps.KnowledgeProjectConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'core.apps.CoreConfig',
+    'accounts.apps.AccountsConfig',
+    'notifications.apps.NotificationsConfig',
+    'notes.apps.NotesConfig',
+    'assets.apps.AssetsConfig',
+    'vault.apps.VaultConfig',
+    'ops.apps.OpsConfig',
+    'moderation.apps.ModerationConfig',
+    'messaging.apps.MessagingConfig',
+    'message_groups.apps.MessageGroupsConfig',
+    'knowledge_project.apps.KnowledgeProjectConfig',
     'django_ckeditor_5',
     'captcha',
 ]
 
 if CHANNELS_AVAILABLE:
     INSTALLED_APPS.append('channels')
+
+if DEBUG and importlib.util.find_spec('debug_toolbar') is not None:
+    INSTALLED_APPS.append('debug_toolbar')
 
 try:
     import django_extensions  # noqa: F401
@@ -84,7 +99,7 @@ except ImportError:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    # 'whitenoise.middleware.WhiteNoiseMiddleware',  # 在 ASGI/Daphne 下暂时禁用，使用 Django URL 路由提供静态文件
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'Team_Project.middleware.IPBanMiddleware',
@@ -96,6 +111,11 @@ MIDDLEWARE = [
     'Team_Project.middleware.ContentSecurityPolicyMiddleware',
     'Team_Project.middleware.VaultLockMiddleware',
 ]
+
+if DEBUG and importlib.util.find_spec('debug_toolbar') is not None:
+    MIDDLEWARE.insert(0, 'debug_toolbar.middleware.DebugToolbarMiddleware')
+
+INTERNAL_IPS = env_list('INTERNAL_IPS', '127.0.0.1,::1')
 
 ROOT_URLCONF = 'Team_Project.urls'
 
@@ -151,13 +171,20 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEFAULT_FILE_STORAGE_BACKEND = os.getenv('DEFAULT_FILE_STORAGE_BACKEND', '').strip()
 MEDIA_URL = os.getenv('MEDIA_URL', '/uploads/')
 MEDIA_ROOT = os.getenv('MEDIA_ROOT', os.path.join(BASE_DIR, 'knowledge_project', 'uploads'))
+IMAGE_UPLOAD_MAX_SIZE = int(os.getenv('IMAGE_UPLOAD_MAX_SIZE', str(10 * 1024 * 1024)))
+IMAGE_UPLOAD_ALLOWED_EXTENSIONS = env_list('IMAGE_UPLOAD_ALLOWED_EXTENSIONS', '.jpg,.jpeg,.png,.gif,.webp')
+IMAGE_UPLOAD_ALLOWED_MIME_TYPES = env_list(
+    'IMAGE_UPLOAD_ALLOWED_MIME_TYPES',
+    'image/jpeg,image/png,image/gif,image/webp'
+)
 
+# WhiteNoise 配置 - 用于在 ASGI/Daphne 下提供静态文件
 STORAGES = {
     'default': {
         'BACKEND': 'django.core.files.storage.FileSystemStorage',
     },
     'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
     },
 }
 

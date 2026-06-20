@@ -10,7 +10,7 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 from django.utils import timezone
 
-from knowledge_project.models import ConversationSettings, Message
+from messaging.models import ConversationSettings, Message
 
 
 class Command(BaseCommand):

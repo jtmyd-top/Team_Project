@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import os
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
 from knowledge_project.models import Asset, Note, NoteAsset
+from knowledge_project.views import upload as upload_views
 
 from ._helpers import login, make_user, parse
 
@@ -74,6 +76,59 @@ class ImageUploadViewTests(_UploadTestBase):
         # 数据库只有一条 Asset
         self.assertEqual(Asset.objects.filter(uploader=user).count(), 1)
 
+    def test_rejects_invalid_extension(self):
+        user = make_user('iu04')
+        login(self.client, user)
+        upload = SimpleUploadedFile('bad.txt', PNG_BYTES, content_type='image/png')
+
+        response = self.client.post(reverse('image_upload_view'), {'file': upload})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
+    def test_rejects_invalid_mime_type(self):
+        user = make_user('iu05')
+        login(self.client, user)
+        upload = SimpleUploadedFile('bad.png', PNG_BYTES, content_type='text/plain')
+
+        response = self.client.post(reverse('image_upload_view'), {'file': upload})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
+    def test_rejects_invalid_magic_number(self):
+        user = make_user('iu06')
+        login(self.client, user)
+        upload = SimpleUploadedFile('bad.png', b'not really an image', content_type='image/png')
+
+        response = self.client.post(reverse('image_upload_view'), {'file': upload})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
+    def test_rejects_too_large_file(self):
+        user = make_user('iu07')
+        login(self.client, user)
+        upload = SimpleUploadedFile('large.png', PNG_BYTES, content_type='image/png')
+
+        with patch.object(upload_views, 'IMAGE_UPLOAD_MAX_SIZE', 8), \
+             patch.object(upload_views, 'IMAGE_UPLOAD_MAX_SIZE_MB', 1):
+            response = self.client.post(reverse('image_upload_view'), {'file': upload})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
+    def test_rate_limit_returns_429(self):
+        user = make_user('iu08')
+        login(self.client, user)
+        upload = SimpleUploadedFile('limited.png', PNG_BYTES, content_type='image/png')
+
+        with patch.object(upload_views, '_check_image_upload_rate_limit', return_value=(False, 20)):
+            response = self.client.post(reverse('image_upload_view'), {'file': upload})
+
+        self.assertEqual(response.status_code, 429)
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
 
 # =========================================================================
 # ckeditor_image_upload_view
@@ -112,6 +167,33 @@ class CKEditorUploadViewTests(_UploadTestBase):
         ))
         self.assertEqual(first['url'], second['url'])
         self.assertEqual(Asset.objects.filter(uploader=user).count(), 1)
+
+    def test_validation_error_uses_ckeditor_shape(self):
+        user = make_user('ck04')
+        login(self.client, user)
+        upload = SimpleUploadedFile('bad.png', b'not really an image', content_type='image/png')
+
+        response = self.client.post(reverse('ckeditor_image_upload_view'), {'upload': upload})
+
+        self.assertEqual(response.status_code, 400)
+        body = parse(response)
+        self.assertIn('error', body)
+        self.assertIn('message', body['error'])
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
+    def test_rate_limit_error_uses_ckeditor_shape(self):
+        user = make_user('ck05')
+        login(self.client, user)
+        upload = SimpleUploadedFile('limited.png', PNG_BYTES, content_type='image/png')
+
+        with patch.object(upload_views, '_check_image_upload_rate_limit', return_value=(False, 20)):
+            response = self.client.post(reverse('ckeditor_image_upload_view'), {'upload': upload})
+
+        self.assertEqual(response.status_code, 429)
+        body = parse(response)
+        self.assertIn('error', body)
+        self.assertIn('message', body['error'])
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
 
 
 # =========================================================================
@@ -215,11 +297,23 @@ class ProtectedMediaViewTests(_UploadTestBase):
         self.assertEqual(response.status_code, 404)
 
 
-class PublicProfileMediaViewTests(_UploadTestBase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+class _UploadTransactionTestBase(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        cache.clear()
+
+
+class PublicProfileMediaViewTests(_UploadTransactionTestBase):
     def setUp(self):
         super().setUp()
         self._tmpdir = tempfile.TemporaryDirectory()
-        self._override = override_settings(MEDIA_ROOT=self._tmpdir.name, MEDIA_URL='/uploads/')
+        self._override = override_settings(
+            MEDIA_ROOT=self._tmpdir.name,
+            MEDIA_URL='/uploads/',
+            USE_X_ACCEL_REDIRECT=True,
+        )
         self._override.enable()
 
     def tearDown(self):
@@ -237,8 +331,12 @@ class PublicProfileMediaViewTests(_UploadTestBase):
 
         response = self.client.get(f'/uploads/{user.profile.avatar.name}')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'image/png')
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['Content-Type'], 'image/png')
+        finally:
+            response.close()
+            user.profile.avatar.close()
 
     def test_unregistered_upload_file_is_not_public(self):
         private_path = os.path.join(self._tmpdir.name, 'user_999', 'private.png')
@@ -246,6 +344,8 @@ class PublicProfileMediaViewTests(_UploadTestBase):
         with open(private_path, 'wb') as private_file:
             private_file.write(PNG_BYTES)
 
-        response = self.client.get('/uploads/user_999/private.png')
+        with patch('knowledge_project.views.upload.Profile.objects.filter') as mock_filter:
+            mock_filter.return_value.exists.return_value = False
+            response = self.client.get('/uploads/user_999/private.png')
 
         self.assertEqual(response.status_code, 404)

@@ -12,7 +12,7 @@ from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect
 
-from knowledge_project.utils.request_utils import get_client_ip
+from core.utils.request_utils import get_client_ip
 
 
 logger = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ class SessionTimeoutMiddleware:
         if getattr(request, 'user', None) is None or not request.user.is_authenticated:
             return
         try:
-            from knowledge_project.utils.session_activity import (
+            from core.utils.session_activity import (
                 mark_user_activity,
                 register_user_session,
             )
@@ -287,7 +287,7 @@ class VaultLockMiddleware:
         if any(request.path.startswith(prefix) for prefix in self.SAFE_PREFIXES):
             return self.get_response(request)
 
-        from knowledge_project.decorators import check_vault_locked
+        from vault.services import check_vault_locked
 
         is_locked, _, _ = check_vault_locked(request.user.id, request)
         if not is_locked:

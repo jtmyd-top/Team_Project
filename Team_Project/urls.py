@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from knowledge_project.admin_auth import secure_admin_site
+from ops.admin_auth import secure_admin_site
 
 # 将默认 admin 的已注册模型复制到安全 admin
 for model, model_admin in admin.site._registry.items():
@@ -38,6 +38,13 @@ urlpatterns = [
 # --- 【核心新增代码】---
 # 只有在 DEBUG 模式下，才让 Django 开发服务器来处理媒体文件
 if settings.DEBUG:
+    try:
+        import debug_toolbar
+    except ImportError:
+        debug_toolbar = None
+    if debug_toolbar is not None:
+        urlpatterns.insert(0, path('__debug__/', include(debug_toolbar.urls)))
+
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     # 这行代码会添加一个新的 URL 模式。
     # 它会拦截以 settings.MEDIA_URL (即 '/uploads/') 开头的请求，

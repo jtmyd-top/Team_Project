@@ -38,6 +38,7 @@ from knowledge_project.models import (
     Message,
     MessageAttachment,
     MessageGroup,
+    MessageGroupAnnouncementHistory,
     MessageGroupAnnouncementRead,
     MessageGroupAuditLog,
     MessageGroupBan,
@@ -693,6 +694,39 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(mark_response.status_code, 200, mark_response.content)
         self.assertEqual(parse(mark_response)['read_stats']['read_count'], 2)
 
+    def test_edit_group_announcement_updates_linked_message_without_resending(self):
+        owner = make_user('grp_ann_edit_owner')
+        member = make_user('grp_ann_edit_member')
+        group = self._create_group_directly(owner, [member])
+        login(self.client, owner)
+
+        create_response = post_json(self.client, reverse('update_group_announcement_api', args=[group.id]), {
+            'announcement': 'first announcement',
+            'pin': True,
+        })
+        self.assertEqual(create_response.status_code, 200, create_response.content)
+        history = MessageGroupAnnouncementHistory.objects.get(group=group)
+        message = history.message
+        self.assertIsNotNone(message)
+        self.assertEqual(GroupMessage.objects.filter(group=group).count(), 1)
+
+        edit_response = post_json(
+            self.client,
+            reverse('group_announcement_detail_api', args=[group.id, history.id]),
+            {
+                'announcement': 'edited announcement',
+                'pin': False,
+            },
+        )
+        self.assertEqual(edit_response.status_code, 200, edit_response.content)
+        self.assertEqual(GroupMessage.objects.filter(group=group).count(), 1)
+        message.refresh_from_db()
+        history.refresh_from_db()
+        self.assertIn('edited announcement', message.content)
+        self.assertTrue(message.is_edited)
+        self.assertEqual(history.content, 'edited announcement')
+        self.assertFalse(history.pinned)
+
     def test_group_ban_blocks_invite_join_and_unban_allows_rejoin(self):
         owner = make_user('grp_ban_owner')
         member = make_user('grp_ban_member')
@@ -892,6 +926,48 @@ class ConversationListTests(_MessageTestBase):
         body = parse(self.client.get(reverse('get_message_conversations_api') + '?scope=unread'))
         peer_ids = [c['user_id'] for c in body['conversations']]
         self.assertEqual(peer_ids, [bob.id])
+
+    def test_group_listing_uses_visible_last_message_announcement_and_unread_count(self):
+        owner = make_user('cv05_owner')
+        member = make_user('cv05_member')
+        login(self.client, member)
+
+        group = MessageGroup.objects.create(name='team room', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        membership = MessageGroupMember.objects.create(group=group, user=member, role='member')
+
+        now = timezone.now()
+        membership.last_read_at = now - timedelta(hours=3)
+        membership.cleared_before = now - timedelta(hours=2)
+        membership.save(update_fields=['last_read_at', 'cleared_before'])
+
+        old_message = GroupMessage.objects.create(group=group, sender=owner, content='old hidden by clear')
+        visible_message = GroupMessage.objects.create(group=group, sender=owner, content='visible latest')
+        deleted_message = GroupMessage.objects.create(group=group, sender=owner, content='deleted latest')
+
+        GroupMessage.objects.filter(pk=old_message.pk).update(created_at=now - timedelta(hours=4))
+        GroupMessage.objects.filter(pk=visible_message.pk).update(created_at=now - timedelta(minutes=30))
+        GroupMessage.objects.filter(pk=deleted_message.pk).update(created_at=now - timedelta(minutes=5))
+        deleted_message.deletions.create(user=member)
+
+        MessageGroupAnnouncementHistory.objects.create(
+            group=group,
+            editor=owner,
+            content='Heads up',
+            pinned=True,
+        )
+
+        body = parse(self.client.get(reverse('get_message_conversations_api')))
+        conversation = next(
+            item for item in body['conversations']
+            if item['conversation_type'] == 'group' and item['group_id'] == group.id
+        )
+
+        self.assertEqual(conversation['last_message'], 'visible latest')
+        self.assertEqual(conversation['last_sender_id'], owner.id)
+        self.assertEqual(conversation['announcement'], 'Heads up')
+        self.assertTrue(conversation['announcement_pinned'])
+        self.assertEqual(conversation['unread_count'], 1)
 
 
 # =========================================================================
@@ -1723,6 +1799,18 @@ class MessagePreferenceTests(_MessageTestBase):
         self.assertIn('email_mention_group_ids', body['preference'])
         self.assertIn('available_email_mention_groups', body['preference'])
 
+    def test_get_preference_rejects_other_user_id(self):
+        user = make_user('mp01_owner')
+        other = make_user('mp01_other')
+        login(self.client, user)
+
+        response = self.client.get(
+            reverse('get_message_preference_api'),
+            {'user_id': other.id},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_update_preference(self):
         user = make_user('mp02')
         login(self.client, user)
@@ -1801,6 +1889,40 @@ class MessagePreferenceTests(_MessageTestBase):
         })
 
         self.assertEqual(response.status_code, 400)
+
+    def test_update_rejects_other_user_id(self):
+        user = make_user('mp07')
+        other = make_user('mp07_other')
+        login(self.client, user)
+
+        response = post_json(self.client, reverse('update_message_preference_api'), {
+            'user_id': other.id,
+            'show_read_status': False,
+        })
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_update_is_atomic_when_group_ids_invalid(self):
+        user = make_user('mp08')
+        owner = make_user('mp08_owner')
+        group = MessageGroup.objects.create(name='atomic bad group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        login(self.client, user)
+
+        pref, _ = MessagePreference.objects.get_or_create(user=user)
+        original_show_read_status = pref.show_read_status
+        original_notify_group_mentions_email = pref.notify_group_mentions_email
+
+        response = post_json(self.client, reverse('update_message_preference_api'), {
+            'show_read_status': not original_show_read_status,
+            'notify_group_mentions_email': not original_notify_group_mentions_email,
+            'email_mention_group_ids': [group.id],
+        })
+
+        self.assertEqual(response.status_code, 400)
+        pref.refresh_from_db()
+        self.assertEqual(pref.show_read_status, original_show_read_status)
+        self.assertEqual(pref.notify_group_mentions_email, original_notify_group_mentions_email)
 
 
 # =========================================================================
@@ -2017,7 +2139,7 @@ class NewConversationQuotaTests(_MessageTestBase):
             NewConversationQuotaLog.objects.create(user=sender, peer=peer)
         new_peer = make_user('nq03_new_peer')
         _enable_messaging(new_peer)
-        with patch('knowledge_project.utils.turnstile.verify_turnstile_token', return_value=True):
+        with patch('core.utils.turnstile.verify_turnstile_token', return_value=True):
             response = post_json(self.client, reverse('send_message_api'), {
                 'recipient_id': new_peer.id,
                 'content': 'hi',
