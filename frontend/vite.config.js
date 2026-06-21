@@ -108,6 +108,10 @@ export default defineConfig({
             }
             // Vue 鐩稿叧搴撳崟鐙墦鍖?
             if (id.includes('vue') || id.includes('pinia')) {
+            // Element Plus 单独打包
+            if (id.includes('element-plus')) {
+              return 'element-plus-vendor';
+            }
               return 'vue-vendor';
             }
           }
