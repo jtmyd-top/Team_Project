@@ -34,6 +34,7 @@ jobs:
           --health-retries=10
     env:
       SECRET_KEY: django-ci-insecure-key
+      VAULT_KEK: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       mysql_name: knowledge_project
       mysql_user: root
       mysql_passwd: root
