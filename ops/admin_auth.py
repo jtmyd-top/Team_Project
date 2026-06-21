@@ -24,7 +24,7 @@ from django.conf import settings
 from accounts.captcha import verify_image_captcha
 from accounts.models import Profile
 from core.utils.request_utils import get_client_ip
-from knowledge_project.admin_nav import split_admin_app_list
+from ops.admin_nav import split_admin_app_list
 from core.utils.turnstile import verify_turnstile_token
 from moderation.models import UserSanction
 

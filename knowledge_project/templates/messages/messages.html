@@ -4,6 +4,11 @@
 {% block title %}私信{% endblock %}
 
 {% block head_extra %}
+<link rel="stylesheet" href="{% static 'dist/assets/el-message.css' %}?v={{ messages_asset_version }}">
+<link rel="stylesheet" href="{% static 'dist/assets/el4.css' %}?v={{ messages_asset_version }}">
+<link rel="stylesheet" href="{% static 'dist/assets/el-input.css' %}?v={{ messages_asset_version }}">
+<link rel="stylesheet" href="{% static 'dist/assets/el-overlay.css' %}?v={{ messages_asset_version }}">
+<link rel="stylesheet" href="{% static 'dist/assets/index2.css' %}?v={{ messages_asset_version }}">
 <link rel="stylesheet" href="{% static 'dist/assets/messages.css' %}?v={{ messages_asset_version }}">
 <style>
   main {

@@ -28,6 +28,23 @@ node_modules/
 .npm-cache/
 staticfiles/
 codex-runserver*.log
+
+# Local diagnostics and service helpers
+.claude/worktrees/
+backups/
+logs/
+server.log
+admin_page_debug.html
+knowledge_project/templates/messages/messages_debug.html
+check_admin_html.py
+diagnose_admin_static.py
+diagnose_messages.sh
+fix_admin_static.bat
+restart_after_fix.bat
+restart_server.bat
+team-project-django-service.exe
+team-project-django-service.xml
+test_whitenoise.py
 # Build output (keep in static/dist for Django)
 # static/dist/ is tracked since it's needed for deployment
 

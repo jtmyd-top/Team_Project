@@ -1,6 +1,26 @@
 from django.db import migrations, models
 
 
+def _index_exists(apps, schema_editor, model_name, index_name):
+    model = apps.get_model('messaging', model_name)
+    table_name = model._meta.db_table
+    with schema_editor.connection.cursor() as cursor:
+        constraints = schema_editor.connection.introspection.get_constraints(cursor, table_name)
+    return index_name in constraints
+
+
+def add_message_unread_index_if_missing(apps, schema_editor):
+    if _index_exists(apps, schema_editor, 'Message', 'message_recipient_unread_idx'):
+        return
+
+    model = apps.get_model('messaging', 'Message')
+    index = models.Index(
+        fields=['recipient', 'is_read', 'deleted_for_recipient', 'is_recalled', '-created_at'],
+        name='message_recipient_unread_idx',
+    )
+    schema_editor.add_index(model, index)
+
+
 def _drop_index_if_exists(apps, schema_editor, model_name, index_name):
     model = apps.get_model('messaging', model_name)
     table_name = model._meta.db_table
@@ -30,6 +50,20 @@ class Migration(migrations.Migration):
     operations = [
         migrations.SeparateDatabaseAndState(
             database_operations=[
+                migrations.RunPython(add_message_unread_index_if_missing, migrations.RunPython.noop),
+            ],
+            state_operations=[
+                migrations.AddIndex(
+                    model_name='message',
+                    index=models.Index(
+                        fields=['recipient', 'is_read', 'deleted_for_recipient', 'is_recalled', '-created_at'],
+                        name='message_recipient_unread_idx',
+                    ),
+                ),
+            ],
+        ),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
                 migrations.RunPython(drop_legacy_message_unread_index, migrations.RunPython.noop),
             ],
             state_operations=[
@@ -38,12 +72,5 @@ class Migration(migrations.Migration):
                     name='messaging_m_recipie_f6f3c4_idx',
                 ),
             ],
-        ),
-        migrations.AddIndex(
-            model_name='message',
-            index=models.Index(
-                fields=['recipient', 'is_read', 'deleted_for_recipient', 'is_recalled', '-created_at'],
-                name='message_recipient_unread_idx',
-            ),
         ),
     ]

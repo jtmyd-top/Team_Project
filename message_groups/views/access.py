@@ -17,7 +17,11 @@ def group_invite_links_api(request, group_id):
             data = json.loads(request.body or '{}')
             expires_at = None
             expires_in_minutes = data.get('expires_in_minutes')
-            if expires_in_minutes not in (None, '', 0, '0'):
+
+            # 默认有效期：7 天（提高安全性）
+            if expires_in_minutes in (None, '', 0, '0'):
+                expires_at = timezone.now() + timedelta(days=7)
+            else:
                 try:
                     minutes = int(expires_in_minutes)
                 except (TypeError, ValueError):
@@ -314,6 +318,42 @@ def revoke_group_invite_link_api(request, group_id, invite_id):
 def join_group_by_invite_api(request, token):
     try:
         from messaging.models import GroupJoinRequest, MessageGroupInviteLink, MessageGroupInviteUse, MessageGroupMember
+        from message_groups.security import verify_pow_challenge
+
+        # ===== PoW 防护：防止脚本批量加群 =====
+        ip_key = f"invite_attempts:{request.META.get('REMOTE_ADDR')}:{token}"
+        attempts = cache.get(ip_key, 0)
+
+        # 如果 1 小时内同一 IP 对同一邀请链接尝试超过 3 次，要求 PoW
+        if attempts >= 3:
+            try:
+                body_data = json.loads(request.body) if request.body else {}
+            except json.JSONDecodeError:
+                body_data = {}
+            nonce = request.GET.get('pow_nonce') or body_data.get('pow_nonce')
+
+            if not nonce:
+                return JsonResponse({
+                    'error': 'PoW required',
+                    'code': 'pow_required',
+                    'message': '检测到频繁请求，请完成验证',
+                    'challenge': {
+                        'token': token,
+                        'difficulty': 4,
+                        'hint': '请计算 SHA256(token:nonce) 使其前 4 位为 0'
+                    }
+                }, status=429)
+
+            if not verify_pow_challenge(token, nonce, difficulty=4):
+                return JsonResponse({
+                    'error': 'Invalid PoW',
+                    'message': '验证失败，请重试'
+                }, status=403)
+
+        # 记录尝试次数
+        cache.set(ip_key, attempts + 1, timeout=3600)
+
+        # ===== 原有加群逻辑 =====
         with transaction.atomic():
             link = get_object_or_404(
                 MessageGroupInviteLink.objects.select_for_update().select_related('group'),

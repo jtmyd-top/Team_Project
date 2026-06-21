@@ -1,7 +1,35 @@
 from django.contrib import admin, messages
+from django.contrib.admin.sites import NotRegistered
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import User
 from django.utils.html import format_html
 
-from .models import AccessLog, LoginDevice, LoginNotification, TrustedDevice
+from .models import AccessLog, LoginDevice, LoginNotification, Profile, TrustedDevice
+
+
+class ProfileInline(admin.StackedInline):
+    model = Profile
+    can_delete = False
+    verbose_name_plural = '鐢ㄦ埛璧勬枡'
+    readonly_fields = ('activation_code', 'code_created_at')
+
+
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'activation_code', 'code_created_at')
+    search_fields = ('user__username',)
+    readonly_fields = ('user', 'activation_code', 'code_created_at')
+
+
+class CustomUserAdmin(BaseUserAdmin):
+    inlines = (ProfileInline,)
+
+
+try:
+    admin.site.unregister(User)
+except NotRegistered:
+    pass
+admin.site.register(User, CustomUserAdmin)
 
 
 @admin.register(LoginDevice)

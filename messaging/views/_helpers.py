@@ -19,7 +19,7 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404  # noqa: F401  (保留 import 以便后续工具复用)
 from django.utils import timezone
 
-from knowledge_project.realtime import push_user_event
+from core.realtime import push_user_event
 from core.utils.session_activity import (
     has_recent_messages_page_activity,
     has_recent_user_activity,
@@ -737,7 +737,7 @@ def _maybe_send_new_message_email(sender, recipient, content):
         if not claimed:
             return
 
-        from knowledge_project.utils.smart_email_sender import SmartEmailSender
+        from core.mailers.smart_email_sender import SmartEmailSender
         subject = f"你收到了来自 {sender.username} 的新私信"
         snippet = (content or '').strip().replace('\n', ' ')
         if len(snippet) > 80:
@@ -800,7 +800,7 @@ def _maybe_send_group_mention_email(sender, recipient, group, content):
         if not claimed:
             return
 
-        from knowledge_project.utils.smart_email_sender import SmartEmailSender
+        from core.mailers.smart_email_sender import SmartEmailSender
         subject = f"你在群组 {group.name} 中被 @{sender.username} 提到了"
         snippet = (content or '').strip().replace('\n', ' ')
         if len(snippet) > 80:

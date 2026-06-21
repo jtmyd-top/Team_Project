@@ -76,7 +76,8 @@ class SignupTests(_AuthTestBase):
         self.assertEqual(parse(response)['status'], 'success')
         self.assertTrue(User.objects.filter(username='newbie01').exists())
 
-    def test_signup_rejects_wrong_email_code(self):
+    @patch('knowledge_project.views.auth.signup.verify_captcha_unified', return_value=(True, None))
+    def test_signup_rejects_wrong_email_code(self, _mock_captcha):
         self._seed_email_verification('wrongcode@example.com', code='000000')
         response = post_json(self.client, reverse('signup'), {
             'email': 'wrongcode@example.com',
@@ -104,7 +105,8 @@ class SignupTests(_AuthTestBase):
         })
         self.assertEqual(response.status_code, 400)
 
-    def test_signup_requires_email_verification_in_session(self):
+    @patch('knowledge_project.views.auth.signup.verify_captcha_unified', return_value=(True, None))
+    def test_signup_requires_email_verification_in_session(self, _mock_captcha):
         response = post_json(self.client, reverse('signup'), {
             'email': 'forgot@example.com',
             'email_code': '123456',
@@ -120,8 +122,9 @@ class SignupTests(_AuthTestBase):
 # 登录(login_api)
 # =========================================================================
 class LoginApiTests(_AuthTestBase):
+    @patch('knowledge_project.views.auth.login.verify_captcha_unified', return_value=(True, None))
     @patch('knowledge_project.views.auth.login.CustomLoginView.send_login_notification', return_value=None)
-    def test_login_success_without_2fa(self, _mocked):
+    def test_login_success_without_2fa(self, _mocked, _mock_captcha):
         user = make_user('login01')
         response = post_json(self.client, reverse('login_api'), {
             'username': user.username,
@@ -136,12 +139,14 @@ class LoginApiTests(_AuthTestBase):
         self.assertIn('auth_started_at', session)
         self.assertIn('last_activity_at', session)
 
+    @patch('knowledge_project.views.auth.login.verify_captcha_unified', return_value=(True, None))
     @patch('knowledge_project.views.auth.login.CustomLoginView.send_login_notification', return_value=None)
-    def test_login_preserves_password_whitespace(self, _mocked):
-        user = make_user('login05', password=' Pass-word-123! ')
+    def test_login_preserves_password_whitespace(self, _mocked, _mock_captcha):
+        raw = ' Pass-word-123! '
+        user = make_user('login05', **{'password': raw})
         response = post_json(self.client, reverse('login_api'), {
             'username': user.username,
-            'password': ' Pass-word-123! ',
+            'password': raw,
             'turnstile_token': 'dummy',
         })
         self.assertEqual(response.status_code, 200)
@@ -195,8 +200,9 @@ class LoginApiTests(_AuthTestBase):
         })
         self.assertEqual(response.status_code, 400)
 
+    @patch('knowledge_project.views.auth.login.verify_captcha_unified', return_value=(True, None))
     @patch('knowledge_project.views.auth.login.send_mail', return_value=1)
-    def test_login_2fa_email_user_returns_require_2fa(self, _mock_send):
+    def test_login_2fa_email_user_returns_require_2fa(self, _mock_send, _mock_captcha):
         user = make_user('login03')
         user.profile.two_fa_enabled = True
         user.profile.two_fa_method = 'email'
@@ -336,7 +342,8 @@ class PasswordChangeTests(_AuthTestBase):
 # 密码重置
 # =========================================================================
 class PasswordResetTests(_AuthTestBase):
-    def test_password_reset_api_does_not_leak_user_existence(self):
+    @patch('knowledge_project.views.auth.password_reset.verify_captcha_unified', return_value=(True, None))
+    def test_password_reset_api_does_not_leak_user_existence(self, _mock_captcha):
         response = post_json(self.client, reverse('password_reset_api'), {
             'email': 'nonexistent@example.com',
             'turnstile_token': 'dummy',
@@ -344,7 +351,8 @@ class PasswordResetTests(_AuthTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(parse(response)['status'], 'success')
 
-    def test_password_reset_api_returns_success_for_existing_user(self):
+    @patch('knowledge_project.views.auth.password_reset.verify_captcha_unified', return_value=(True, None))
+    def test_password_reset_api_returns_success_for_existing_user(self, _mock_captcha):
         user = make_user('reset01')
         with patch('knowledge_project.views.auth.password_reset.threading.Thread'):
             response = post_json(self.client, reverse('password_reset_api'), {

@@ -36,8 +36,10 @@ DEBUG = env_bool('DEBUG', not IS_PRODUCTION)
 _allowed_hosts = env_list('ALLOWED_HOSTS')
 if _allowed_hosts:
     ALLOWED_HOSTS = _allowed_hosts
+    if DEBUG and 'testserver' not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append('testserver')
 elif DEBUG:
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
 else:
     raise ImproperlyConfigured('ALLOWED_HOSTS must be set in production.')
 

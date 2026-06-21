@@ -50,6 +50,13 @@ def send_group_message_api(request, group_id):
     try:
         from messaging.models import GroupMessage, GroupMessageMention, MessageAttachment, MessageGroup, MessageGroupMember
         from moderation.models import UserSanction
+        from message_groups.security import check_group_message_security
+
+        # ===== 安全检查：频率限制 + 熔断机制 =====
+        allowed, error_response = check_group_message_security(request.user.id, group_id)
+        if not allowed:
+            return error_response
+
         data = json.loads(request.body)
         content = _body_string(data, 'content')
         try:

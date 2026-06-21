@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, JsonResponse
@@ -40,6 +41,7 @@ __all__ = [
     'timedelta',
     'login_required',
     'User',
+    'cache',
     'transaction',
     'Q',
     'Http404',

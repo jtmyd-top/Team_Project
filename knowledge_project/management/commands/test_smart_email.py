@@ -20,7 +20,7 @@ class Command(BaseCommand):
 
         # 导入智能邮件发送器
         try:
-            from knowledge_project.utils.smart_email_sender import SmartEmailSender
+            from core.mailers.smart_email_sender import SmartEmailSender
         except ImportError as e:
             self.stdout.write(self.style.ERROR(f'导入错误: {e}'))
             return

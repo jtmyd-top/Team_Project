@@ -8,6 +8,25 @@
       @joined="handleGroupJoined"
     />
 
+    <!-- 无法定位公告的提示对话框 -->
+    <div v-if="showAnnouncementJumpFailedDialog" class="announcement-dialog-overlay" @click.self="closeAnnouncementDialog">
+      <div class="announcement-dialog">
+        <div class="announcement-dialog-header">
+          <i class="fas fa-exclamation-triangle"></i>
+          <h3>无法定位公告消息</h3>
+        </div>
+        <div class="announcement-dialog-body">
+          <p>此公告对应的消息已被删除或撤回，无法定位。</p>
+          <p>您可以前往群设置页面查看完整公告内容。</p>
+          <p class="hint-text">注：普通成员仅有查看权限，管理员可编辑群公告。</p>
+        </div>
+        <div class="announcement-dialog-footer">
+          <button class="btn-cancel" @click="closeAnnouncementDialog">取消</button>
+          <button class="btn-confirm" @click="openGroupInfoFromDialog">打开群设置</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 左侧：对话列表 -->
     <aside v-show="!showGroupInvitePreview" class="conversations-sidebar">
       <div class="sidebar-header">
@@ -300,6 +319,7 @@
                   v-for="m in group.messages"
                   :key="m.id"
                   :data-msg-id="m.id"
+                  :class="{ 'jump-highlighted': highlightMessageId === m.id && !globalSearch }"
                   :msg="m"
                   :highlight="highlightMessageId === m.id ? globalSearch : ''"
                   :selectable="selectionMode"
@@ -953,6 +973,15 @@
             </button>
           </footer>
         </template>
+
+        <div v-else class="group-panel-state is-error">
+          <i class="fas fa-circle-exclamation"></i>
+          <strong>群设置加载失败</strong>
+          <span>{{ groupPanel.error || '暂时无法获取群设置内容' }}</span>
+          <button class="group-secondary-btn small" type="button" @click="openGroupInfo">
+            重试
+          </button>
+        </div>
       </section>
     </div>
 
@@ -1105,6 +1134,7 @@ const loadingMessages = ref(false)
 
 // Group invite preview
 const showGroupInvitePreview = ref(false)
+const showAnnouncementJumpFailedDialog = ref(false)
 const groupInviteToken = ref('')
 const currentSettings = ref({
   is_pinned: false,
@@ -1131,6 +1161,7 @@ const mergedForwardDialog = ref({ visible: false, payload: null })
 const groupPanel = ref({
   visible: false,
   loading: false,
+  error: '',
   detail: null,
   nameDraft: '',
   searchInput: '',
@@ -2840,6 +2871,14 @@ async function jumpToGroupAnnouncement(announcement) {
   if (!messages.value.some((message) => message.id === messageId)) {
     await loadMessages({ silent: true })
   }
+
+  // 检查消息是否真的存在（可能被用户删除或撤回）
+  if (!messages.value.some((message) => message.id === messageId)) {
+    showAnnouncementJumpFailedDialog.value = true
+    highlightMessageId.value = null
+    return
+  }
+
   scrollToMessage(messageId)
   setTimeout(() => {
     if (highlightMessageId.value === messageId) highlightMessageId.value = null
@@ -3357,11 +3396,14 @@ async function openGroupInfo() {
   if (!groupId) return
   groupPanel.value.visible = true
   groupPanel.value.loading = true
+  groupPanel.value.error = ''
+  groupPanel.value.detail = null
   groupPanel.value.searchResult = null
   try {
     const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群设置失败'))
+    if (!d.group) throw new Error('群设置数据为空')
     groupPanel.value.detail = d.group
     groupPanel.value.nameDraft = d.group?.name || ''
     groupPanel.value.announcementDraft = d.group?.announcement || ''
@@ -3378,7 +3420,10 @@ async function openGroupInfo() {
       loadGroupAuditLogs()
     }
   } catch (e) {
-    ElMessage.error(e.message)
+    const message = e?.message || '加载群设置失败'
+    groupPanel.value.detail = null
+    groupPanel.value.error = message
+    ElMessage.error(message)
   } finally {
     groupPanel.value.loading = false
   }
@@ -3386,6 +3431,7 @@ async function openGroupInfo() {
 
 function closeGroupInfo() {
   groupPanel.value.visible = false
+  groupPanel.value.error = ''
   groupPanel.value.searchInput = ''
   groupPanel.value.searchResult = null
   groupPanel.value.inviteLinks = []
@@ -3396,6 +3442,15 @@ function closeGroupInfo() {
   groupPanel.value.memberRoleFilter = 'all'
   groupPanel.value.savingAnnouncement = false
   cancelEditGroupAnnouncement()
+}
+
+function closeAnnouncementDialog() {
+  showAnnouncementJumpFailedDialog.value = false
+}
+
+function openGroupInfoFromDialog() {
+  showAnnouncementJumpFailedDialog.value = false
+  openGroupInfo()
 }
 
 function currentGroupAnnouncementFromDetail(detail) {
@@ -5601,6 +5656,29 @@ watch(
   color: var(--text-tertiary);
 }
 
+.group-panel-state.is-error {
+  flex-direction: column;
+  padding: 28px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.group-panel-state.is-error i {
+  color: var(--danger-color, #ef4444);
+  font-size: 22px;
+}
+
+.group-panel-state.is-error strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.group-panel-state.is-error span {
+  max-width: 360px;
+  line-height: 1.5;
+}
+
 .group-edit-row,
 .group-config-box,
 .group-pinned-box,
@@ -7176,5 +7254,166 @@ watch(
 
 .turnstile-gate-actions .btn-ghost:hover {
   background: var(--bg-tertiary, #f2f2f2);
+}
+</style>
+
+<style>
+/* 修复 Element Plus Message 图标异常放大的问题 */
+.el-message__icon {
+  font-size: 16px !important;
+  width: 16px !important;
+  height: 16px !important;
+  flex-shrink: 0 !important;
+}
+
+.el-message__icon svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* 确保 MessageBox 对话框显示在最上层且居中 */
+.el-message-box__wrapper {
+  z-index: 3000 !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.el-overlay {
+  z-index: 2999 !important;
+}
+
+/* 公告跳转失败对话框的特殊样式 */
+.announcement-jump-failed-dialog {
+  z-index: 3001 !important;
+}
+
+/* 自定义公告对话框 */
+.announcement-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+}
+
+.announcement-dialog {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  min-width: 400px;
+  max-width: 500px;
+  overflow: hidden;
+}
+
+.announcement-dialog-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.announcement-dialog-header i {
+  color: #f59e0b;
+  font-size: 22px;
+}
+
+.announcement-dialog-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.announcement-dialog-body {
+  padding: 24px;
+  line-height: 1.6;
+}
+
+.announcement-dialog-body p {
+  margin: 0 0 12px 0;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.announcement-dialog-body p:last-child {
+  margin-bottom: 0;
+}
+
+.announcement-dialog-body .hint-text {
+  font-size: 13px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.announcement-dialog-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.announcement-dialog-footer button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.announcement-dialog-footer .btn-cancel {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.announcement-dialog-footer .btn-cancel:hover {
+  background: #e5e7eb;
+}
+
+.announcement-dialog-footer .btn-confirm {
+  background: #3b82f6;
+  color: white;
+}
+
+.announcement-dialog-footer .btn-confirm:hover {
+  background: #2563eb;
+}
+
+/* 跳转高亮动画 */
+.jump-highlighted {
+  animation: jumpHighlight 2.5s ease-out;
+}
+
+@keyframes jumpHighlight {
+  0% {
+    background-color: #fef3c7;
+    box-shadow: 0 0 0 4px #fbbf24;
+    transform: scale(1.02);
+  }
+  10% {
+    background-color: #fef3c7;
+    box-shadow: 0 0 0 4px #fbbf24;
+    transform: scale(1.02);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+    transform: scale(1);
+  }
 }
 </style>

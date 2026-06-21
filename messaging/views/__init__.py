@@ -39,43 +39,6 @@ from .conversation import (
     toggle_mute_api,
     toggle_pin_api,
 )
-from message_groups.views import (
-    add_group_members_api,
-    check_transfer_eligibility_api,
-    create_message_group_api,
-    delete_group_message_api,
-    dissolve_message_group_api,
-    edit_group_message_api,
-    group_audit_logs_api,
-    group_announcement_detail_api,
-    group_announcement_reads_api,
-    group_bans_api,
-    group_invite_links_api,
-    group_join_requests_api,
-    group_shared_items_api,
-    get_group_messages_api,
-    get_group_policy_api,
-    join_group_by_invite_api,
-    leave_message_group_api,
-    message_group_detail_api,
-    mute_group_member_api,
-    preview_group_invite_api,
-    pin_group_message_api,
-    remove_group_member_api,
-    report_group_message_api,
-    request_join_group_api,
-    review_join_request_api,
-    revoke_group_ban_api,
-    revoke_group_invite_link_api,
-    send_group_message_api,
-    set_group_member_role_api,
-    set_group_mute_mode_api,
-    toggle_group_setting_api,
-    toggle_message_reaction_api,
-    transfer_group_ownership_api,
-    update_group_announcement_api,
-    update_group_profile_api,
-)
 from .preference import (
     block_user_api,
     get_blocked_users_api,
@@ -97,6 +60,54 @@ from .users import (
     search_users_api,
     touch_messages_page_api,
 )
+
+_GROUP_VIEW_EXPORTS = {
+    'add_group_members_api',
+    'check_transfer_eligibility_api',
+    'create_message_group_api',
+    'delete_group_message_api',
+    'dissolve_message_group_api',
+    'edit_group_message_api',
+    'group_audit_logs_api',
+    'group_announcement_detail_api',
+    'group_announcement_reads_api',
+    'group_bans_api',
+    'group_invite_links_api',
+    'group_join_requests_api',
+    'group_shared_items_api',
+    'get_group_messages_api',
+    'get_group_policy_api',
+    'join_group_by_invite_api',
+    'leave_message_group_api',
+    'message_group_detail_api',
+    'mute_group_member_api',
+    'preview_group_invite_api',
+    'pin_group_message_api',
+    'remove_group_member_api',
+    'report_group_message_api',
+    'request_join_group_api',
+    'review_join_request_api',
+    'revoke_group_ban_api',
+    'revoke_group_invite_link_api',
+    'send_group_message_api',
+    'set_group_member_role_api',
+    'set_group_mute_mode_api',
+    'toggle_group_setting_api',
+    'toggle_message_reaction_api',
+    'transfer_group_ownership_api',
+    'update_group_announcement_api',
+    'update_group_profile_api',
+}
+
+
+def __getattr__(name):
+    if name in _GROUP_VIEW_EXPORTS:
+        from message_groups import views as group_views
+        value = getattr(group_views, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # attachment

@@ -27,8 +27,11 @@ def leave_message_group_api(request, group_id):
 @require_http_methods(["POST"])
 @login_required
 def dissolve_message_group_api(request, group_id):
+    """解散群组 - 需要 2FA 验证的高危操作"""
     try:
         from messaging.models import MessageGroup
+        from accounts.services import require_2fa_verified
+
         group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
         membership, error = _require_group_member(group, request.user)
         if error is not None:
@@ -36,6 +39,30 @@ def dissolve_message_group_api(request, group_id):
         if membership.role != 'owner':
             return JsonResponse({'error': '只有群主可以解散群组'}, status=403)
 
+        # 2FA 验证逻辑
+        profile = getattr(request.user, 'profile', None)
+        if profile and profile.two_fa_enabled:
+            from accounts.services import get_param, verify_2fa_for_request
+            code = get_param(request, 'two_fa_code', '')
+            use_backup = get_param(request, 'use_backup', False)
+
+            if not code:
+                return JsonResponse({
+                    'status': 'require_2fa',
+                    'code': 'require_2fa',
+                    'message': '解散群组是高危操作，需要两步验证',
+                    'method': profile.two_fa_method,
+                }, status=200)
+
+            success, message = verify_2fa_for_request(request, code, use_backup)
+            if not success:
+                return JsonResponse({
+                    'status': 'error',
+                    'code': '2fa_failed',
+                    'message': message or '验证失败',
+                }, status=403)
+
+        # 执行解散操作
         group.is_active = False
         group.updated_at = timezone.now()
         group.save(update_fields=['is_active', 'updated_at'])

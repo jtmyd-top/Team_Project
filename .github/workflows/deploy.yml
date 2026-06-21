@@ -1,0 +1,69 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["Django CI"]
+    branches: ["main"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_SERVICE: ${{ secrets.DEPLOY_SERVICE }}
+      DEPLOY_PYTHON: ${{ secrets.DEPLOY_PYTHON }}
+
+    steps:
+      - name: Validate deployment secrets
+        run: |
+          test -n "$DEPLOY_HOST" || (echo "DEPLOY_HOST is required" && exit 1)
+          test -n "$DEPLOY_USER" || (echo "DEPLOY_USER is required" && exit 1)
+          test -n "${{ secrets.DEPLOY_SSH_KEY }}" || (echo "DEPLOY_SSH_KEY is required" && exit 1)
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Deploy over SSH
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+            set -euo pipefail
+
+            APP_PATH="${{ secrets.DEPLOY_PATH }}"
+            SERVICE_NAME="${{ secrets.DEPLOY_SERVICE }}"
+            PYTHON_BIN="${{ secrets.DEPLOY_PYTHON }}"
+            : "${APP_PATH:=/opt/Team_Project}"
+            : "${SERVICE_NAME:=team-project.service}"
+            : "${PYTHON_BIN:=python3}"
+
+            cd "$APP_PATH"
+            git fetch origin main
+            git reset --hard origin/main
+
+            if [ -f .venv/bin/activate ]; then
+              . .venv/bin/activate
+            fi
+
+            "$PYTHON_BIN" -m pip install -r requirements.txt
+            npm --prefix frontend ci
+            npm --prefix frontend run build
+            "$PYTHON_BIN" manage.py migrate --noinput
+            "$PYTHON_BIN" manage.py collectstatic --noinput
+
+            systemctl restart "$SERVICE_NAME"
+            systemctl status "$SERVICE_NAME" --no-pager
+          REMOTE

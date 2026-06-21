@@ -1,5 +1,10 @@
 """Notes crud views."""
 from .common import *  # noqa: F401, F403
+from .common import (
+    _clear_vault_pending_encryption_guard,
+    _invalidate_public_notes_cache,
+    _set_vault_pending_encryption_guard,
+)
 
 
 @login_required
@@ -475,4 +480,3 @@ def toggle_secret_api(request, note_id):
     except Exception as e:
         logger.error(f"为用户 {user.id} 切换笔记 {note_id} 的保密状态时出错: {e}", exc_info=True)
         return JsonResponse({'error': '更新保密状态时发生内部错误'}, status=500)
-
