@@ -772,7 +772,7 @@
           <div v-if="canManageCurrentGroup" class="group-config-box compact">
             <div class="group-section-title">
               <span><i class="fas fa-shield-halved"></i> 权限与入群</span>
-              <button class="group-secondary-btn small" :disabled="groupPanel.savingPermissions" @click="saveGroupPermissions">
+              <button class="group-secondary-btn small" :disabled="groupPanel.savingPermissions || !hasGroupPermissionsChanges" @click="saveGroupPermissions">
                 <i v-if="groupPanel.savingPermissions" class="fas fa-spinner fa-spin"></i>
                 保存
               </button>
@@ -1272,6 +1272,12 @@ const groupPanel = ref({
   sharedMedia: [],
   sharedFiles: [],
   savingPermissions: false,
+  // 权限设置原始值
+  originalPermissions: {
+    require_approval: false,
+    members_visible: true,
+    mute_mode: 'none',
+  },
 })
 const activeMuteMenuUserId = ref(null)
 const muteDurationOptions = [
@@ -1403,6 +1409,18 @@ const hasGroupAnnouncementChanges = computed(() => {
   return (
     groupPanel.value.announcementDraft !== groupPanel.value.announcementOriginal ||
     !!groupPanel.value.announcementPinned !== !!groupPanel.value.announcementPinnedOriginal
+  )
+})
+
+const hasGroupPermissionsChanges = computed(() => {
+  if (!canManageCurrentGroup.value) return false
+  const detail = groupPanel.value.detail
+  const original = groupPanel.value.originalPermissions
+  if (!detail) return false
+  return (
+    !!detail.require_approval !== !!original.require_approval ||
+    (detail.members_visible !== false) !== (original.members_visible !== false) ||
+    (detail.mute_mode || 'none') !== (original.mute_mode || 'none')
   )
 })
 
@@ -3509,6 +3527,12 @@ async function openGroupInfo() {
     groupPanel.value.announcementPinned = !!d.group?.announcement_pinned_at
     groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
     groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
+    // 保存权限设置原始值
+    groupPanel.value.originalPermissions = {
+      require_approval: !!d.group.require_approval,
+      members_visible: d.group.members_visible !== false,
+      mute_mode: d.group.mute_mode || 'none',
+    }
     cancelEditGroupAnnouncement()
     syncConversationAnnouncementFromGroup(d.group)
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
@@ -3725,6 +3749,12 @@ async function saveGroupPermissions() {
       mute_mode: detail.mute_mode || 'none',
     })
     groupPanel.value.detail = mode.group || profile.group || detail
+    // 更新原始权限值
+    groupPanel.value.originalPermissions = {
+      require_approval: !!detail.require_approval,
+      members_visible: detail.members_visible !== false,
+      mute_mode: detail.mute_mode || 'none',
+    }
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('群权限已保存')
   } catch (e) {
