@@ -804,34 +804,6 @@
             </div>
           </div>
 
-          <div v-if="canManageCurrentGroup" class="group-add-box">
-            <div class="group-section-title subtle">
-              <span><i class="fas fa-user-plus"></i> 添加成员</span>
-            </div>
-            <div class="group-add-search">
-              <input
-                v-model="groupPanel.searchInput"
-                class="group-input"
-                type="text"
-                placeholder="搜索完整用户名 / 邮箱 / 搜索码"
-                @keydown.enter.prevent="searchGroupInviteUser"
-              />
-              <button class="group-secondary-btn" :disabled="groupPanel.searchInput.trim().length < 3 || groupPanel.searching" @click="searchGroupInviteUser">
-                <i :class="groupPanel.searching ? 'fas fa-spinner fa-spin' : 'fas fa-search'"></i>
-              </button>
-            </div>
-            <button
-              v-if="groupPanel.searchResult"
-              class="group-member-row invite"
-              type="button"
-              @click="addGroupMember(groupPanel.searchResult)"
-            >
-              <img :src="groupPanel.searchResult.avatar" :alt="groupPanel.searchResult.username" />
-              <span>{{ groupPanel.searchResult.username }}</span>
-              <i class="fas fa-plus"></i>
-            </button>
-          </div>
-
           <div v-if="canManageCurrentGroup" class="group-invite-box">
             <div class="group-section-title">
               <span><i class="fas fa-link"></i> 邀请链接</span>
@@ -1108,7 +1080,7 @@
           </div>
 
           <!-- 搜索和筛选 -->
-          <div v-if="groupPanel.detail?.can_view_members" class="group-members-filters">
+          <div v-if="canViewCurrentGroupMembers" class="group-members-filters">
             <div class="group-members-search">
               <i class="fas fa-search"></i>
               <input
@@ -1130,7 +1102,7 @@
             <i class="fas fa-spinner fa-spin"></i>
             加载中...
           </div>
-          <div v-else-if="!groupPanel.detail?.can_view_members" class="group-panel-state">
+          <div v-else-if="!canViewCurrentGroupMembers" class="group-panel-state">
             <i class="fas fa-eye-slash"></i>
             <p>成员列表已隐藏</p>
           </div>
@@ -1588,7 +1560,7 @@ const currentGroupRole = computed(() =>
 )
 
 const canViewCurrentGroupMembers = computed(() =>
-  !!groupPanel.value.detail?.can_view_members
+  canManageCurrentGroup.value || !!groupPanel.value.detail?.can_view_members
 )
 
 const canMentionAllCurrentGroup = computed(() =>
