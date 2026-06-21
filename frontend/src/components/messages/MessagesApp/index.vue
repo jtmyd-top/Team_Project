@@ -192,6 +192,12 @@
                 <button v-if="isCurrentGroup" class="dm-item" @click="openGroupInfo">
                   <i class="fas fa-users-gear"></i> 群设置
                 </button>
+                <button v-if="isCurrentGroup" class="dm-item" @click="openGroupMembers">
+                  <i class="fas fa-user-group"></i> 群成员
+                </button>
+                <button v-if="isCurrentGroup" class="dm-item" @click="openGroupFiles">
+                  <i class="fas fa-folder-open"></i> 群文件
+                </button>
                 <button v-if="!isCurrentGroup" class="dm-item" @click="toggleMarkRead">
                   <i class="fas" :class="currentSettings.force_unread || hasUnread ? 'fa-check-double' : 'fa-envelope'"></i>
                   <span v-if="currentSettings.force_unread || hasUnread">标记为已读</span><span v-else>标记为未读</span>
@@ -876,170 +882,6 @@
               </div>
             </div>
           </div>
-
-          <div class="group-shared-box">
-            <div class="group-section-title">
-              <span><i class="fas fa-folder-open"></i> 群文件</span>
-              <span class="group-section-meta">
-                {{ groupPanel.sharedMedia.length + groupPanel.sharedFiles.length }} 项
-              </span>
-            </div>
-            <div class="group-shared-tabs" role="tablist" aria-label="群文件分类">
-              <button
-                class="group-shared-tab"
-                :class="{ active: groupPanel.sharedTab === 'media' }"
-                type="button"
-                role="tab"
-                :aria-selected="groupPanel.sharedTab === 'media'"
-                @click="groupPanel.sharedTab = 'media'"
-              >
-                <i class="fas fa-photo-film"></i>
-                媒体 {{ groupPanel.sharedMedia.length }}
-              </button>
-              <button
-                class="group-shared-tab"
-                :class="{ active: groupPanel.sharedTab === 'files' }"
-                type="button"
-                role="tab"
-                :aria-selected="groupPanel.sharedTab === 'files'"
-                @click="groupPanel.sharedTab = 'files'"
-              >
-                <i class="fas fa-file-lines"></i>
-                文件 {{ groupPanel.sharedFiles.length }}
-              </button>
-            </div>
-            <div v-if="groupPanel.sharedLoading" class="group-inline-state">
-              <i class="fas fa-spinner fa-spin"></i>
-              加载中...
-            </div>
-            <div v-else-if="groupPanel.sharedTab === 'media'">
-              <div v-if="groupPanel.sharedMedia.length" class="group-media-grid">
-                <a
-                  v-for="item in groupPanel.sharedMedia"
-                  :key="item.id"
-                  class="group-media-item"
-                  :href="item.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  :title="item.name"
-                >
-                  <img v-if="item.type === 'image'" :src="item.url" :alt="item.name" loading="lazy" />
-                  <video v-else-if="item.type === 'video'" :src="item.url" muted preload="metadata"></video>
-                  <span v-if="item.type === 'video'" class="group-media-type"><i class="fas fa-play"></i></span>
-                  <span class="group-media-meta">{{ sharedItemMeta(item) }}</span>
-                </a>
-              </div>
-              <div v-else class="group-inline-state">暂无媒体</div>
-            </div>
-            <div v-else>
-              <div v-if="groupPanel.sharedFiles.length" class="group-file-list">
-                <a
-                  v-for="item in groupPanel.sharedFiles"
-                  :key="item.id"
-                  class="group-file-row"
-                  :href="item.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  :title="item.name"
-                >
-                  <span class="group-file-icon"><i class="fas" :class="sharedFileIcon(item)"></i></span>
-                  <span class="group-file-main">
-                    <strong>{{ item.name || '未命名文件' }}</strong>
-                    <em>{{ sharedItemMeta(item) }}</em>
-                  </span>
-                  <span class="group-file-size">{{ formatSharedFileSize(item.size) }}</span>
-                </a>
-              </div>
-              <div v-else class="group-inline-state">暂无文件</div>
-            </div>
-          </div>
-
-          <div class="group-members">
-            <div class="group-section-title subtle member-title">
-              <span><i class="fas fa-user-group"></i> 成员</span>
-            </div>
-            <div v-if="!groupPanel.detail.can_view_members" class="group-inline-state">
-              <i class="fas fa-eye-slash"></i>
-              成员列表已隐藏
-            </div>
-            <div
-              v-else
-              v-for="member in groupPanel.detail.members"
-              :key="member.user_id"
-              class="group-member-row"
-            >
-              <img :src="member.avatar" :alt="member.username" />
-              <div class="group-member-meta">
-                <strong>{{ member.username }}</strong>
-                <span>
-                  {{ roleLabel(member.role) }}<template v-if="member.is_self"> · 我</template>
-                  <template v-if="member.is_group_muted"> · 禁言至 {{ formatMutedUntil(member.muted_until) }}</template>
-                </span>
-              </div>
-              <div v-if="canManageGroupMember(member)" class="group-member-actions">
-                <button
-                  v-if="canChangeGroupRole(member)"
-                  class="group-icon-btn"
-                  :title="member.role === 'admin' ? '取消管理员' : '设为管理员'"
-                  @click="setGroupMemberRole(member, member.role === 'admin' ? 'member' : 'admin')"
-                >
-                  <i :class="member.role === 'admin' ? 'fas fa-user' : 'fas fa-user-shield'"></i>
-                </button>
-                <div class="group-mute-menu-wrap" @click.stop>
-                  <button
-                    class="group-icon-btn"
-                    :class="{ active: activeMuteMenuUserId === member.user_id, muted: member.is_group_muted }"
-                    :title="member.is_group_muted ? '禁言设置' : '禁言时长'"
-                    @click="toggleMuteMenu(member)"
-                  >
-                    <i :class="member.is_group_muted ? 'fas fa-microphone' : 'fas fa-microphone-slash'"></i>
-                  </button>
-                  <div
-                    v-if="activeMuteMenuUserId === member.user_id"
-                    class="group-mute-menu"
-                    role="menu"
-                  >
-                    <button
-                      v-if="member.is_group_muted"
-                      class="group-mute-menu-item primary"
-                      @click="unmuteGroupMember(member)"
-                    >
-                      <i class="fas fa-microphone"></i>
-                      解除禁言
-                    </button>
-                    <div v-if="member.is_group_muted" class="group-mute-menu-separator"></div>
-                    <div class="group-mute-menu-title">
-                      {{ member.is_group_muted ? '延长禁言' : '禁言时长' }}
-                    </div>
-                    <button
-                      v-for="option in muteDurationOptions"
-                      :key="option.value"
-                      class="group-mute-menu-item"
-                      @click="muteGroupMember(member, option.value)"
-                    >
-                      {{ option.label }}
-                    </button>
-                  </div>
-                </div>
-                <button
-                  v-if="canRemoveGroupMember(member)"
-                  class="group-icon-btn danger"
-                  title="移出群组"
-                  @click="removeGroupMember(member)"
-                >
-                  <i class="fas fa-user-minus"></i>
-                </button>
-              </div>
-              <button
-                v-else-if="canRemoveGroupMember(member)"
-                class="group-icon-btn danger"
-                title="移出群组"
-                @click="removeGroupMember(member)"
-              >
-                <i class="fas fa-user-minus"></i>
-              </button>
-            </div>
-          </div>
           </div>
 
           <footer class="group-panel-footer">
@@ -1063,6 +905,229 @@
           <button class="group-secondary-btn small" type="button" @click="openGroupInfo">
             重试
           </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="groupFilesVisible" class="group-panel-overlay" @click.self="closeGroupFiles">
+      <section class="group-panel group-files-panel">
+        <header class="group-panel-header">
+          <div class="group-panel-heading">
+            <span class="group-panel-mark" aria-hidden="true">
+              <i class="fas fa-folder-open"></i>
+            </span>
+            <div>
+              <h3>群文件</h3>
+              <p>{{ selectedConversation?.username || '群组会话' }} · {{ groupPanel.sharedMedia.length + groupPanel.sharedFiles.length }} 项</p>
+            </div>
+          </div>
+          <button class="close-btn" type="button" title="关闭" @click="closeGroupFiles">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+
+        <div class="group-files-content">
+          <div class="group-shared-tabs" role="tablist" aria-label="群文件分类">
+            <button
+              class="group-shared-tab"
+              :class="{ active: groupPanel.sharedTab === 'media' }"
+              type="button"
+              role="tab"
+              :aria-selected="groupPanel.sharedTab === 'media'"
+              @click="groupPanel.sharedTab = 'media'"
+            >
+              <i class="fas fa-photo-film"></i>
+              媒体 {{ groupPanel.sharedMedia.length }}
+            </button>
+            <button
+              class="group-shared-tab"
+              :class="{ active: groupPanel.sharedTab === 'files' }"
+              type="button"
+              role="tab"
+              :aria-selected="groupPanel.sharedTab === 'files'"
+              @click="groupPanel.sharedTab = 'files'"
+            >
+              <i class="fas fa-file-lines"></i>
+              文件 {{ groupPanel.sharedFiles.length }}
+            </button>
+          </div>
+
+          <div v-if="groupPanel.sharedLoading" class="group-panel-state">
+            <i class="fas fa-spinner fa-spin"></i>
+            加载中...
+          </div>
+          <div v-else-if="groupPanel.sharedTab === 'media'">
+            <div v-if="groupPanel.sharedMedia.length" class="group-media-grid">
+              <a
+                v-for="item in groupPanel.sharedMedia"
+                :key="item.id"
+                class="group-media-item"
+                :href="item.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="item.name"
+              >
+                <img v-if="item.type === 'image'" :src="item.url" :alt="item.name" loading="lazy" />
+                <video v-else-if="item.type === 'video'" :src="item.url" muted preload="metadata"></video>
+                <span v-if="item.type === 'video'" class="group-media-type"><i class="fas fa-play"></i></span>
+                <span class="group-media-meta">{{ sharedItemMeta(item) }}</span>
+              </a>
+            </div>
+            <div v-else class="group-inline-state">暂无媒体</div>
+          </div>
+          <div v-else>
+            <div v-if="groupPanel.sharedFiles.length" class="group-file-list">
+              <a
+                v-for="item in groupPanel.sharedFiles"
+                :key="item.id"
+                class="group-file-row"
+                :href="item.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="item.name"
+              >
+                <span class="group-file-icon"><i class="fas" :class="sharedFileIcon(item)"></i></span>
+                <span class="group-file-main">
+                  <strong>{{ item.name || '未命名文件' }}</strong>
+                  <em>{{ sharedItemMeta(item) }}</em>
+                </span>
+                <span class="group-file-size">{{ formatSharedFileSize(item.size) }}</span>
+              </a>
+            </div>
+            <div v-else class="group-inline-state">暂无文件</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 群成员面板 -->
+    <div v-if="groupMembersVisible" class="group-panel-overlay" @click.self="closeGroupMembers">
+      <section class="group-panel group-members-panel">
+        <header class="group-panel-header">
+          <div class="group-panel-heading">
+            <span class="group-panel-mark" aria-hidden="true">
+              <i class="fas fa-user-group"></i>
+            </span>
+            <div>
+              <h3>群成员</h3>
+              <p>{{ selectedConversation?.username || '群组会话' }} · {{ filteredGroupMembers.length }} 人</p>
+            </div>
+          </div>
+          <button class="close-btn" type="button" title="关闭" @click="closeGroupMembers">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+
+        <div class="group-members-content">
+          <!-- 搜索和筛选 -->
+          <div class="group-members-filters">
+            <div class="group-members-search">
+              <i class="fas fa-search"></i>
+              <input
+                v-model="groupPanel.memberSearch"
+                type="text"
+                placeholder="搜索成员用户名..."
+              />
+            </div>
+            <select v-model="groupPanel.memberRoleFilter" class="group-members-role-filter">
+              <option value="all">全部成员</option>
+              <option value="owner">群主</option>
+              <option value="admin">管理员</option>
+              <option value="member">普通成员</option>
+            </select>
+          </div>
+
+          <!-- 成员列表 -->
+          <div v-if="groupPanel.loading" class="group-panel-state">
+            <i class="fas fa-spinner fa-spin"></i>
+            加载中...
+          </div>
+          <div v-else-if="!groupPanel.detail?.can_view_members" class="group-panel-state">
+            <i class="fas fa-eye-slash"></i>
+            <p>成员列表已隐藏</p>
+          </div>
+          <div v-else-if="!filteredGroupMembers.length" class="group-panel-state">
+            <i class="fas fa-user-slash"></i>
+            <p>没有找到符合条件的成员</p>
+          </div>
+          <div v-else class="group-members-list">
+            <div
+              v-for="member in filteredGroupMembers"
+              :key="member.user_id"
+              class="group-member-item"
+            >
+              <img :src="member.avatar" :alt="member.username" class="member-avatar" />
+              <div class="member-info">
+                <div class="member-name">
+                  <strong>{{ member.username }}</strong>
+                  <span v-if="member.is_self" class="member-badge me">我</span>
+                  <span v-if="member.role === 'owner'" class="member-badge owner">群主</span>
+                  <span v-else-if="member.role === 'admin'" class="member-badge admin">管理员</span>
+                </div>
+                <div class="member-status">
+                  <span v-if="member.is_group_muted" class="muted-status">
+                    <i class="fas fa-microphone-slash"></i>
+                    禁言至 {{ formatMutedUntil(member.muted_until) }}
+                  </span>
+                  <span v-else class="normal-status">正常</span>
+                </div>
+              </div>
+              <div v-if="canManageGroupMember(member)" class="member-actions">
+                <button
+                  v-if="canChangeGroupRole(member)"
+                  class="member-action-btn"
+                  :title="member.role === 'admin' ? '取消管理员' : '设为管理员'"
+                  @click="setGroupMemberRole(member, member.role === 'admin' ? 'member' : 'admin')"
+                >
+                  <i :class="member.role === 'admin' ? 'fas fa-user' : 'fas fa-user-shield'"></i>
+                </button>
+                <div class="member-mute-menu-wrap" @click.stop>
+                  <button
+                    class="member-action-btn"
+                    :class="{ active: activeMuteMenuUserId === member.user_id, muted: member.is_group_muted }"
+                    :title="member.is_group_muted ? '禁言设置' : '禁言时长'"
+                    @click="toggleMuteMenu(member)"
+                  >
+                    <i :class="member.is_group_muted ? 'fas fa-microphone' : 'fas fa-microphone-slash'"></i>
+                  </button>
+                  <div
+                    v-if="activeMuteMenuUserId === member.user_id"
+                    class="member-mute-menu"
+                    role="menu"
+                  >
+                    <button
+                      v-if="member.is_group_muted"
+                      class="member-mute-item primary"
+                      @click="unmuteGroupMember(member)"
+                    >
+                      <i class="fas fa-microphone"></i>
+                      解除禁言
+                    </button>
+                    <div v-if="member.is_group_muted" class="member-mute-separator"></div>
+                    <div class="member-mute-title">
+                      {{ member.is_group_muted ? '延长禁言' : '禁言时长' }}
+                    </div>
+                    <button
+                      v-for="option in muteDurationOptions"
+                      :key="option.value"
+                      class="member-mute-item"
+                      @click="muteGroupMember(member, option.value)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  v-if="canRemoveGroupMember(member)"
+                  class="member-action-btn danger"
+                  title="移出群组"
+                  @click="removeGroupMember(member)"
+                >
+                  <i class="fas fa-user-minus"></i>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -1238,6 +1303,8 @@ const showNewMessageDialog = ref(false)
 const showChatMenu = ref(false)
 const showChatSearch = ref(false)
 const showDisappearingDialog = ref(false)
+const groupFilesVisible = ref(false)
+const groupMembersVisible = ref(false)
 const reportTarget = ref(null)
 const mergedForwardDialog = ref({ visible: false, payload: null })
 const groupPanel = ref({
@@ -2093,6 +2160,7 @@ function selectConversation(conv) {
   replyDraft.value = null
   highlightMessageId.value = null
   showChatMenu.value = false
+  groupFilesVisible.value = false
   closeMessageCtxMenu()
   mobileChatOpen.value = true
   loadMessages()
@@ -3536,7 +3604,6 @@ async function openGroupInfo() {
     cancelEditGroupAnnouncement()
     syncConversationAnnouncementFromGroup(d.group)
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
-    loadGroupSharedItems()
     if (canManageCurrentGroup.value) {
       loadGroupInviteLinks()
       loadGroupJoinRequests()
@@ -3568,6 +3635,50 @@ function closeGroupInfo() {
   groupPanel.value.memberRoleFilter = 'all'
   groupPanel.value.savingAnnouncement = false
   cancelEditGroupAnnouncement()
+}
+
+async function openGroupFiles() {
+  showChatMenu.value = false
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  groupFilesVisible.value = true
+  groupPanel.value.sharedTab = 'media'
+  await loadGroupSharedItems()
+}
+
+function closeGroupFiles() {
+  groupFilesVisible.value = false
+}
+
+async function openGroupMembers() {
+  showChatMenu.value = false
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  groupMembersVisible.value = true
+  groupPanel.value.memberSearch = ''
+  groupPanel.value.memberRoleFilter = 'all'
+  // 如果群组信息还没加载，先加载
+  if (!groupPanel.value.detail) {
+    groupPanel.value.loading = true
+    try {
+      const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if (r.ok && d.group) {
+        groupPanel.value.detail = d.group
+      }
+    } catch (e) {
+      ElMessage.error('加载群组信息失败')
+    } finally {
+      groupPanel.value.loading = false
+    }
+  }
+}
+
+function closeGroupMembers() {
+  groupMembersVisible.value = false
+  groupPanel.value.memberSearch = ''
+  groupPanel.value.memberRoleFilter = 'all'
+  activeMuteMenuUserId.value = null
 }
 
 function closeAnnouncementDialog() {
@@ -5756,6 +5867,10 @@ watch(
   overflow: hidden;
 }
 
+.group-files-panel {
+  width: min(680px, 100%);
+}
+
 .group-panel-header {
   display: flex;
   align-items: center;
@@ -5814,6 +5929,19 @@ watch(
   scrollbar-gutter: stable;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 28%, transparent), transparent 160px);
+}
+
+.group-files-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 24%, transparent), transparent 150px);
 }
 
 .group-panel .close-btn {
@@ -6696,6 +6824,301 @@ watch(
 
 .group-file-size {
   justify-self: end;
+}
+
+/* ========== 群成员面板 ========== */
+.group-members-panel {
+  width: min(720px, 100%);
+}
+
+.group-members-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 24%, transparent), transparent 150px);
+}
+
+.group-members-filters {
+  display: flex;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 24%, transparent);
+}
+
+.group-members-search {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.group-members-search i {
+  position: absolute;
+  left: 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.group-members-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px 0 36px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13.5px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-members-search input:focus {
+  outline: none;
+  border-color: var(--primary-color, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+}
+
+.group-members-role-filter {
+  height: 38px;
+  padding: 0 32px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-members-role-filter:focus {
+  outline: none;
+  border-color: var(--primary-color, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+}
+
+.group-members-list {
+  padding: 12px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-member-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-member-item:hover {
+  border-color: color-mix(in srgb, var(--border-color) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 42%, var(--bg-primary));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.member-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+
+.member-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.member-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.member-name strong {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.member-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.member-badge.me {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+  color: var(--primary-color, #2563eb);
+}
+
+.member-badge.owner {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+}
+
+.member-badge.admin {
+  background: color-mix(in srgb, #8b5cf6 15%, transparent);
+  color: #7c3aed;
+}
+
+.member-status {
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+
+.normal-status {
+  color: var(--text-tertiary);
+}
+
+.muted-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger-color, #ef4444);
+}
+
+.muted-status i {
+  font-size: 11px;
+}
+
+.member-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.member-action-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.member-action-btn:hover {
+  border-color: var(--primary-color, #2563eb);
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+  color: var(--primary-color, #2563eb);
+  transform: translateY(-1px);
+}
+
+.member-action-btn.danger:hover {
+  border-color: var(--danger-color, #ef4444);
+  background: color-mix(in srgb, var(--danger-color, #ef4444) 12%, transparent);
+  color: var(--danger-color, #ef4444);
+}
+
+.member-action-btn.active,
+.member-action-btn.muted {
+  border-color: var(--primary-color, #2563eb);
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 18%, transparent);
+  color: var(--primary-color, #2563eb);
+}
+
+.member-action-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 18%, transparent);
+}
+
+.member-mute-menu-wrap {
+  position: relative;
+}
+
+.member-mute-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.member-mute-item {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.member-mute-item:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+}
+
+.member-mute-item.primary {
+  color: var(--primary-color, #2563eb);
+  font-weight: 600;
+}
+
+.member-mute-item.primary:hover {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+}
+
+.member-mute-item i {
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.member-mute-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--border-color) 48%, transparent);
+}
+
+.member-mute-title {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .group-member-row {
