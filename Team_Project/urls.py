@@ -31,6 +31,17 @@ urlpatterns = [
     # 这会自动为我们添加 /accounts/login/, /accounts/logout/ 等所有必需的URL
     path('accounts/', include('django.contrib.auth.urls')),
     # 将我们自己app的URL包含进来
+    # Domain app URL entrypoints live here; knowledge_project.urls is kept only as a compatibility shell.
+    path('', include('ops.urls')),
+    path('', include('message_groups.urls')),
+    path('', include('assets.urls')),
+    path('', include('messaging.urls')),
+    path('', include('notes.urls')),
+    path('', include('accounts.urls')),
+    path('', include('vault.urls')),
+    path('api/notifications/', include('notifications.urls')),
+    path('moderation/', include('moderation.urls')),
+    path('api/moderation/', include('moderation.api_urls')),
     path('', include('knowledge_project.urls')),
     path("ckeditor5/", include('django_ckeditor_5.urls'), name="ck_editor_5_upload_file"),
     path('captcha/', include('captcha.urls')),  # django-simple-captcha

@@ -585,7 +585,7 @@
         <i class="fas fa-trash-alt"></i> 删除
       </button>
       <button
-        v-if="messageCtxMenu.msg?.is_own && canRecallMessage(messageCtxMenu.msg)"
+        v-if="canRecallMessage(messageCtxMenu.msg)"
         class="dm-item danger"
         @click="messageCtxAction('recall')"
       >
@@ -2697,7 +2697,15 @@ function cleanupVoiceRecording() {
 }
 
 function canRecallMessage(m) {
-  if (!m?.is_own || !m?.created_at) return false
+  if (!m?.created_at) return false
+
+  // 群主/管理员可以撤回任何消息，无时间限制
+  if (isCurrentGroup.value && canManageCurrentGroup.value) {
+    return true
+  }
+
+  // 普通成员只能撤回自己在时间窗口内的消息
+  if (!m?.is_own) return false
   const ts = new Date(m.created_at).getTime()
   return Number.isFinite(ts) && (Date.now() - ts) / 1000 < recallWindowSeconds
 }
@@ -3325,8 +3333,14 @@ function buildKnowledgeNoteFromMessages(selected) {
 }
 
 async function recallMessage(m) {
+  const isOwn = m?.is_own
+  const confirmText = isOwn
+    ? '撤回后双方都将看不到此消息，确认撤回吗？'
+    : '你正在以管理员身份撤回此成员的消息，撤回后所有人都将看不到此消息，确认撤回吗？'
+  const confirmTitle = isOwn ? '撤回消息' : '撤回成员消息'
+
   try {
-    await ElMessageBox.confirm('撤回后双方都将看不到此消息，确认撤回吗？', '撤回消息', {
+    await ElMessageBox.confirm(confirmText, confirmTitle, {
       confirmButtonText: '撤回',
       cancelButtonText: '取消',
       type: 'warning',
@@ -3719,18 +3733,7 @@ async function openGroupMembers() {
   groupPanel.value.memberRoleFilter = 'all'
   // 如果群组信息还没加载，或已经切换到另一个群，先重新加载
   if (normalizeUserId(groupPanel.value.detail?.id) !== groupId) {
-    groupPanel.value.loading = true
-    try {
-      const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
-      const d = await r.json().catch(() => ({}))
-      if (r.ok && d.group) {
-        groupPanel.value.detail = d.group
-      }
-    } catch (e) {
-      ElMessage.error('加载群组信息失败')
-    } finally {
-      groupPanel.value.loading = false
-    }
+    await refreshCurrentGroupDetail({ loading: true })
   }
   // 如果是管理员，加载邀请链接
   if (canManageCurrentGroup.value) {
@@ -3743,6 +3746,32 @@ function closeGroupMembers() {
   groupPanel.value.memberSearch = ''
   groupPanel.value.memberRoleFilter = 'all'
   activeMuteMenuUserId.value = null
+}
+
+async function refreshCurrentGroupDetail({ loading = false } = {}) {
+  const groupId = selectedGroupId()
+  if (!groupId) return null
+  if (loading) groupPanel.value.loading = true
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群组信息失败'))
+    if (d.group) {
+      groupPanel.value.detail = d.group
+      groupPanel.value.originalPermissions = {
+        require_approval: !!d.group.require_approval,
+        members_visible: d.group.members_visible !== false,
+        mute_mode: d.group.mute_mode || 'none',
+      }
+    }
+    if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
+    return d.group || null
+  } catch (e) {
+    ElMessage.error(e.message || '加载群组信息失败')
+    return null
+  } finally {
+    if (loading) groupPanel.value.loading = false
+  }
 }
 
 function closeAnnouncementDialog() {
@@ -3944,6 +3973,7 @@ async function setGroupMembersVisible(value) {
   if (!groupPanel.value.detail || !canManageCurrentGroup.value) return
   groupPanel.value.detail.members_visible = !!value
   await saveGroupPermissions()
+  await refreshCurrentGroupDetail()
 }
 
 async function searchGroupInviteUser() {

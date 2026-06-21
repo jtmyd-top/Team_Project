@@ -408,13 +408,34 @@ def delete_group_message_api(request, group_id, message_id):
         message = get_object_or_404(GroupMessage, id=message_id, group=group)
 
         if scope == 'both':
-            if message.sender_id != request.user.id:
-                return JsonResponse({'error': '只有发送者可以撤回'}, status=403)
-            if message.created_at < timezone.now() - timedelta(seconds=RECALL_WINDOW_SECONDS):
-                return JsonResponse({'error': f'发送超过 {RECALL_WINDOW_SECONDS // 60} 分钟的消息不能撤回'}, status=403)
+            # 检查撤回权限
+            is_sender = message.sender_id == request.user.id
+            is_manager = membership.role in ('owner', 'admin')
+
+            # 普通成员只能撤回自己的消息
+            if not is_sender and not is_manager:
+                return JsonResponse({'error': '只有发送者或群管理员可以撤回此消息'}, status=403)
+
+            # 普通成员撤回自己的消息有时间限制
+            if is_sender and not is_manager:
+                if message.created_at < timezone.now() - timedelta(seconds=RECALL_WINDOW_SECONDS):
+                    return JsonResponse({'error': f'发送超过 {RECALL_WINDOW_SECONDS // 60} 分钟的消息不能撤回'}, status=403)
+
+            # 群主/管理员撤回任何消息无时间限制
             message.is_recalled = True
             message.recalled_at = timezone.now()
             message.save(update_fields=['is_recalled', 'recalled_at'])
+
+            # 如果是管理员撤回他人消息，记录审计日志
+            if is_manager and not is_sender:
+                _create_group_audit_log(
+                    group,
+                    request.user,
+                    'message_recall_by_admin',
+                    target_user=message.sender,
+                    metadata={'message_id': message.id, 'content_preview': message.content[:50]},
+                )
+
             return JsonResponse({'status': 'success', 'scope': 'both'})
 
         GroupMessageDeletion.objects.get_or_create(message=message, user=request.user)
