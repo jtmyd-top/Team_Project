@@ -791,13 +791,6 @@
                   <em>邀请链接加入前需管理员同意</em>
                 </span>
               </label>
-              <label class="group-switch-row">
-                <input v-model="groupPanel.detail.members_visible" type="checkbox" />
-                <span>
-                  <strong>成员列表可见</strong>
-                  <em>关闭后普通成员不能查看列表或主动 @ 成员</em>
-                </span>
-              </label>
               <label class="group-switch-row select-row">
                 <span>
                   <strong>发言模式</strong>
@@ -1019,8 +1012,103 @@
         </header>
 
         <div class="group-members-content">
+          <div v-if="canManageCurrentGroup && groupPanel.detail" class="group-members-toolbar">
+            <div class="group-members-visibility-meta">
+              <strong>{{ groupPanel.detail?.members_visible === false ? '成员列表已隐藏' : '成员列表可见' }}</strong>
+              <span>{{ groupPanel.detail?.members_visible === false ? '普通成员不可查看列表或主动 @ 成员' : '普通成员可查看成员列表并主动 @ 成员' }}</span>
+            </div>
+            <button
+              class="group-secondary-btn small"
+              type="button"
+              :disabled="groupPanel.savingPermissions"
+              @click="setGroupMembersVisible(groupPanel.detail?.members_visible === false)"
+            >
+              <i v-if="groupPanel.savingPermissions" class="fas fa-spinner fa-spin"></i>
+              <i v-else class="fas" :class="groupPanel.detail?.members_visible === false ? 'fa-eye' : 'fa-eye-slash'"></i>
+              {{ groupPanel.detail?.members_visible === false ? '显示成员' : '隐藏成员' }}
+            </button>
+          </div>
+
+          <!-- 添加成员 -->
+          <div v-if="canManageCurrentGroup" class="group-add-member-section">
+            <div class="group-section-header">
+              <span class="section-icon"><i class="fas fa-user-plus"></i></span>
+              <strong>添加成员</strong>
+            </div>
+            <div class="group-add-search">
+              <input
+                v-model="groupPanel.searchInput"
+                class="group-input"
+                type="text"
+                placeholder="搜索完整用户名 / 邮箱 / 搜索码"
+                @keydown.enter.prevent="searchGroupInviteUser"
+              />
+              <button class="group-secondary-btn" :disabled="groupPanel.searchInput.trim().length < 3 || groupPanel.searching" @click="searchGroupInviteUser">
+                <i :class="groupPanel.searching ? 'fas fa-spinner fa-spin' : 'fas fa-search'"></i>
+              </button>
+            </div>
+            <button
+              v-if="groupPanel.searchResult"
+              class="group-member-row invite"
+              type="button"
+              @click="addGroupMember(groupPanel.searchResult)"
+            >
+              <img :src="groupPanel.searchResult.avatar" :alt="groupPanel.searchResult.username" />
+              <span>{{ groupPanel.searchResult.username }}</span>
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+
+          <!-- 邀请链接 -->
+          <div v-if="canManageCurrentGroup" class="group-invite-section">
+            <div class="group-section-header">
+              <span class="section-icon"><i class="fas fa-link"></i></span>
+              <strong>邀请链接</strong>
+              <button
+                class="group-secondary-btn small"
+                :disabled="groupPanel.inviteBusy || groupPanel.inviteLoading || groupPanel.inviteLinks.length > 0"
+                :title="groupPanel.inviteLinks.length > 0 ? '每个群组仅能创建一个邀请链接' : '新建邀请链接'"
+                @click="createGroupInviteLink"
+              >
+                <i :class="groupPanel.inviteBusy ? 'fas fa-spinner fa-spin' : 'fas fa-link'"></i>
+                {{ groupPanel.inviteLinks.length > 0 ? '已创建' : '新建' }}
+              </button>
+            </div>
+            <div v-if="groupPanel.inviteLoading" class="group-inline-state small">
+              <i class="fas fa-spinner fa-spin"></i>
+              加载中...
+            </div>
+            <div v-else-if="!groupPanel.inviteLinks.length" class="group-inline-state small">暂无邀请链接</div>
+            <div v-else class="group-invite-compact">
+              <div
+                v-for="invite in groupPanel.inviteLinks"
+                :key="invite.id"
+                class="invite-link-row"
+                :class="{ disabled: !invite.is_active }"
+              >
+                <div class="invite-link-info">
+                  <strong>{{ invite.is_active ? '可用链接' : '已失效' }}</strong>
+                  <span>已使用 {{ invite.uses_count || 0 }} 次</span>
+                </div>
+                <div class="invite-link-actions">
+                  <button class="group-icon-btn" title="复制邀请链接" @click="copyGroupInviteLink(invite)">
+                    <i class="fas fa-copy"></i>
+                  </button>
+                  <button
+                    v-if="invite.is_active"
+                    class="group-icon-btn danger"
+                    title="撤销邀请链接"
+                    @click="revokeGroupInviteLink(invite)"
+                  >
+                    <i class="fas fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 搜索和筛选 -->
-          <div class="group-members-filters">
+          <div v-if="groupPanel.detail?.can_view_members" class="group-members-filters">
             <div class="group-members-search">
               <i class="fas fa-search"></i>
               <input
@@ -3657,8 +3745,8 @@ async function openGroupMembers() {
   groupMembersVisible.value = true
   groupPanel.value.memberSearch = ''
   groupPanel.value.memberRoleFilter = 'all'
-  // 如果群组信息还没加载，先加载
-  if (!groupPanel.value.detail) {
+  // 如果群组信息还没加载，或已经切换到另一个群，先重新加载
+  if (normalizeUserId(groupPanel.value.detail?.id) !== groupId) {
     groupPanel.value.loading = true
     try {
       const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
@@ -3671,6 +3759,10 @@ async function openGroupMembers() {
     } finally {
       groupPanel.value.loading = false
     }
+  }
+  // 如果是管理员，加载邀请链接
+  if (canManageCurrentGroup.value) {
+    loadGroupInviteLinks()
   }
 }
 
@@ -3859,12 +3951,13 @@ async function saveGroupPermissions() {
     const mode = await apiPost(`/api/messages/groups/${groupId}/mute-mode/`, {
       mute_mode: detail.mute_mode || 'none',
     })
-    groupPanel.value.detail = mode.group || profile.group || detail
+    const savedDetail = mode.group || profile.group || detail
+    groupPanel.value.detail = savedDetail
     // 更新原始权限值
     groupPanel.value.originalPermissions = {
-      require_approval: !!detail.require_approval,
-      members_visible: detail.members_visible !== false,
-      mute_mode: detail.mute_mode || 'none',
+      require_approval: !!savedDetail.require_approval,
+      members_visible: savedDetail.members_visible !== false,
+      mute_mode: savedDetail.mute_mode || 'none',
     }
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('群权限已保存')
@@ -3873,6 +3966,12 @@ async function saveGroupPermissions() {
   } finally {
     groupPanel.value.savingPermissions = false
   }
+}
+
+async function setGroupMembersVisible(value) {
+  if (!groupPanel.value.detail || !canManageCurrentGroup.value) return
+  groupPanel.value.detail.members_visible = !!value
+  await saveGroupPermissions()
 }
 
 async function searchGroupInviteUser() {
@@ -6841,6 +6940,124 @@ watch(
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 24%, transparent), transparent 150px);
 }
 
+.group-members-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 72%, var(--bg-secondary));
+}
+
+.group-members-visibility-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.group-members-visibility-meta strong {
+  color: var(--text-primary);
+  font-size: 13.5px;
+  line-height: 1.25;
+}
+
+.group-members-visibility-meta span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.group-add-member-section,
+.group-invite-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 42%, transparent);
+}
+
+.group-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.section-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+  color: var(--primary-color, #2563eb);
+  font-size: 14px;
+}
+
+.group-section-header strong {
+  flex: 1;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.group-invite-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.invite-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 62%, transparent);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.invite-link-row:hover {
+  border-color: color-mix(in srgb, var(--border-color) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 32%, var(--bg-primary));
+}
+
+.invite-link-row.disabled {
+  opacity: 0.6;
+}
+
+.invite-link-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.invite-link-info strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.invite-link-info span {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.invite-link-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.group-inline-state.small {
+  min-height: 60px;
+  padding: 16px;
+  font-size: 13px;
+}
+
 .group-members-filters {
   display: flex;
   gap: 12px;
@@ -7969,6 +8186,20 @@ watch(
 
   .group-invite-row {
     grid-template-columns: minmax(0, 1fr) 34px 34px;
+  }
+
+  .group-members-toolbar,
+  .group-members-filters {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    flex-direction: column;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .group-members-toolbar .group-secondary-btn,
+  .group-members-role-filter {
+    width: 100%;
   }
 
   .group-media-grid {
