@@ -73,7 +73,12 @@ def send_group_message_api(request, group_id):
         # Phase 2: 获取回复和转发参数
         reply_to_id = data.get('reply_to')
         forwarded_from_id = data.get('forwarded_from')
-        mentioned_usernames = data.get('mentions', [])  # @提及的用户名列表
+        raw_mentions = data.get('mentions', [])  # @提及的用户名列表
+        mentioned_usernames = [
+            str(username).strip()
+            for username in raw_mentions
+            if isinstance(username, str) and str(username).strip()
+        ] if isinstance(raw_mentions, list) else []
         mention_everyone = bool(data.get('mention_all')) or '@全体' in content or '@all' in content.lower()
 
         mute = UserSanction.is_muted(request.user)
@@ -87,16 +92,37 @@ def send_group_message_api(request, group_id):
         send_error = _can_send_group_message(group, membership)
         if send_error is not None:
             return send_error
-        if mention_everyone and membership.role not in ('owner', 'admin') and not group.allow_member_mention_all:
+        if mention_everyone and membership.role not in ('owner', 'admin'):
             return JsonResponse({'error': '当前群组仅群主或管理员可以 @全体成员'}, status=403)
 
         # Phase 2: 验证回复消息
         reply_to_message = None
         if reply_to_id:
             try:
-                reply_to_message = GroupMessage.objects.get(id=reply_to_id, group=group, is_recalled=False)
+                reply_to_message = GroupMessage.objects.select_related('sender').get(id=reply_to_id, group=group, is_recalled=False)
             except GroupMessage.DoesNotExist:
                 return JsonResponse({'error': '回复的消息不存在或已撤回'}, status=400)
+
+        if mentioned_usernames and not _can_view_group_members(group, membership):
+            allowed_quoted_mentions = set()
+            if reply_to_message and reply_to_message.sender_id != request.user.id:
+                quoted_username = reply_to_message.sender.username
+                if f'@{quoted_username}' in content:
+                    allowed_quoted_mentions.add(quoted_username)
+            invalid_mentions = [
+                username for username in mentioned_usernames
+                if username not in allowed_quoted_mentions
+            ]
+            if invalid_mentions:
+                return JsonResponse({'error': '当前群组未开放成员列表，不能主动 @ 群成员'}, status=403)
+
+        if (
+            reply_to_message
+            and reply_to_message.sender_id != request.user.id
+            and f'@{reply_to_message.sender.username}' in content
+            and reply_to_message.sender.username not in mentioned_usernames
+        ):
+            mentioned_usernames.append(reply_to_message.sender.username)
 
         # Phase 2: 验证转发消息
         forwarded_message = None
@@ -272,10 +298,31 @@ def group_shared_items_api(request, group_id):
         if error is not None:
             return error
 
+        def _shared_attachment_payload(attachment, message):
+            payload = _attachment_payload(attachment)
+            payload.update({
+                'sender': _user_payload(message.sender),
+                'message_id': message.id,
+                'group_id': group.id,
+                'created_at': message.created_at.isoformat() if message.created_at else None,
+                'category': 'media' if attachment.attachment_type in ('image', 'video') else 'file',
+            })
+            return payload
+
         links = []
+        media = []
+        files = []
         seen = set()
         qs = _visible_group_messages_qs(group, membership).order_by('-created_at')[:200]
         for message in qs:
+            for attachment in message.attachments.all():
+                item = _shared_attachment_payload(attachment, message)
+                if attachment.attachment_type in ('image', 'video'):
+                    if len(media) < 60:
+                        media.append(item)
+                elif len(files) < 60:
+                    files.append(item)
+
             for url in _extract_links_from_text(message.content):
                 if url in seen:
                     continue
@@ -294,8 +341,9 @@ def group_shared_items_api(request, group_id):
         return JsonResponse({
             'status': 'success',
             'links': links,
-            'files': [],
-            'images': [],
+            'media': media,
+            'files': files,
+            'images': [item for item in media if item.get('type') == 'image'],
         })
     except Http404:
         raise

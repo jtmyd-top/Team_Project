@@ -191,6 +191,10 @@ def update_group_profile_api(request, group_id):
             group.require_approval = bool(data.get('require_approval'))
             changed_fields.append('require_approval')
             metadata['require_approval'] = group.require_approval
+        if 'members_visible' in data:
+            group.members_visible = bool(data.get('members_visible'))
+            changed_fields.append('members_visible')
+            metadata['members_visible'] = group.members_visible
         if 'allow_member_mention_all' in data:
             group.allow_member_mention_all = bool(data.get('allow_member_mention_all'))
             changed_fields.append('allow_member_mention_all')

@@ -398,6 +398,7 @@ class MessageGroup(models.Model):
     )
     # Phase 3: 入群审批
     require_approval = models.BooleanField(default=False, verbose_name="需要入群审批")
+    members_visible = models.BooleanField(default=True, verbose_name="成员列表对普通成员可见")
     allow_member_mention_all = models.BooleanField(default=False, verbose_name="Allow members to mention everyone")
     pinned_message = models.ForeignKey(
         'GroupMessage', null=True, blank=True, on_delete=models.SET_NULL,

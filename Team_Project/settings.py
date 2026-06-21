@@ -101,7 +101,7 @@ except ImportError:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    # 'whitenoise.middleware.WhiteNoiseMiddleware',  # 在 ASGI/Daphne 下暂时禁用，使用 Django URL 路由提供静态文件
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'Team_Project.middleware.IPBanMiddleware',

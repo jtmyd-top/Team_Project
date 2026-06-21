@@ -139,6 +139,11 @@ def _member_payload(membership):
         'is_self': False,
     }
 
+def _can_view_group_members(group, viewer_membership):
+    if not viewer_membership:
+        return False
+    return group.members_visible or _is_group_manager(viewer_membership)
+
 def _group_detail_payload(group, viewer_membership=None):
     memberships = list(
         group.memberships
@@ -146,8 +151,10 @@ def _group_detail_payload(group, viewer_membership=None):
         .select_related('user')
         .order_by('role', 'joined_at')
     )
-    members = [_member_payload(membership) for membership in memberships]
-    if viewer_membership:
+    can_view_members = _can_view_group_members(group, viewer_membership)
+    visible_memberships = memberships if can_view_members else []
+    members = [_member_payload(membership) for membership in visible_memberships]
+    if viewer_membership and can_view_members:
         for member in members:
             member['is_self'] = member['user_id'] == viewer_membership.user_id
     current_announcement = _latest_active_announcement(group)
@@ -169,12 +176,14 @@ def _group_detail_payload(group, viewer_membership=None):
         ],
         'mute_mode': group.mute_mode,
         'require_approval': group.require_approval,
+        'members_visible': group.members_visible,
+        'can_view_members': can_view_members,
         'allow_member_mention_all': group.allow_member_mention_all,
         'pinned_message': _pinned_group_message_payload(group, viewer_membership.user if viewer_membership else None),
         'owner_id': group.owner_id,
-        'member_count': len(members),
+        'member_count': len(memberships),
         'max_members': MAX_MESSAGE_GROUP_MEMBERS,
-        'is_full': len(members) >= MAX_MESSAGE_GROUP_MEMBERS,
+        'is_full': len(memberships) >= MAX_MESSAGE_GROUP_MEMBERS,
         'pending_join_request_count': group.join_requests.filter(status='pending').count() if viewer_membership and _is_group_manager(viewer_membership) else 0,
         'created_at': group.created_at.isoformat() if group.created_at else None,
         'updated_at': group.updated_at.isoformat() if group.updated_at else None,
@@ -196,6 +205,7 @@ __all__ = [
     '_group_settings_payload',
     '_group_message_payload',
     '_member_payload',
+    '_can_view_group_members',
     '_group_detail_payload',
     '_visible_group_messages_qs',
 ]

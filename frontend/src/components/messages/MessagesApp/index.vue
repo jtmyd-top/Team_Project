@@ -786,10 +786,10 @@
                 </span>
               </label>
               <label class="group-switch-row">
-                <input v-model="groupPanel.detail.allow_member_mention_all" type="checkbox" />
+                <input v-model="groupPanel.detail.members_visible" type="checkbox" />
                 <span>
-                  <strong>成员 @全体</strong>
-                  <em>关闭后仅群主/管理员可 @全体</em>
+                  <strong>成员列表可见</strong>
+                  <em>关闭后普通成员不能查看列表或主动 @ 成员</em>
                 </span>
               </label>
               <label class="group-switch-row select-row">
@@ -877,11 +877,93 @@
             </div>
           </div>
 
+          <div class="group-shared-box">
+            <div class="group-section-title">
+              <span><i class="fas fa-folder-open"></i> 群文件</span>
+              <span class="group-section-meta">
+                {{ groupPanel.sharedMedia.length + groupPanel.sharedFiles.length }} 项
+              </span>
+            </div>
+            <div class="group-shared-tabs" role="tablist" aria-label="群文件分类">
+              <button
+                class="group-shared-tab"
+                :class="{ active: groupPanel.sharedTab === 'media' }"
+                type="button"
+                role="tab"
+                :aria-selected="groupPanel.sharedTab === 'media'"
+                @click="groupPanel.sharedTab = 'media'"
+              >
+                <i class="fas fa-photo-film"></i>
+                媒体 {{ groupPanel.sharedMedia.length }}
+              </button>
+              <button
+                class="group-shared-tab"
+                :class="{ active: groupPanel.sharedTab === 'files' }"
+                type="button"
+                role="tab"
+                :aria-selected="groupPanel.sharedTab === 'files'"
+                @click="groupPanel.sharedTab = 'files'"
+              >
+                <i class="fas fa-file-lines"></i>
+                文件 {{ groupPanel.sharedFiles.length }}
+              </button>
+            </div>
+            <div v-if="groupPanel.sharedLoading" class="group-inline-state">
+              <i class="fas fa-spinner fa-spin"></i>
+              加载中...
+            </div>
+            <div v-else-if="groupPanel.sharedTab === 'media'">
+              <div v-if="groupPanel.sharedMedia.length" class="group-media-grid">
+                <a
+                  v-for="item in groupPanel.sharedMedia"
+                  :key="item.id"
+                  class="group-media-item"
+                  :href="item.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  :title="item.name"
+                >
+                  <img v-if="item.type === 'image'" :src="item.url" :alt="item.name" loading="lazy" />
+                  <video v-else-if="item.type === 'video'" :src="item.url" muted preload="metadata"></video>
+                  <span v-if="item.type === 'video'" class="group-media-type"><i class="fas fa-play"></i></span>
+                  <span class="group-media-meta">{{ sharedItemMeta(item) }}</span>
+                </a>
+              </div>
+              <div v-else class="group-inline-state">暂无媒体</div>
+            </div>
+            <div v-else>
+              <div v-if="groupPanel.sharedFiles.length" class="group-file-list">
+                <a
+                  v-for="item in groupPanel.sharedFiles"
+                  :key="item.id"
+                  class="group-file-row"
+                  :href="item.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  :title="item.name"
+                >
+                  <span class="group-file-icon"><i class="fas" :class="sharedFileIcon(item)"></i></span>
+                  <span class="group-file-main">
+                    <strong>{{ item.name || '未命名文件' }}</strong>
+                    <em>{{ sharedItemMeta(item) }}</em>
+                  </span>
+                  <span class="group-file-size">{{ formatSharedFileSize(item.size) }}</span>
+                </a>
+              </div>
+              <div v-else class="group-inline-state">暂无文件</div>
+            </div>
+          </div>
+
           <div class="group-members">
             <div class="group-section-title subtle member-title">
               <span><i class="fas fa-user-group"></i> 成员</span>
             </div>
+            <div v-if="!groupPanel.detail.can_view_members" class="group-inline-state">
+              <i class="fas fa-eye-slash"></i>
+              成员列表已隐藏
+            </div>
             <div
+              v-else
               v-for="member in groupPanel.detail.members"
               :key="member.user_id"
               class="group-member-row"
@@ -1185,7 +1267,10 @@ const groupPanel = ref({
   joinRequestsLoading: false,
   joinRequests: [],
   sharedLoading: false,
+  sharedTab: 'media',
   sharedLinks: [],
+  sharedMedia: [],
+  sharedFiles: [],
   savingPermissions: false,
 })
 const activeMuteMenuUserId = ref(null)
@@ -1325,6 +1410,18 @@ const isCurrentGroupOwner = computed(() =>
   (groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '') === 'owner'
 )
 
+const currentGroupRole = computed(() =>
+  groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || ''
+)
+
+const canViewCurrentGroupMembers = computed(() =>
+  !!groupPanel.value.detail?.can_view_members
+)
+
+const canMentionAllCurrentGroup = computed(() =>
+  ['owner', 'admin'].includes(currentGroupRole.value)
+)
+
 const filteredGroupMembers = computed(() => {
   const detail = groupPanel.value.detail
   if (!detail?.members) return []
@@ -1348,6 +1445,7 @@ const isGroupComposerBlocked = computed(() => {
 
 const mentionMembers = computed(() => {
   if (!isCurrentGroup.value) return []
+  if (!canViewCurrentGroupMembers.value) return []
   const detail = groupPanel.value.detail
   if (!detail || normalizeUserId(detail.id) !== selectedGroupId()) return []
   const members = detail.members || []
@@ -1358,7 +1456,7 @@ const mentionSuggestions = computed(() => {
   if (!mentionPicker.value.visible) return []
   const query = mentionPicker.value.query.trim().toLowerCase()
   const suggestions = []
-  if (!query || '全体成员'.includes(query) || 'all'.startsWith(query)) {
+  if (canMentionAllCurrentGroup.value && (!query || '全体成员'.includes(query) || 'all'.startsWith(query))) {
     suggestions.push({ type: 'all', label: '@全体成员', username: '全体成员' })
   }
   for (const member of mentionMembers.value) {
@@ -2001,6 +2099,7 @@ async function sendMessage(turnstileToken = '') {
       const d = await apiPost(`/api/messages/groups/${groupId}/send/`, {
         content: finalContent,
         attachment_ids: attachmentIds,
+        reply_to: replyDraft.value?.id || null,
         ...mentionPayload,
       })
       const sentMessage = normalizeIncomingMessage(d.message)
@@ -2550,7 +2649,7 @@ async function ensureGroupMembersForMention() {
   const groupId = selectedGroupId()
   if (!groupId) return
   const detail = groupPanel.value.detail
-  if (normalizeUserId(detail?.id) === groupId && mentionMembers.value.length) return
+  if (normalizeUserId(detail?.id) === groupId && (mentionMembers.value.length || detail?.can_view_members === false)) return
   try {
     const r = await fetch(`/api/messages/groups/${groupId}/`, { cache: 'no-store' })
     const d = await r.json().catch(() => ({}))
@@ -3438,6 +3537,9 @@ function closeGroupInfo() {
   groupPanel.value.auditLogs = []
   groupPanel.value.joinRequests = []
   groupPanel.value.sharedLinks = []
+  groupPanel.value.sharedMedia = []
+  groupPanel.value.sharedFiles = []
+  groupPanel.value.sharedTab = 'media'
   groupPanel.value.memberSearch = ''
   groupPanel.value.memberRoleFilter = 'all'
   groupPanel.value.savingAnnouncement = false
@@ -3617,7 +3719,7 @@ async function saveGroupPermissions() {
     const detail = groupPanel.value.detail || {}
     const profile = await apiPost(`/api/messages/groups/${groupId}/profile/`, {
       require_approval: !!detail.require_approval,
-      allow_member_mention_all: !!detail.allow_member_mention_all,
+      members_visible: detail.members_visible !== false,
     })
     const mode = await apiPost(`/api/messages/groups/${groupId}/mute-mode/`, {
       mute_mode: detail.mute_mode || 'none',
@@ -3701,6 +3803,30 @@ function formatGroupDate(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function formatSharedFileSize(size) {
+  const bytes = Number(size) || 0
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function sharedFileIcon(item) {
+  const mime = String(item?.mime_type || '').toLowerCase()
+  const name = String(item?.name || '').toLowerCase()
+  if (item?.type === 'audio' || mime.startsWith('audio/')) return 'fa-file-audio'
+  if (mime.includes('pdf') || name.endsWith('.pdf')) return 'fa-file-pdf'
+  if (mime.includes('spreadsheet') || name.endsWith('.xls') || name.endsWith('.xlsx')) return 'fa-file-excel'
+  if (mime.includes('word') || name.endsWith('.doc') || name.endsWith('.docx')) return 'fa-file-word'
+  if (mime.includes('zip') || name.endsWith('.zip') || name.endsWith('.rar') || name.endsWith('.7z')) return 'fa-file-zipper'
+  return 'fa-file'
+}
+
+function sharedItemMeta(item) {
+  const sender = item?.sender?.username || '成员'
+  const time = formatGroupDate(item?.created_at)
+  return time ? `${sender} · ${time}` : sender
 }
 
 function groupMessagePreview(message) {
@@ -3870,7 +3996,9 @@ async function loadGroupSharedItems() {
     const r = await fetch(`/api/messages/groups/${groupId}/shared/`, { cache: 'no-store' })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群资料失败'))
-    groupPanel.value.sharedLinks = d.links || []
+    groupPanel.value.sharedLinks = Array.isArray(d.links) ? d.links : []
+    groupPanel.value.sharedMedia = Array.isArray(d.media) ? d.media : (Array.isArray(d.images) ? d.images : [])
+    groupPanel.value.sharedFiles = Array.isArray(d.files) ? d.files : []
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -3970,21 +4098,69 @@ async function leaveCurrentGroup() {
 async function dissolveCurrentGroup() {
   const groupId = selectedGroupId()
   if (!groupId) return
+
   try {
     await ElMessageBox.confirm('解散后所有成员都无法继续使用该群组，确认解散？', '解散群组', { type: 'warning' })
   } catch {
     return
   }
+
   try {
-    await apiPost(`/api/messages/groups/${groupId}/dissolve/`, {})
-    closeGroupInfo()
-    selectedConversationKey.value = null
-    selectedUserId.value = null
-    messages.value = []
-    loadConversations()
-    ElMessage.success('已解散群组')
+    // 第一次请求，检查是否需要 2FA
+    const firstResponse = await apiPost(`/api/messages/groups/${groupId}/dissolve/`, {})
+
+    // 如果返回 require_2fa，则需要输入验证码
+    if (firstResponse.status === 'require_2fa' || firstResponse.code === 'require_2fa') {
+      const method = firstResponse.method || 'totp'
+      const methodLabel = method === 'totp' ? 'TOTP 验证器' : method === 'email' ? '邮箱验证码' : '两步验证'
+
+      let twoFaCode = ''
+      try {
+        const result = await ElMessageBox.prompt(
+          `解散群组是高危操作，需要进行两步验证。\n请输入您的 ${methodLabel} 验证码：`,
+          '两步验证',
+          {
+            confirmButtonText: '确认',
+            cancelButtonText: '取消',
+            inputPattern: /^\d{6}$/,
+            inputErrorMessage: '请输入 6 位数字验证码',
+            inputPlaceholder: '请输入 6 位验证码',
+            type: 'warning',
+          }
+        )
+        twoFaCode = result.value
+      } catch {
+        return
+      }
+
+      // 第二次请求，带上验证码
+      const secondResponse = await apiPost(`/api/messages/groups/${groupId}/dissolve/`, {
+        two_fa_code: twoFaCode,
+      })
+
+      if (secondResponse.status === 'success') {
+        closeGroupInfo()
+        selectedConversationKey.value = null
+        selectedUserId.value = null
+        messages.value = []
+        loadConversations()
+        ElMessage.success('已解散群组')
+      } else {
+        ElMessage.error(secondResponse.message || '验证失败')
+      }
+    } else if (firstResponse.status === 'success') {
+      // 没有开启 2FA，直接成功
+      closeGroupInfo()
+      selectedConversationKey.value = null
+      selectedUserId.value = null
+      messages.value = []
+      loadConversations()
+      ElMessage.success('已解散群组')
+    } else {
+      ElMessage.error(firstResponse.message || '操作失败')
+    }
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(e.message || '操作失败')
   }
 }
 
@@ -5641,6 +5817,9 @@ watch(
 .group-secondary-btn:focus-visible,
 .group-danger-btn:focus-visible,
 .group-icon-btn:focus-visible,
+.group-shared-tab:focus-visible,
+.group-media-item:focus-visible,
+.group-file-row:focus-visible,
 .group-mute-menu-item:focus-visible,
 .group-member-row.invite:focus-visible {
   outline: none;
@@ -5684,6 +5863,7 @@ watch(
 .group-pinned-box,
 .group-add-box,
 .group-invite-box,
+.group-shared-box,
 .group-members,
 .group-panel-footer {
   padding: 16px 20px;
@@ -5703,7 +5883,8 @@ watch(
 
 .group-pinned-box,
 .group-config-box,
-.group-invite-box {
+.group-invite-box,
+.group-shared-box {
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   display: flex;
   flex-direction: column;
@@ -6313,6 +6494,178 @@ watch(
 .group-invite-meta span {
   color: var(--text-tertiary);
   font-size: 11px;
+}
+
+.group-shared-tabs {
+  min-height: 38px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 68%, var(--bg-primary));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.group-shared-tab {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.group-shared-tab.active {
+  background: var(--bg-primary);
+  color: var(--primary-color, #2563eb);
+  box-shadow: 0 1px 4px color-mix(in srgb, #0f172a 8%, transparent);
+}
+
+.group-media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.group-media-item {
+  position: relative;
+  aspect-ratio: 1;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 74%, var(--bg-primary));
+  color: #fff;
+  text-decoration: none;
+  isolation: isolate;
+}
+
+.group-media-item img,
+.group-media-item video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.group-media-item::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 44%;
+  background: linear-gradient(180deg, transparent, rgba(15, 23, 42, 0.58));
+  z-index: 1;
+  pointer-events: none;
+}
+
+.group-media-type {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.7);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  font-size: 10px;
+}
+
+.group-media-meta {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 6px;
+  z-index: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.55);
+}
+
+.group-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.group-file-row {
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-secondary) 58%, transparent);
+  color: inherit;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.group-file-row:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 24%, var(--border-color));
+  background: var(--bg-primary);
+  transform: translateY(-1px);
+}
+
+.group-file-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, var(--bg-primary));
+  color: var(--primary-color, #2563eb);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.group-file-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.group-file-main strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.group-file-main em,
+.group-file-size {
+  color: var(--text-tertiary);
+  font-style: normal;
+  font-size: 11.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.group-file-size {
+  justify-self: end;
 }
 
 .group-member-row {
@@ -7068,6 +7421,7 @@ watch(
   .group-pinned-box,
   .group-add-box,
   .group-invite-box,
+  .group-shared-box,
   .group-members,
   .group-panel-footer {
     padding-left: 14px;
@@ -7162,6 +7516,19 @@ watch(
 
   .group-invite-row {
     grid-template-columns: minmax(0, 1fr) 34px 34px;
+  }
+
+  .group-media-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .group-file-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .group-file-size {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .group-panel-footer {

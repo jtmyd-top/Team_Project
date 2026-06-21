@@ -40,6 +40,7 @@ from .payloads import (
     _group_detail_payload,
     _group_message_payload,
     _group_settings_payload,
+    _can_view_group_members,
     _member_payload,
     _pinned_group_message_payload,
     _policy_payload,
@@ -82,6 +83,7 @@ __all__ = list(_base_all) + [
     '_group_settings_payload',
     '_group_message_payload',
     '_member_payload',
+    '_can_view_group_members',
     '_group_detail_payload',
     '_visible_group_messages_qs',
 ]

@@ -35,6 +35,7 @@ from django.utils import timezone
 from knowledge_project.models import (
     ConversationSettings,
     GroupMessage,
+    GroupMessageMention,
     Message,
     MessageAttachment,
     MessageGroup,
@@ -420,6 +421,81 @@ class MessageGroupTests(_MessageTestBase):
         forbidden = self.client.get(reverse('message_attachment_file_api', args=[attachment.id]))
         self.assertEqual(forbidden.status_code, 403, forbidden.content)
 
+    def test_group_shared_items_lists_media_files_and_filters_hidden_messages(self):
+        owner = make_user('grp_shared_owner')
+        member = make_user('grp_shared_member')
+        outsider = make_user('grp_shared_outsider')
+        group = self._create_group_directly(owner, [member])
+        visible_message = GroupMessage.objects.create(
+            group=group,
+            sender=owner,
+            content='docs https://example.com/spec',
+        )
+        deleted_message = GroupMessage.objects.create(group=group, sender=owner, content='deleted')
+        recalled_message = GroupMessage.objects.create(
+            group=group,
+            sender=owner,
+            content='recalled',
+            is_recalled=True,
+        )
+        deleted_message.deletions.create(user=member)
+
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=visible_message,
+            file=SimpleUploadedFile('preview.png', b'image-bytes', content_type='image/png'),
+            original_name='preview.png',
+            attachment_type='image',
+            mime_type='image/png',
+            size=11,
+        )
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=visible_message,
+            file=SimpleUploadedFile('brief.pdf', b'file-bytes', content_type='application/pdf'),
+            original_name='brief.pdf',
+            attachment_type='file',
+            mime_type='application/pdf',
+            size=10,
+        )
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=deleted_message,
+            file=SimpleUploadedFile('hidden.txt', b'hidden', content_type='text/plain'),
+            original_name='hidden.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=6,
+        )
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=recalled_message,
+            file=SimpleUploadedFile('recalled.png', b'hidden', content_type='image/png'),
+            original_name='recalled.png',
+            attachment_type='image',
+            mime_type='image/png',
+            size=6,
+        )
+
+        login(self.client, member)
+        response = self.client.get(reverse('group_shared_items_api', args=[group.id]))
+        self.assertEqual(response.status_code, 200, response.content)
+        body = parse(response)
+        self.assertEqual([item['name'] for item in body['media']], ['preview.png'])
+        self.assertEqual([item['name'] for item in body['files']], ['brief.pdf'])
+        self.assertEqual(body['media'][0]['category'], 'media')
+        self.assertEqual(body['files'][0]['category'], 'file')
+        self.assertEqual(body['media'][0]['sender']['username'], owner.username)
+        self.assertEqual(body['media'][0]['message_id'], visible_message.id)
+        self.assertEqual(body['links'][0]['url'], 'https://example.com/spec')
+        self.assertFalse(any(item['name'] == 'hidden.txt' for item in body['files']))
+        self.assertFalse(any(item['name'] == 'recalled.png' for item in body['media']))
+
+        self.client.logout()
+        login(self.client, outsider)
+        forbidden = self.client.get(reverse('group_shared_items_api', args=[group.id]))
+        self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
     def test_group_owner_can_manage_members_and_group_name(self):
         owner = make_user('grp_manage_owner')
         member = make_user('grp_manage_member')
@@ -667,6 +743,71 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(MessageGroupMember.objects.get(group=group, user=member).role, 'owner')
         self.assertEqual(MessageGroupMember.objects.get(group=group, user=owner).role, 'admin')
         self.assertTrue(MessageGroupAuditLog.objects.filter(group=group, action='ownership_transfer').exists())
+
+    def test_group_member_visibility_hides_member_list_from_regular_members(self):
+        owner = make_user('grp_vis_owner')
+        member = make_user('grp_vis_member')
+        other = make_user('grp_vis_other')
+        group = self._create_group_directly(owner, [member, other])
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('update_group_profile_api', args=[group.id]), {
+            'members_visible': False,
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        owner_body = parse(response)['group']
+        self.assertFalse(owner_body['members_visible'])
+        self.assertTrue(owner_body['can_view_members'])
+        self.assertEqual(len(owner_body['members']), 3)
+
+        self.client.logout()
+        login(self.client, member)
+        detail_response = self.client.get(reverse('message_group_detail_api', args=[group.id]))
+        self.assertEqual(detail_response.status_code, 200, detail_response.content)
+        member_body = parse(detail_response)['group']
+        self.assertFalse(member_body['members_visible'])
+        self.assertFalse(member_body['can_view_members'])
+        self.assertEqual(member_body['member_count'], 3)
+        self.assertEqual(member_body['members'], [])
+
+    def test_hidden_group_members_block_active_mentions_but_allow_quoted_sender(self):
+        owner = make_user('grp_mention_owner')
+        member = make_user('grp_mention_member')
+        other = make_user('grp_mention_other')
+        group = self._create_group_directly(owner, [member, other])
+        group.members_visible = False
+        group.allow_member_mention_all = True
+        group.save(update_fields=['members_visible', 'allow_member_mention_all'])
+
+        owner_message = GroupMessage.objects.create(group=group, sender=owner, content='owner message')
+
+        login(self.client, member)
+        blocked_response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': f'hello @{other.username}',
+            'mentions': [other.username],
+        })
+        self.assertEqual(blocked_response.status_code, 403, blocked_response.content)
+        self.assertIn('不能主动', parse(blocked_response)['error'])
+
+        mention_all_response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': '@全体成员 ping',
+            'mention_all': True,
+        })
+        self.assertEqual(mention_all_response.status_code, 403, mention_all_response.content)
+
+        quoted_response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': f'> 引用 @{owner.username}: owner message\n\n收到',
+            'reply_to': owner_message.id,
+            'mentions': [owner.username],
+        })
+        self.assertEqual(quoted_response.status_code, 201, quoted_response.content)
+        message_id = parse(quoted_response)['message']['id']
+        self.assertTrue(
+            GroupMessageMention.objects.filter(message_id=message_id, mentioned_user=owner).exists()
+        )
+        self.assertTrue(
+            UserNotification.objects.filter(user=owner, kind='group_mention', data__message_id=message_id).exists()
+        )
 
     def test_group_announcement_read_receipts(self):
         owner = make_user('grp_ann_owner')
