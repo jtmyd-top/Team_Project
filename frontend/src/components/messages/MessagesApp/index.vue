@@ -52,7 +52,7 @@
       <!-- Tabs -->
       <div class="tabs">
         <button
-          v-for="t in tabs"
+          v-for="t in visibleTabs"
           :key="t.value"
           class="tab"
           :class="{ active: scope === t.value }"
@@ -62,6 +62,9 @@
           <span>{{ t.label }}</span>
           <span v-if="t.value === 'unread' && totalUnread > 0" class="tab-badge">
             {{ totalUnread > 99 ? '99+' : totalUnread }}
+          </span>
+          <span v-if="t.value === 'pending_approvals' && pendingApprovalsCount > 0" class="tab-badge">
+            {{ pendingApprovalsCount > 99 ? '99+' : pendingApprovalsCount }}
           </span>
         </button>
       </div>
@@ -112,7 +115,53 @@
           <i class="fas fa-circle-info"></i>
           <span>新消息到达时将自动恢复到全部会话</span>
         </div>
-        <div v-if="loadingConversations && filteredConversations.length === 0" class="empty-state">
+
+        <!-- 待审核列表 -->
+        <div v-if="scope === 'pending_approvals'" class="pending-approvals-list">
+          <div v-if="loadingPendingApprovals" class="empty-state">
+            <i class="fas fa-spinner fa-spin"></i>
+          </div>
+          <div v-else-if="pendingApprovals.length === 0" class="empty-state">
+            <i class="fas fa-user-clock"></i>
+            <p>暂无待审核申请</p>
+          </div>
+          <div v-else class="approval-items">
+            <div
+              v-for="req in pendingApprovals"
+              :key="req.id"
+              class="approval-item"
+            >
+              <div class="approval-header">
+                <img :src="req.user.avatar" :alt="req.user.username" class="approval-avatar" />
+                <div class="approval-info">
+                  <div class="approval-user-name">{{ req.user.username }}</div>
+                  <div class="approval-group-name">
+                    <i class="fas fa-users"></i>
+                    {{ req.group.name }}
+                  </div>
+                </div>
+              </div>
+              <div v-if="req.request_message" class="approval-message">
+                {{ req.request_message }}
+              </div>
+              <div class="approval-time">
+                {{ new Date(req.created_at).toLocaleString() }}
+              </div>
+              <div class="approval-actions">
+                <button class="btn-approve" @click="reviewGroupJoinRequest(req, 'approve')">
+                  <i class="fas fa-check"></i>
+                  通过
+                </button>
+                <button class="btn-reject" @click="reviewGroupJoinRequest(req, 'reject')">
+                  <i class="fas fa-times"></i>
+                  拒绝
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loadingConversations && filteredConversations.length === 0" class="empty-state">
           <i class="fas fa-spinner fa-spin"></i>
         </div>
         <div v-else-if="filteredConversations.length === 0" class="empty-state">
@@ -134,9 +183,10 @@
     <!-- 右侧：聊天区域 -->
     <main class="chat-area">
       <!-- 未选中会话 -->
-      <div v-if="!selectedConversationKey || scope === 'blocked'" class="empty-chat-state">
+      <div v-if="!selectedConversationKey || scope === 'blocked' || scope === 'pending_approvals'" class="empty-chat-state">
         <i class="fas fa-comments"></i>
         <p v-if="scope === 'blocked'">屏蔽管理模式<br />在左侧管理你已屏蔽的用户</p>
+        <p v-else-if="scope === 'pending_approvals'">待审核管理<br />在左侧查看和处理入群申请</p>
         <p v-else>
           选择一个对话开始聊天
           <br />
@@ -161,11 +211,29 @@
                   <i class="fas fa-lock"></i>
                   安全连接
                 </span>
+                <span v-if="realtimeState === 'connected'" class="realtime-status connected" title="实时消息已连接">
+                  <i class="fas fa-circle"></i>
+                </span>
+                <span v-else-if="realtimeState === 'connecting'" class="realtime-status connecting" title="连接中...">
+                  <i class="fas fa-circle-notch fa-spin"></i>
+                </span>
+                <span v-else-if="realtimeState === 'disconnected'" class="realtime-status disconnected" title="连接已断开">
+                  <i class="fas fa-circle"></i>
+                </span>
               </span>
               <span v-else class="chat-subtitle secure-subtitle">
                 <span class="secure-chip">
                   <i class="fas fa-users"></i>
                   群组会话
+                </span>
+                <span v-if="realtimeState === 'connected'" class="realtime-status connected" title="实时消息已连接">
+                  <i class="fas fa-circle"></i>
+                </span>
+                <span v-else-if="realtimeState === 'connecting'" class="realtime-status connecting" title="连接中...">
+                  <i class="fas fa-circle-notch fa-spin"></i>
+                </span>
+                <span v-else-if="realtimeState === 'disconnected'" class="realtime-status disconnected" title="连接已断开">
+                  <i class="fas fa-circle"></i>
                 </span>
               </span>
             </div>
@@ -178,7 +246,7 @@
             >
               <i class="fas" :class="selectionMode ? 'fa-xmark' : 'fa-check-double'"></i>
             </button>
-            <button class="action-btn" @click="showChatSearch = true" title="在对话中搜索">
+            <button class="action-btn" @click="openChatSearch" title="在对话中搜索">
               <i class="fas fa-search"></i>
             </button>
             <div class="menu-wrap" @click.stop>
@@ -257,6 +325,27 @@
           </div>
         </header>
 
+        <!-- 消息搜索栏 -->
+        <div v-if="showChatSearch" class="chat-search-bar">
+          <div class="search-input-wrap">
+            <i class="fas fa-search"></i>
+            <input
+              ref="chatSearchInputRef"
+              v-model="chatSearchQuery"
+              type="text"
+              placeholder="搜索消息内容..."
+              @input="onChatSearchInput"
+              @keyup.enter="performChatSearch"
+            />
+            <button v-if="chatSearchQuery" class="clear-search-btn" @click="clearChatSearch">
+              <i class="fas fa-times-circle"></i>
+            </button>
+          </div>
+          <button class="close-search-btn" @click="closeChatSearch">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
         <!-- 阅后即焚提示条 -->
         <div v-if="!isCurrentGroup && currentSettings.disappearing_enabled" class="disappearing-banner">
           <i class="fas fa-fire-alt"></i>
@@ -316,6 +405,14 @@
           </div>
 
           <template v-else>
+            <div v-if="messagesPaging.hasMore && !messagesPaging.loadingOlder" class="load-more-hint" @click="loadOlderMessages">
+              <i class="fas fa-angle-up"></i>
+              <span>向上滚动或点击加载更早消息</span>
+            </div>
+            <div v-if="messagesPaging.loadingOlder" class="older-messages-loader" title="加载更早消息">
+              <i class="fas fa-spinner fa-spin"></i>
+              <span>加载中...</span>
+            </div>
             <div class="message-stream">
               <div v-for="(group, i) in groupedMessages" :key="i" class="message-group">
                 <div class="date-sep-wrap">
@@ -325,14 +422,15 @@
                   v-for="m in group.messages"
                   :key="m.id"
                   :data-msg-id="m.id"
-                  :class="{ 'jump-highlighted': highlightMessageId === m.id && !globalSearch }"
+                  :class="{ 'jump-highlighted': highlightMessageId === m.id && !globalSearch && !chatSearchQuery }"
                   :msg="m"
-                  :highlight="highlightMessageId === m.id ? globalSearch : ''"
+                  :highlight="highlightMessageId === m.id ? (globalSearch || chatSearchQuery) : ''"
                   :selectable="selectionMode"
                   :selected="selectedMessageIds.has(m.id)"
                   @context-menu="onMessageContextMenu"
                   @toggle-selected="toggleMessageSelected"
                   @open-merged-forward="openMergedForwardDialog"
+                  @open-media-preview="openMediaPreview"
                   @reaction-toggle="handleReactionToggle"
                 />
               </div>
@@ -667,6 +765,32 @@
             </button>
           </div>
 
+          <!-- 群头像上传 -->
+          <div v-if="canManageCurrentGroup" class="group-avatar-section">
+            <div class="group-section-title">
+              <span><i class="fas fa-image"></i> 群头像</span>
+            </div>
+            <div class="group-avatar-upload">
+              <div class="group-avatar-preview">
+                <img :src="groupPanel.detail.avatar || '/static/img/default-group-avatar.png'" alt="群头像" />
+              </div>
+              <div class="group-avatar-actions">
+                <input
+                  ref="groupAvatarInputRef"
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  style="display: none;"
+                  @change="onGroupAvatarSelected"
+                />
+                <button class="group-secondary-btn" type="button" :disabled="groupPanel.uploadingAvatar" @click="triggerGroupAvatarUpload">
+                  <i :class="groupPanel.uploadingAvatar ? 'fas fa-spinner fa-spin' : 'fas fa-upload'"></i>
+                  {{ groupPanel.uploadingAvatar ? '上传中...' : '更换头像' }}
+                </button>
+                <p class="group-avatar-hint">支持 JPG、PNG、GIF、WebP 格式，最大 5MB</p>
+              </div>
+            </div>
+          </div>
+
           <div class="group-edit-row">
             <input
               v-model="groupPanel.nameDraft"
@@ -674,6 +798,7 @@
               type="text"
               maxlength="80"
               :disabled="!canManageCurrentGroup"
+              placeholder="群名称"
             />
             <button class="group-primary-btn" :disabled="!canManageCurrentGroup || !groupPanel.nameDraft.trim()" @click="saveGroupName">
               保存
@@ -923,20 +1048,23 @@
           </div>
           <div v-else-if="groupPanel.sharedTab === 'media'">
             <div v-if="groupPanel.sharedMedia.length" class="group-media-grid">
-              <a
+              <button
                 v-for="item in groupPanel.sharedMedia"
                 :key="item.id"
                 class="group-media-item"
-                :href="item.url"
-                target="_blank"
-                rel="noopener noreferrer"
+                type="button"
                 :title="item.name"
+                @click="openMediaPreview({ attachment: item })"
               >
-                <img v-if="item.type === 'image'" :src="item.url" :alt="item.name" loading="lazy" />
-                <video v-else-if="item.type === 'video'" :src="item.url" muted preload="metadata"></video>
-                <span v-if="item.type === 'video'" class="group-media-type"><i class="fas fa-play"></i></span>
+                <img v-if="getMediaPreviewType(item) === 'image'" :src="item.url" :alt="item.name" loading="lazy" />
+                <video v-else-if="getMediaPreviewType(item) === 'video'" :src="item.url" muted preload="metadata"></video>
+                <div v-else-if="getMediaPreviewType(item) === 'audio'" class="group-audio-placeholder">
+                  <i class="fas fa-music"></i>
+                </div>
+                <span v-if="getMediaPreviewType(item) === 'video'" class="group-media-type"><i class="fas fa-play"></i></span>
+                <span v-if="getMediaPreviewType(item) === 'audio'" class="group-media-type"><i class="fas fa-volume-up"></i></span>
                 <span class="group-media-meta">{{ sharedItemMeta(item) }}</span>
-              </a>
+              </button>
             </div>
             <div v-else class="group-inline-state">暂无媒体</div>
           </div>
@@ -1192,6 +1320,32 @@
       </section>
     </div>
 
+    <!-- 入群申请审核面板 -->
+    <div v-if="joinRequestsVisible" class="group-panel-overlay" @click.self="closeJoinRequests">
+      <section class="group-panel group-join-requests-panel">
+        <header class="group-panel-header">
+          <div class="group-panel-heading">
+            <span class="group-panel-mark" aria-hidden="true">
+              <i class="fas fa-user-clock"></i>
+            </span>
+            <div>
+              <h3>入群申请</h3>
+              <p>{{ selectedConversation?.username || '群组' }}</p>
+            </div>
+          </div>
+          <button class="close-btn" type="button" title="关闭" @click="closeJoinRequests">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+
+        <GroupJoinRequests
+          v-if="selectedConversation?.is_group && selectedConversation.id"
+          :group-id="selectedConversation.id"
+          @update="handleJoinRequestUpdate"
+        />
+      </section>
+    </div>
+
     <div v-if="peerProfile.visible" class="profile-card-overlay" @click.self="closePeerProfile">
       <section class="profile-card-modal">
         <button class="profile-card-close" type="button" title="关闭" @click="closePeerProfile">
@@ -1260,6 +1414,49 @@
       </section>
     </div>
 
+    <div v-if="mediaPreview.visible" class="media-preview-overlay" @click.self="closeMediaPreview">
+      <section class="media-preview-modal">
+        <header class="media-preview-header">
+          <strong>{{ mediaPreview.name || '媒体预览' }}</strong>
+          <div class="media-preview-actions">
+            <a
+              class="media-preview-icon-btn"
+              :href="mediaPreview.url"
+              :download="mediaPreview.name || undefined"
+              title="下载"
+              @click.stop
+            >
+              <i class="fas fa-download"></i>
+            </a>
+            <button class="media-preview-icon-btn" type="button" title="关闭" @click="closeMediaPreview">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+        </header>
+        <div class="media-preview-stage">
+          <img
+            v-if="mediaPreview.type === 'image'"
+            :src="mediaPreview.url"
+            :alt="mediaPreview.name || '图片'"
+          />
+          <video
+            v-else-if="mediaPreview.type === 'video'"
+            :src="mediaPreview.url"
+            controls
+            autoplay
+            playsinline
+          ></video>
+          <audio
+            v-else-if="mediaPreview.type === 'audio'"
+            :src="mediaPreview.url"
+            controls
+            autoplay
+            class="media-preview-audio"
+          ></audio>
+        </div>
+      </section>
+    </div>
+
     <DisappearingSettingDialog
       v-if="showDisappearingDialog && selectedUserId && !isCurrentGroup"
       :peer-id="selectedUserId"
@@ -1296,6 +1493,58 @@
         </div>
       </div>
     </div>
+
+    <!-- 待审核提醒弹窗 -->
+    <el-dialog
+      v-model="pendingRequestsReminder.visible"
+      :title="`${pendingRequestsReminder.groupName} - 待审核申请`"
+      width="500px"
+      append-to-body
+    >
+      <div class="reminder-requests">
+        <div
+          v-for="req in pendingRequestsReminder.requests"
+          :key="req.id"
+          class="reminder-request-item"
+        >
+          <div class="reminder-header">
+            <img :src="req.user.avatar" :alt="req.user.username" class="reminder-avatar" />
+            <div class="reminder-info">
+              <div class="reminder-user-name">{{ req.user.username }}</div>
+              <div class="reminder-time">
+                {{ new Date(req.created_at).toLocaleString() }}
+              </div>
+            </div>
+          </div>
+          <div v-if="req.request_message" class="reminder-message">
+            {{ req.request_message }}
+          </div>
+          <div class="reminder-actions">
+            <button class="btn-approve-small" @click="handleReminderAction(req, 'approve')">
+              <i class="fas fa-check"></i>
+              通过
+            </button>
+            <button class="btn-reject-small" @click="handleReminderAction(req, 'reject')">
+              <i class="fas fa-times"></i>
+              拒绝
+            </button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="reminder-footer">
+          <el-button @click="snoozeReminder(pendingRequestsReminder.groupId, 24)">
+            24小时内不再提醒
+          </el-button>
+          <el-button @click="snoozeReminder(pendingRequestsReminder.groupId, 168)">
+            7天内不再提醒
+          </el-button>
+          <el-button type="primary" @click="pendingRequestsReminder.visible = false">
+            关闭
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1316,6 +1565,7 @@ import ReportUserDialog from '@components/messages/ReportUserDialog/index.vue'
 import DisappearingSettingDialog from '@components/messages/DisappearingSettingDialog/index.vue'
 import MergedForwardDialog from '@components/messages/MergedForwardDialog/index.vue'
 import GroupInvitePreview from '@components/messages/GroupInvitePreview/index.vue'
+import GroupJoinRequests from '@components/messages/GroupJoinRequests/index.vue'
 import Turnstile from '@components/common/Turnstile/index.vue'
 import {
   encodeMergedForward,
@@ -1327,6 +1577,7 @@ import {
 
 // ==== 常量 ====
 const recallWindowSeconds = 120
+const MESSAGE_PAGE_SIZE = 50
 
 // ==== 状态 ====
 const currentUserId = ref(0)
@@ -1334,10 +1585,19 @@ const csrfToken = ref('')
 const scope = ref('all')
 const conversations = ref([])
 const loadingConversations = ref(false)
+const pendingApprovals = ref([])
+const loadingPendingApprovals = ref(false)
+const pendingApprovalsCount = ref(0)
 const selectedUserId = ref(null)
 const selectedConversationKey = ref(null)
 const messages = ref([])
 const loadingMessages = ref(false)
+const messagesPaging = ref({
+  limit: MESSAGE_PAGE_SIZE,
+  nextOffset: 0,
+  hasMore: false,
+  loadingOlder: false,
+})
 
 // Group invite preview
 const showGroupInvitePreview = ref(false)
@@ -1358,15 +1618,25 @@ const isRecordingVoice = ref(false)
 const messagesListRef = ref(null)
 const inputRef = ref(null)
 const fileInputRef = ref(null)
+const groupAvatarInputRef = ref(null)
 const peerProfileVideoRef = ref(null)
 const showNewMessageDialog = ref(false)
 const showChatMenu = ref(false)
 const showChatSearch = ref(false)
+const chatSearchQuery = ref('')
+const chatSearchInputRef = ref(null)
 const showDisappearingDialog = ref(false)
 const groupFilesVisible = ref(false)
 const groupMembersVisible = ref(false)
+const joinRequestsVisible = ref(false)
 const reportTarget = ref(null)
 const mergedForwardDialog = ref({ visible: false, payload: null })
+const mediaPreview = ref({
+  visible: false,
+  type: '',
+  url: '',
+  name: '',
+})
 const groupPanel = ref({
   visible: false,
   loading: false,
@@ -1393,12 +1663,14 @@ const groupPanel = ref({
   auditLogs: [],
   joinRequestsLoading: false,
   joinRequests: [],
+  pendingRequestsCount: 0,
   sharedLoading: false,
   sharedTab: 'media',
   sharedLinks: [],
   sharedMedia: [],
   sharedFiles: [],
   savingPermissions: false,
+  uploadingAvatar: false,
   // 权限设置原始值
   originalPermissions: {
     require_approval: false,
@@ -1433,6 +1705,7 @@ const replyDraft = ref(null)
 const forwardDraft = ref(null)
 const browserNotificationsEnabled = ref(false)
 let suppressConversationRefreshUntil = 0
+let preserveMessageScrollOnLengthChange = false
 const pendingAttachments = ref([])
 const showEmojiPicker = ref(false)
 const showCodeInput = ref(false)
@@ -1454,6 +1727,12 @@ const peerProfile = ref({
 })
 const maxPendingAttachments = 6
 const realtimeState = ref('disabled')
+const pendingRequestsReminder = ref({
+  visible: false,
+  groupId: null,
+  groupName: '',
+  requests: [],
+})
 let voiceRecorder = null
 let voiceStream = null
 let voiceChunks = []
@@ -1482,6 +1761,7 @@ const tabs = [
   { value: 'unread', label: '未读', icon: 'fas fa-envelope' },
   { value: 'archived', label: '归档', icon: 'fas fa-box-archive' },
   { value: 'blocked', label: '屏蔽', icon: 'fas fa-ban' },
+  { value: 'pending_approvals', label: '待审核', icon: 'fas fa-user-clock' },
 ]
 
 const emojiChoices = [
@@ -1505,6 +1785,33 @@ const isCurrentGroup = computed(() => selectedConversation.value?.conversation_t
 const canManageCurrentGroup = computed(() =>
   ['owner', 'admin'].includes(groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '')
 )
+
+// 独立存储管理权限状态，避免在切换到待审核标签时因 conversations 清空而失效
+const userHasAdminRole = ref(false)
+
+// 判断用户是否有管理权限（用于显示待审核标签）
+const hasAdminPermissions = computed(() => {
+  // 如果当前在待审核标签，使用缓存的权限状态
+  if (scope.value === 'pending_approvals') {
+    return userHasAdminRole.value
+  }
+  // 否则实时检查 conversations
+  return conversations.value.some(conv =>
+    conv.conversation_type === 'group' &&
+    conv.viewer_role &&
+    ['owner', 'admin'].includes(conv.viewer_role)
+  )
+})
+
+// 过滤显示的标签
+const visibleTabs = computed(() => {
+  return tabs.filter(tab => {
+    if (tab.value === 'pending_approvals') {
+      return hasAdminPermissions.value
+    }
+    return true
+  })
+})
 
 const activeGroupAnnouncement = computed(() => {
   if (!isCurrentGroup.value) return null
@@ -1986,10 +2293,26 @@ function initRealtimeMessages() {
     path: window.MESSAGE_REALTIME?.wsPath || '/ws/messages/',
     onStatusChange: (status) => {
       realtimeState.value = status
+      // 连接状态变化时的UI提示
+      if (status === 'connected' && !chatSocket.isFirstConnection) {
+        ElMessage.success('实时消息已重新连接')
+      } else if (status === 'disconnected') {
+        console.warn('WebSocket 连接已断开，将自动重连')
+      } else if (status === 'error') {
+        console.error('WebSocket 连接错误')
+      }
     },
     onEvent: handleRealtimeEvent,
     onMaxReconnectReached: () => {
       ElMessage.warning('实时消息连接失败，已切换为轮询刷新')
+    },
+    onReconnectSuccess: async () => {
+      // 重连成功后同步未读消息
+      console.log('WebSocket 重连成功，正在同步消息...')
+      await loadConversations({ silent: true, preserveOrder: true })
+      if (selectedUserId.value || selectedGroupId()) {
+        await loadMessages({ silent: true })
+      }
     },
   })
   chatSocket.connect()
@@ -2130,6 +2453,11 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
     conversations.value = []
     return
   }
+  if (scope.value === 'pending_approvals') {
+    await loadPendingApprovals({ silent })
+    conversations.value = []
+    return
+  }
   if (silent && Date.now() < suppressConversationRefreshUntil) return
   if (!silent) loadingConversations.value = true
   try {
@@ -2145,6 +2473,14 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
       updateBrowserNotificationSnapshot(nextConversations)
       syncConversations(nextConversations, { preserveOrder })
       applyDraftPreviews()
+
+      // 更新缓存的管理权限状态
+      userHasAdminRole.value = nextConversations.some(conv =>
+        conv.conversation_type === 'group' &&
+        conv.viewer_role &&
+        ['owner', 'admin'].includes(conv.viewer_role)
+      )
+
       const currentSelected = selectedKey ? findConversationByKey(selectedKey) : null
       const nextSelectedVersion = conversationVersion(currentSelected)
       if (
@@ -2166,18 +2502,118 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
   }
 }
 
-async function loadMessages({ silent = false } = {}) {
+async function loadPendingApprovals({ silent = false } = {}) {
+  if (!silent) loadingPendingApprovals.value = true
+  try {
+    const r = await fetch('/api/messages/groups/join-requests/pending/')
+    if (r.ok) {
+      const d = await r.json()
+      pendingApprovals.value = d.requests || []
+      pendingApprovalsCount.value = d.count || 0
+    } else if (r.status === 404 || r.status === 403) {
+      // 用户无权限或接口不存在，静默处理
+      pendingApprovals.value = []
+      pendingApprovalsCount.value = 0
+    }
+  } catch (e) {
+    console.error('加载待审核申请失败:', e)
+    pendingApprovals.value = []
+    pendingApprovalsCount.value = 0
+  } finally {
+    if (!silent) loadingPendingApprovals.value = false
+  }
+}
+
+function getSnoozeKey(groupId) {
+  return `group_${groupId}_reminder_snooze`
+}
+
+function isReminderSnoozed(groupId) {
+  const key = getSnoozeKey(groupId)
+  const snoozeData = localStorage.getItem(key)
+  if (!snoozeData) return false
+  try {
+    const { until } = JSON.parse(snoozeData)
+    return Date.now() < until
+  } catch {
+    return false
+  }
+}
+
+function snoozeReminder(groupId, hours) {
+  const key = getSnoozeKey(groupId)
+  const until = Date.now() + hours * 60 * 60 * 1000
+  localStorage.setItem(key, JSON.stringify({ until }))
+  pendingRequestsReminder.value.visible = false
+}
+
+async function checkPendingRequestsReminder(groupId) {
+  if (!groupId) return
+  if (isReminderSnoozed(groupId)) return
+
+  try {
+    const r = await fetch(`/api/messages/groups/${groupId}/join-requests/?status=pending`)
+    if (!r.ok) return
+    const d = await r.json()
+    const requests = d.requests || []
+    if (requests.length === 0) return
+
+    const conv = findConversationByKey(`group:${groupId}`)
+    pendingRequestsReminder.value = {
+      visible: true,
+      groupId: groupId,
+      groupName: conv?.username || '群组',
+      requests: requests.slice(0, 3),
+    }
+  } catch (e) {
+    console.error('检查待审核申请失败:', e)
+  }
+}
+
+async function handleReminderAction(requestItem, action) {
+  await reviewGroupJoinRequest(requestItem, action)
+  pendingRequestsReminder.value.requests = pendingRequestsReminder.value.requests.filter(
+    (r) => r.id !== requestItem.id
+  )
+  if (pendingRequestsReminder.value.requests.length === 0) {
+    pendingRequestsReminder.value.visible = false
+  }
+}
+
+function buildMessagesUrl({ offset = 0, limit = MESSAGE_PAGE_SIZE, query = '' } = {}) {
+  const groupId = selectedGroupId()
+  const params = new URLSearchParams()
+  if (limit) params.set('limit', String(limit))
+  if (offset) params.set('offset', String(offset))
+  if (query) params.set('q', query)
+  if (groupId) {
+    const qs = params.toString()
+    return `/api/messages/groups/${groupId}/messages/${qs ? `?${qs}` : ''}`
+  }
+  params.set('user_id', selectedUserId.value)
+  return `/api/messages/get/?${params.toString()}`
+}
+
+function applyMessagesPagination(pagination, loadedCount, requestedLimit) {
+  messagesPaging.value = {
+    limit: pagination?.limit || requestedLimit || MESSAGE_PAGE_SIZE,
+    nextOffset: pagination?.next_offset ?? loadedCount,
+    hasMore: Boolean(pagination?.has_more),
+    loadingOlder: false,
+  }
+}
+
+async function loadMessages({ silent = false, limit = null, query = '' } = {}) {
   if (!selectedConversationKey.value) return
   if (!silent) loadingMessages.value = true
   try {
-    const groupId = selectedGroupId()
-    const url = groupId
-      ? `/api/messages/groups/${groupId}/messages/`
-      : `/api/messages/get/?user_id=${selectedUserId.value}`
+    const requestedLimit = limit || (silent ? Math.max(MESSAGE_PAGE_SIZE, messages.value.length || 0) : MESSAGE_PAGE_SIZE)
+    const url = buildMessagesUrl({ limit: requestedLimit, offset: 0, query })
     const r = await fetch(url)
     if (r.ok) {
       const d = await r.json()
       messages.value = (d.messages || []).map(normalizeIncomingMessage)
+      applyMessagesPagination(d.pagination, messages.value.length, requestedLimit)
       if (d.settings) {
         currentSettings.value = { ...currentSettings.value, ...d.settings }
       }
@@ -2199,10 +2635,46 @@ async function loadMessages({ silent = false } = {}) {
   }
 }
 
+async function loadOlderMessages({ keepPosition = true } = {}) {
+  if (!selectedConversationKey.value || messagesPaging.value.loadingOlder || !messagesPaging.value.hasMore) return false
+  const el = messagesListRef.value
+  const previousHeight = el?.scrollHeight || 0
+  const previousTop = el?.scrollTop || 0
+  messagesPaging.value = { ...messagesPaging.value, loadingOlder: true }
+  try {
+    const requestedLimit = messagesPaging.value.limit || MESSAGE_PAGE_SIZE
+    const url = buildMessagesUrl({
+      limit: requestedLimit,
+      offset: Math.max(messagesPaging.value.nextOffset || 0, messages.value.length || 0),
+    })
+    const r = await fetch(url)
+    if (!r.ok) return false
+    const d = await r.json()
+    const olderMessages = (d.messages || []).map(normalizeIncomingMessage)
+    const existingIds = new Set(messages.value.map((message) => message.id))
+    const uniqueOlder = olderMessages.filter((message) => !existingIds.has(message.id))
+    if (uniqueOlder.length) {
+      preserveMessageScrollOnLengthChange = true
+      messages.value = [...uniqueOlder, ...messages.value]
+      await nextTick()
+      if (keepPosition && el) {
+        el.scrollTop = el.scrollHeight - previousHeight + previousTop
+      }
+    }
+    applyMessagesPagination(d.pagination, messages.value.length, requestedLimit)
+    return uniqueOlder.length > 0
+  } catch (e) {
+    console.error(e)
+    return false
+  } finally {
+    messagesPaging.value = { ...messagesPaging.value, loadingOlder: false }
+  }
+}
+
 // ==== 选择与发送 ====
 function selectConversation(conv) {
   if (conv.is_blocked) {
-    // 在“屏蔽”Tab下点击仅展示提示
+    // 在”屏蔽”Tab下点击仅展示提示
     ElMessage.info('此用户已被你屏蔽')
     return
   }
@@ -2224,9 +2696,15 @@ function selectConversation(conv) {
   closeMessageCtxMenu()
   mobileChatOpen.value = true
   loadMessages()
+
+  // Check for pending join requests when entering a group chat
+  if (conv.conversation_type === 'group') {
+    checkPendingRequestsReminder(conv.group_id)
+  }
 }
 
 async function sendMessage(turnstileToken = '') {
+  if (isSending.value) return
   if ((!newMessage.value.trim() && pendingAttachments.value.length === 0) || !selectedConversationKey.value) return
   // 用户提交消息后，立即让对方屏幕清除"正在输入"提示，不必等 2s timeout
   sendTypingStop()
@@ -2763,6 +3241,43 @@ function closeMergedForwardDialog() {
   mergedForwardDialog.value = { visible: false, payload: null }
 }
 
+function getMediaPreviewType(attachment) {
+  const type = String(attachment?.type || '').toLowerCase()
+  if (type === 'image' || type === 'video' || type === 'audio') return type
+
+  const mime = String(attachment?.mime_type || attachment?.content_type || '').toLowerCase()
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+
+  const name = String(attachment?.name || attachment?.url || '').toLowerCase()
+  if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)(\?|#|$)/.test(name)) return 'image'
+  if (/\.(mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/.test(name)) return 'video'
+  if (/\.(mp3|wav|ogg|m4a|aac|flac|wma)(\?|#|$)/.test(name)) return 'audio'
+  return ''
+}
+
+function openMediaPreview(payload = {}) {
+  const attachment = payload.attachment || payload
+  const type = getMediaPreviewType(attachment)
+  if (!attachment?.url || !type) return
+  mediaPreview.value = {
+    visible: true,
+    type,
+    url: attachment.url,
+    name: attachment.name || '',
+  }
+}
+
+function closeMediaPreview() {
+  mediaPreview.value = {
+    visible: false,
+    type: '',
+    url: '',
+    name: '',
+  }
+}
+
 function handleComposerEnter(e) {
   if (mentionPicker.value.visible && mentionSuggestions.value.length) {
     e.preventDefault()
@@ -3008,6 +3523,10 @@ function updateScrollBottomState() {
 
 function onMessagesScroll() {
   updateScrollBottomState()
+  const el = messagesListRef.value
+  if (el && el.scrollTop < 80) {
+    loadOlderMessages()
+  }
 }
 
 function jumpToLatest() {
@@ -3095,22 +3614,90 @@ async function jumpToResult(r) {
   highlightMessageId.value = r.id
   mobileChatOpen.value = true
   await loadMessages()
-  scrollToMessage(r.id)
+  await scrollToMessage(r.id)
 }
 
 async function jumpToMessage(m) {
   showChatSearch.value = false
   highlightMessageId.value = m.id
-  scrollToMessage(m.id)
+  await scrollToMessage(m.id)
   setTimeout(() => (highlightMessageId.value = null), 2500)
 }
 
-function scrollToMessage(messageId) {
+// ==== 消息搜索 ====
+let chatSearchDebounceTimer = null
+
+function openChatSearch() {
+  showChatSearch.value = true
+  chatSearchQuery.value = ''
+  nextTick(() => {
+    chatSearchInputRef.value?.focus()
+  })
+}
+
+function closeChatSearch() {
+  showChatSearch.value = false
+  chatSearchQuery.value = ''
+  if (chatSearchQuery.value) {
+    // 清除搜索，重新加载所有消息
+    loadMessages()
+  }
+}
+
+function clearChatSearch() {
+  chatSearchQuery.value = ''
+  loadMessages()
+}
+
+function onChatSearchInput() {
+  clearTimeout(chatSearchDebounceTimer)
+  chatSearchDebounceTimer = setTimeout(performChatSearch, 300)
+}
+
+async function performChatSearch() {
+  const query = chatSearchQuery.value.trim()
+  if (!query) {
+    loadMessages()
+    return
+  }
+  await loadMessages({ query })
+  // 搜索后滚动到顶部，显示第一个结果
+  if (messages.value.length > 0) {
+    nextTick(() => {
+      const firstMessage = messages.value[0]
+      if (firstMessage) {
+        highlightMessageId.value = firstMessage.id
+        scrollToMessage(firstMessage.id, { fallbackToBottom: false })
+        setTimeout(() => {
+          highlightMessageId.value = null
+        }, 3000)
+      }
+    })
+  }
+}
+
+function hasLoadedMessage(messageId) {
+  return messages.value.some((message) => String(message.id) === String(messageId))
+}
+
+async function ensureMessageLoaded(messageId, maxPages = 20) {
+  let attempts = 0
+  while (!hasLoadedMessage(messageId) && messagesPaging.value.hasMore && attempts < maxPages) {
+    attempts += 1
+    const loaded = await loadOlderMessages({ keepPosition: false })
+    if (!loaded && !messagesPaging.value.hasMore) break
+  }
+  return hasLoadedMessage(messageId)
+}
+
+async function scrollToMessage(messageId, { fallbackToBottom = true } = {}) {
+  const found = await ensureMessageLoaded(messageId)
   nextTick(() => {
     const el = document.querySelector(`.messages-list [data-msg-id="${messageId}"]`)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    else scrollToBottomSoon()
+    else if (fallbackToBottom) scrollToBottomSoon()
   })
+  return found
 }
 
 async function jumpToGroupAnnouncement(announcement) {
@@ -3121,18 +3708,12 @@ async function jumpToGroupAnnouncement(announcement) {
     return
   }
   highlightMessageId.value = messageId
-  if (!messages.value.some((message) => message.id === messageId)) {
-    await loadMessages({ silent: true })
-  }
-
-  // 检查消息是否真的存在（可能被用户删除或撤回）
-  if (!messages.value.some((message) => message.id === messageId)) {
+  const found = await scrollToMessage(messageId, { fallbackToBottom: false })
+  if (!found) {
     showAnnouncementJumpFailedDialog.value = true
     highlightMessageId.value = null
     return
   }
-
-  scrollToMessage(messageId)
   setTimeout(() => {
     if (highlightMessageId.value === messageId) highlightMessageId.value = null
   }, 2500)
@@ -3748,6 +4329,34 @@ function closeGroupMembers() {
   activeMuteMenuUserId.value = null
 }
 
+function openJoinRequestsPanel() {
+  joinRequestsVisible.value = true
+  loadPendingRequestsCount()
+}
+
+function closeJoinRequests() {
+  joinRequestsVisible.value = false
+}
+
+async function loadPendingRequestsCount() {
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  try {
+    const resp = await fetch(`/api/messages/groups/${groupId}/join-requests/?status=pending`)
+    const data = await resp.json()
+    if (data.status === 'success') {
+      groupPanel.value.pendingRequestsCount = data.requests?.length || 0
+    }
+  } catch (err) {
+    console.error('加载待审核申请数量失败:', err)
+  }
+}
+
+function handleJoinRequestUpdate() {
+  loadPendingRequestsCount()
+  refreshCurrentGroupDetail()
+}
+
 async function refreshCurrentGroupDetail({ loading = false } = {}) {
   const groupId = selectedGroupId()
   if (!groupId) return null
@@ -3804,6 +4413,69 @@ function syncConversationAnnouncementFromGroup(group) {
     announcement_message_id: item?.message_id || null,
     announcement_updated_at: item?.updated_at || null,
   })
+}
+
+function triggerGroupAvatarUpload() {
+  groupAvatarInputRef.value?.click()
+}
+
+async function onGroupAvatarSelected(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  // 验证文件类型
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    ElMessage.error('仅支持 JPG、PNG、GIF、WebP 格式的图片')
+    event.target.value = ''
+    return
+  }
+
+  // 验证文件大小（最大 5MB）
+  const maxSize = 5 * 1024 * 1024
+  if (file.size > maxSize) {
+    ElMessage.error('图片大小不能超过 5MB')
+    event.target.value = ''
+    return
+  }
+
+  const groupId = selectedGroupId()
+  if (!groupId) return
+
+  groupPanel.value.uploadingAvatar = true
+  try {
+    const formData = new FormData()
+    formData.append('avatar', file)
+
+    const response = await fetch(`/api/messages/groups/${groupId}/profile/`, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': csrfToken.value,
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || '上传失败')
+    }
+
+    const data = await response.json()
+    if (data.group) {
+      groupPanel.value.detail = data.group
+      // 更新对话列表中的头像
+      const conv = findConversationByKey(`group:${groupId}`)
+      if (conv) {
+        conv.avatar = data.group.avatar
+      }
+      ElMessage.success('群头像已更新')
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '上传群头像失败')
+  } finally {
+    groupPanel.value.uploadingAvatar = false
+    event.target.value = ''
+  }
 }
 
 async function saveGroupName() {
@@ -4199,7 +4871,7 @@ async function loadGroupJoinRequests() {
 }
 
 async function reviewGroupJoinRequest(requestItem, action) {
-  const groupId = selectedGroupId()
+  const groupId = requestItem.group?.id || selectedGroupId()
   if (!groupId || !requestItem?.id) return
   let rejectionReason = ''
   if (action === 'reject') {
@@ -4222,6 +4894,8 @@ async function reviewGroupJoinRequest(requestItem, action) {
     })
     if (d.group) groupPanel.value.detail = d.group
     groupPanel.value.joinRequests = groupPanel.value.joinRequests.filter((item) => item.id !== requestItem.id)
+    pendingApprovals.value = pendingApprovals.value.filter((item) => item.id !== requestItem.id)
+    pendingApprovalsCount.value = Math.max(0, pendingApprovalsCount.value - 1)
     loadGroupAuditLogs()
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success(action === 'approve' ? '已同意入群' : '已拒绝入群')
@@ -4238,6 +4912,7 @@ async function loadGroupSharedItems() {
     const r = await fetch(`/api/messages/groups/${groupId}/shared/`, { cache: 'no-store' })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(extractApiErrorMessage(d, '加载群资料失败'))
+
     groupPanel.value.sharedLinks = Array.isArray(d.links) ? d.links : []
     groupPanel.value.sharedMedia = Array.isArray(d.media) ? d.media : (Array.isArray(d.images) ? d.images : [])
     groupPanel.value.sharedFiles = Array.isArray(d.files) ? d.files : []
@@ -4717,6 +5392,12 @@ function onGlobalClick() {
   showChatMenu.value = false
 }
 
+function onGlobalKeydown(event) {
+  if (event.key === 'Escape' && mediaPreview.value.visible) {
+    closeMediaPreview()
+  }
+}
+
 function closeMobileChat() {
   mobileChatOpen.value = false
 }
@@ -4731,6 +5412,9 @@ function startPolling() {
     if (document.hidden) return
     if (realtimeState.value === 'connected') return
     if (scope.value !== 'blocked') loadConversations({ silent: true })
+    if (scope.value === 'pending_approvals' && hasAdminPermissions.value) {
+      loadPendingApprovals({ silent: true })
+    }
   }, 15000)
 }
 
@@ -4804,12 +5488,18 @@ onMounted(() => {
   csrfToken.value = getCsrfToken()
   loadDraftsFromStorage()
   loadNotificationPreferences()
-  loadConversations()
+  loadConversations().then(() => {
+    // 只在有管理权限时加载待审核申请
+    if (hasAdminPermissions.value) {
+      loadPendingApprovals({ silent: true })
+    }
+  })
   handleGroupInviteFromUrl()
   initRealtimeMessages()
   startPolling()
   startMessagesPageTouch()
   document.addEventListener('click', onGlobalClick)
+  document.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -4822,6 +5512,7 @@ onBeforeUnmount(() => {
   cleanupVoiceRecording()
   chatSocket?.close()
   document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('keydown', onGlobalKeydown)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -4837,6 +5528,10 @@ watch(selectedConversationKey, (v) => {
 watch(
   () => messages.value.length,
   (len, prev) => {
+    if (preserveMessageScrollOnLengthChange) {
+      preserveMessageScrollOnLengthChange = false
+      return
+    }
     if (len > prev) scrollToBottomSoon()
   }
 )
@@ -5040,6 +5735,129 @@ watch(
   font-size: 13px;
 }
 
+/* 待审核列表 */
+.pending-approvals-list {
+  padding: 8px;
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-primary);
+}
+
+.approval-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.approval-item {
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.approval-item:hover {
+  border-color: color-mix(in srgb, var(--border-color) 88%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.approval-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.approval-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+
+.approval-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.approval-user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.approval-group-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.approval-group-name i {
+  font-size: 11px;
+}
+
+.approval-message {
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.approval-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-actions button {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-approve {
+  background: #22c55e;
+  color: white;
+}
+
+.btn-approve:hover {
+  background: #16a34a;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+
+.btn-reject {
+  background: #ef4444;
+  color: white;
+}
+
+.btn-reject:hover {
+  background: #dc2626;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
 /* 搜索结果 */
 .search-results {
   flex: 1;
@@ -5239,6 +6057,35 @@ watch(
   gap: 6px;
 }
 
+.realtime-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  line-height: 1;
+}
+
+.realtime-status i {
+  font-size: 6px;
+}
+
+.realtime-status.connected {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.realtime-status.connecting {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.realtime-status.disconnected {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .chat-actions {
   display: flex;
   align-items: center;
@@ -5345,6 +6192,94 @@ watch(
   color: var(--text-primary);
   border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
   box-shadow: 0 22px 60px rgba(15, 23, 42, 0.24);
+}
+
+.media-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10500;  /* 高于群文件面板的 10000 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(8, 13, 24, 0.78);
+}
+
+.media-preview-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1120px, 100%);
+  height: min(820px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+}
+
+.media-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 16px;
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.media-preview-header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.media-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.media-preview-icon-btn {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.media-preview-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.media-preview-stage {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.media-preview-stage img,
+.media-preview-stage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.media-preview-audio {
+  width: 100%;
+  max-width: 600px;
+  outline: none;
 }
 
 .profile-card-close {
@@ -5537,6 +6472,87 @@ watch(
   color: var(--text-secondary);
 }
 
+.chat-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.search-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.search-input-wrap:focus-within {
+  border-color: var(--primary-color);
+  background: var(--bg-primary);
+}
+
+.search-input-wrap i {
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.search-input-wrap input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+
+.search-input-wrap input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.clear-search-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+
+.clear-search-btn:hover {
+  color: var(--text-secondary);
+}
+
+.close-search-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.close-search-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
 .selection-summary {
   display: inline-flex;
   align-items: center;
@@ -5652,6 +6668,40 @@ watch(
   overflow-y: auto;
   padding: 20px;
   background: var(--bg-secondary);
+}
+
+.older-messages-loader {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.load-more-hint {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 5%, transparent);
+  border-radius: 8px;
+  margin: 0 0 12px 0;
+  transition: all 0.2s;
+}
+
+.load-more-hint:hover {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent);
+  color: var(--primary-color);
+}
+
+.load-more-hint i {
+  font-size: 14px;
 }
 
 .messages-state {
@@ -6115,6 +7165,43 @@ watch(
 .group-panel-state.is-error span {
   max-width: 360px;
   line-height: 1.5;
+}
+
+.group-avatar-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+}
+
+.group-avatar-upload {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.group-avatar-preview {
+  flex-shrink: 0;
+}
+
+.group-avatar-preview img {
+  width: 80px;
+  height: 80px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 2px solid var(--border-color);
+}
+
+.group-avatar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.group-avatar-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 .group-edit-row,
@@ -6802,12 +7889,15 @@ watch(
   position: relative;
   aspect-ratio: 1;
   min-width: 0;
+  padding: 0;
+  border: 0;
   overflow: hidden;
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-secondary) 74%, var(--bg-primary));
   color: #fff;
   text-decoration: none;
   isolation: isolate;
+  cursor: zoom-in;
 }
 
 .group-media-item img,
@@ -6816,6 +7906,17 @@ watch(
   height: 100%;
   display: block;
   object-fit: cover;
+}
+
+.group-audio-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--primary-color) 0%, color-mix(in srgb, var(--primary-color) 70%, #000) 100%);
+  font-size: 48px;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .group-media-item::after {
@@ -6930,6 +8031,11 @@ watch(
 /* ========== 群成员面板 ========== */
 .group-members-panel {
   width: min(720px, 100%);
+}
+
+.group-join-requests-panel {
+  width: min(680px, 100%);
+  max-height: 85vh;
 }
 
 .group-members-content {
@@ -8468,5 +9574,107 @@ watch(
     box-shadow: none;
     transform: scale(1);
   }
+}
+
+/* 待审核提醒弹窗 */
+.reminder-requests {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.reminder-request-item {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.reminder-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.reminder-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+
+.reminder-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.reminder-user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.reminder-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.reminder-message {
+  padding: 8px;
+  margin-bottom: 10px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.reminder-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.reminder-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.btn-approve-small {
+  background: #22c55e;
+  color: white;
+}
+
+.btn-approve-small:hover {
+  background: #16a34a;
+}
+
+.btn-reject-small {
+  background: #ef4444;
+  color: white;
+}
+
+.btn-reject-small:hover {
+  background: #dc2626;
+}
+
+.reminder-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

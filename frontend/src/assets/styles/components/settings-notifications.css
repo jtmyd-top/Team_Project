@@ -62,6 +62,32 @@
   row-gap: 4px;
 }
 
+/* 确保禁用状态下的视觉反馈 */
+.group-mention-select.is-disabled .el-select__wrapper {
+  background-color: #f5f7fa;
+  border-color: #e4e7ed;
+  cursor: not-allowed;
+}
+
+.group-mention-select.is-disabled .el-select__wrapper input {
+  cursor: not-allowed;
+  color: #c0c4cc;
+}
+
+.group-mention-select.is-disabled .el-select__wrapper .el-tag {
+  background-color: #f0f2f5;
+  border-color: #e4e7ed;
+  color: #909399;
+}
+
+.suboption-row.disabled {
+  opacity: 0.6;
+}
+
+.suboption-row.disabled span {
+  color: #909399;
+}
+
 .notification-center-header,
 .notification-center-title,
 .notification-center-item {

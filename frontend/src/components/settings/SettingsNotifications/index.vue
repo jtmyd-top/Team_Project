@@ -43,7 +43,7 @@
           <el-switch v-model="notifications.email_messages" @change="saveNotifications" />
           <div class="form-hint">收到新私信时发送邮件提醒，同一用户短时间内会自动合并。</div>
           <div class="message-email-suboptions">
-            <div class="suboption-row">
+            <div class="suboption-row" :class="{ disabled: !notifications.email_messages }">
               <span>群组聊天被 @ 时发送邮件通知</span>
               <el-switch
                 v-model="notifications.notify_group_mentions_email"
@@ -58,8 +58,8 @@
               collapse-tags-tooltip
               filterable
               placeholder="选择需要提醒的群组"
-              :disabled="!notifications.email_messages || !notifications.notify_group_mentions_email"
               class="group-mention-select"
+              :disabled="!notifications.email_messages || !notifications.notify_group_mentions_email"
               @change="saveNotifications"
             >
               <el-option
