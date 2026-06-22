@@ -262,6 +262,7 @@ def get_message_conversations_api(request):
                 'disappearing_enabled': False,
                 'force_unread': membership.force_unread,
                 'is_blocked': False,
+                'viewer_role': membership.role,
                 'announcement': announcement.content if announcement else '',
                 'announcement_pinned': bool(announcement and announcement.pinned),
                 'announcement_message_id': announcement.message_id if announcement else None,
