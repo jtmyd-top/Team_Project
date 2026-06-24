@@ -1495,56 +1495,64 @@
     </div>
 
     <!-- 待审核提醒弹窗 -->
-    <el-dialog
-      v-model="pendingRequestsReminder.visible"
-      :title="`${pendingRequestsReminder.groupName} - 待审核申请`"
-      width="500px"
-      append-to-body
+    <div
+      v-if="pendingRequestsReminder.visible"
+      class="join-request-reminder-overlay"
+      @click.self="pendingRequestsReminder.visible = false"
     >
-      <div class="reminder-requests">
-        <div
-          v-for="req in pendingRequestsReminder.requests"
-          :key="req.id"
-          class="reminder-request-item"
-        >
-          <div class="reminder-header">
-            <img :src="req.user.avatar" :alt="req.user.username" class="reminder-avatar" />
-            <div class="reminder-info">
-              <div class="reminder-user-name">{{ req.user.username }}</div>
-              <div class="reminder-time">
-                {{ new Date(req.created_at).toLocaleString() }}
+      <section class="join-request-reminder-modal" role="dialog" aria-modal="true">
+        <header class="join-request-reminder-header">
+          <div>
+            <h3>{{ pendingRequestsReminder.groupName }} - 待审核申请</h3>
+            <p>{{ pendingRequestsReminder.requests.length }} 个新成员等待处理</p>
+          </div>
+          <button type="button" title="关闭" @click="pendingRequestsReminder.visible = false">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+        <div class="reminder-requests">
+          <div
+            v-for="req in pendingRequestsReminder.requests"
+            :key="req.id"
+            class="reminder-request-item"
+          >
+            <div class="reminder-header">
+              <img :src="req.user.avatar" :alt="req.user.username" class="reminder-avatar" />
+              <div class="reminder-info">
+                <div class="reminder-user-name">{{ req.user.username }}</div>
+                <div class="reminder-time">
+                  {{ new Date(req.created_at).toLocaleString() }}
+                </div>
               </div>
             </div>
-          </div>
-          <div v-if="req.request_message" class="reminder-message">
-            {{ req.request_message }}
-          </div>
-          <div class="reminder-actions">
-            <button class="btn-approve-small" @click="handleReminderAction(req, 'approve')">
-              <i class="fas fa-check"></i>
-              通过
-            </button>
-            <button class="btn-reject-small" @click="handleReminderAction(req, 'reject')">
-              <i class="fas fa-times"></i>
-              拒绝
-            </button>
+            <div v-if="req.request_message" class="reminder-message">
+              {{ req.request_message }}
+            </div>
+            <div class="reminder-actions">
+              <button class="btn-approve-small" @click="handleReminderAction(req, 'approve')">
+                <i class="fas fa-check"></i>
+                通过
+              </button>
+              <button class="btn-reject-small" @click="handleReminderAction(req, 'reject')">
+                <i class="fas fa-times"></i>
+                拒绝
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-      <template #footer>
-        <div class="reminder-footer">
-          <el-button @click="snoozeReminder(pendingRequestsReminder.groupId, 24)">
+        <footer class="reminder-footer">
+          <button type="button" class="reminder-secondary-btn" @click="snoozeReminder(pendingRequestsReminder.groupId, 24)">
             24小时内不再提醒
-          </el-button>
-          <el-button @click="snoozeReminder(pendingRequestsReminder.groupId, 168)">
+          </button>
+          <button type="button" class="reminder-secondary-btn" @click="snoozeReminder(pendingRequestsReminder.groupId, 168)">
             7天内不再提醒
-          </el-button>
-          <el-button type="primary" @click="pendingRequestsReminder.visible = false">
+          </button>
+          <button type="button" class="reminder-primary-btn" @click="pendingRequestsReminder.visible = false">
             关闭
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
+          </button>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -2588,7 +2596,6 @@ async function checkPendingRequestsReminder(groupId) {
 
     // 检查是否暂停提醒
     if (isReminderSnoozed(groupId)) {
-      console.log(`群组 ${groupId} 的提醒已暂停`)
       return
     }
 
@@ -2600,7 +2607,7 @@ async function checkPendingRequestsReminder(groupId) {
       requests: requests.slice(0, 3),
     }
   } catch (e) {
-    console.error('检查待审核申请失败:', e)
+    console.error('[checkPendingRequestsReminder] 检查待审核申请失败:', e)
   }
 }
 
@@ -9645,12 +9652,78 @@ watch(
 }
 
 /* 待审核提醒弹窗 */
+.join-request-reminder-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.join-request-reminder-modal {
+  width: min(500px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
+  box-shadow: 0 24px 72px rgba(15, 23, 42, 0.28);
+}
+
+.join-request-reminder-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+}
+
+.join-request-reminder-header h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.join-request-reminder-header p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.join-request-reminder-header button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.join-request-reminder-header button:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
 .reminder-requests {
   display: flex;
   flex-direction: column;
   gap: 16px;
   max-height: 400px;
   overflow-y: auto;
+  padding: 16px 20px;
 }
 
 .reminder-request-item {
@@ -9744,5 +9817,39 @@ watch(
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  flex-wrap: wrap;
+}
+
+.reminder-secondary-btn,
+.reminder-primary-btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reminder-secondary-btn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+}
+
+.reminder-secondary-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.reminder-primary-btn {
+  border: 1px solid var(--primary-color, #3b82f6);
+  background: var(--primary-color, #3b82f6);
+  color: #fff;
+}
+
+.reminder-primary-btn:hover {
+  filter: brightness(0.96);
 }
 </style>
