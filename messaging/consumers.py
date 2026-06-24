@@ -145,3 +145,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'type': 'typing_stop',
             'peer_id': event['peer_id'],
         }))
+
+    async def group_join_request(self, event):
+        """处理群组加入申请通知"""
+        await self.send(text_data=json.dumps({
+            'type': 'group_join_request',
+            'group_id': event['group_id'],
+            'group_name': event.get('group_name', ''),
+            'request_id': event.get('request_id'),
+            'user': event.get('user', {}),
+            'request_message': event.get('request_message', ''),
+        }))

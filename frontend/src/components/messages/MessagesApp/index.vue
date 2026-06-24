@@ -1588,6 +1588,7 @@ const loadingConversations = ref(false)
 const pendingApprovals = ref([])
 const loadingPendingApprovals = ref(false)
 const pendingApprovalsCount = ref(0)
+const managedApprovalGroupCount = ref(0)
 const selectedUserId = ref(null)
 const selectedConversationKey = ref(null)
 const messages = ref([])
@@ -1793,10 +1794,10 @@ const userHasAdminRole = ref(false)
 const hasAdminPermissions = computed(() => {
   // 如果当前在待审核标签，使用缓存的权限状态
   if (scope.value === 'pending_approvals') {
-    return userHasAdminRole.value
+    return userHasAdminRole.value || managedApprovalGroupCount.value > 0
   }
   // 否则实时检查 conversations
-  return conversations.value.some(conv =>
+  return managedApprovalGroupCount.value > 0 || conversations.value.some(conv =>
     conv.conversation_type === 'group' &&
     conv.viewer_role &&
     ['owner', 'admin'].includes(conv.viewer_role)
@@ -2282,6 +2283,28 @@ function handleRealtimeEvent(event) {
     // 对方停止输入或发送了消息，立即隐藏指示器，不再等 2 秒 timeout
     hideTypingIndicator()
   }
+
+  if (event.type === 'group_join_request') {
+    // 收到新的群组加入申请
+    const groupId = event.group_id
+    if (!groupId) return
+
+    // 刷新待审核数量
+    if (hasAdminPermissions.value) {
+      loadPendingApprovals({ silent: true })
+    }
+
+    // 如果当前正在查看该群组，立即弹窗提醒
+    if (selectedGroupId() === normalizeUserId(groupId)) {
+      showJoinRequestNotification(event)
+    } else {
+      // 否则显示桌面通知
+      ElMessage.info({
+        message: `${event.user?.username || '用户'} 申请加入群组 ${event.group_name || ''}`,
+        duration: 3000,
+      })
+    }
+  }
 }
 
 function initRealtimeMessages() {
@@ -2510,15 +2533,21 @@ async function loadPendingApprovals({ silent = false } = {}) {
       const d = await r.json()
       pendingApprovals.value = d.requests || []
       pendingApprovalsCount.value = d.count || 0
+      managedApprovalGroupCount.value = Number(d.managed_group_count || 0)
+      if (managedApprovalGroupCount.value > 0) {
+        userHasAdminRole.value = true
+      }
     } else if (r.status === 404 || r.status === 403) {
       // 用户无权限或接口不存在，静默处理
       pendingApprovals.value = []
       pendingApprovalsCount.value = 0
+      managedApprovalGroupCount.value = 0
     }
   } catch (e) {
     console.error('加载待审核申请失败:', e)
     pendingApprovals.value = []
     pendingApprovalsCount.value = 0
+    managedApprovalGroupCount.value = 0
   } finally {
     if (!silent) loadingPendingApprovals.value = false
   }
@@ -2549,7 +2578,6 @@ function snoozeReminder(groupId, hours) {
 
 async function checkPendingRequestsReminder(groupId) {
   if (!groupId) return
-  if (isReminderSnoozed(groupId)) return
 
   try {
     const r = await fetch(`/api/messages/groups/${groupId}/join-requests/?status=pending`)
@@ -2557,6 +2585,12 @@ async function checkPendingRequestsReminder(groupId) {
     const d = await r.json()
     const requests = d.requests || []
     if (requests.length === 0) return
+
+    // 检查是否暂停提醒
+    if (isReminderSnoozed(groupId)) {
+      console.log(`群组 ${groupId} 的提醒已暂停`)
+      return
+    }
 
     const conv = findConversationByKey(`group:${groupId}`)
     pendingRequestsReminder.value = {
@@ -2577,6 +2611,36 @@ async function handleReminderAction(requestItem, action) {
   )
   if (pendingRequestsReminder.value.requests.length === 0) {
     pendingRequestsReminder.value.visible = false
+  }
+}
+
+function showJoinRequestNotification(event) {
+  // 实时收到加入申请时显示弹窗
+  const groupId = event.group_id
+  if (!groupId) return
+
+  const requestItem = {
+    id: event.request_id,
+    user: event.user,
+    request_message: event.request_message,
+    created_at: new Date().toISOString(),
+  }
+
+  // 如果弹窗已经打开且是同一个群组，追加到列表
+  if (pendingRequestsReminder.value.visible && pendingRequestsReminder.value.groupId === groupId) {
+    // 检查是否已存在
+    const exists = pendingRequestsReminder.value.requests.some(r => r.id === requestItem.id)
+    if (!exists) {
+      pendingRequestsReminder.value.requests.unshift(requestItem)
+    }
+  } else {
+    // 打开新弹窗
+    pendingRequestsReminder.value = {
+      visible: true,
+      groupId: groupId,
+      groupName: event.group_name || '群组',
+      requests: [requestItem],
+    }
   }
 }
 
@@ -2699,7 +2763,14 @@ function selectConversation(conv) {
 
   // Check for pending join requests when entering a group chat
   if (conv.conversation_type === 'group') {
-    checkPendingRequestsReminder(conv.group_id)
+    // 延迟检查，等待群组详情加载后再判断权限
+    nextTick(() => {
+      // 只有在用户是群主或管理员时才检查待审核申请
+      const isAdmin = ['owner', 'admin'].includes(conv.viewer_role)
+      if (isAdmin) {
+        checkPendingRequestsReminder(conv.group_id)
+      }
+    })
   }
 }
 
@@ -5412,7 +5483,7 @@ function startPolling() {
     if (document.hidden) return
     if (realtimeState.value === 'connected') return
     if (scope.value !== 'blocked') loadConversations({ silent: true })
-    if (scope.value === 'pending_approvals' && hasAdminPermissions.value) {
+    if (scope.value === 'pending_approvals' || managedApprovalGroupCount.value > 0) {
       loadPendingApprovals({ silent: true })
     }
   }, 15000)
@@ -5489,10 +5560,7 @@ onMounted(() => {
   loadDraftsFromStorage()
   loadNotificationPreferences()
   loadConversations().then(() => {
-    // 只在有管理权限时加载待审核申请
-    if (hasAdminPermissions.value) {
-      loadPendingApprovals({ silent: true })
-    }
+    loadPendingApprovals({ silent: true })
   })
   handleGroupInviteFromUrl()
   initRealtimeMessages()

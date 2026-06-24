@@ -59,6 +59,11 @@ def request_join_group_api(request, group_id):
             left_at__isnull=True
         ).select_related('user')
 
+        # 实时推送通知
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+
         for admin_member in admins:
             try:
                 notify_user(
@@ -69,6 +74,24 @@ def request_join_group_api(request, group_id):
                     group_id=group.id,
                     request_id=join_request.id,
                 )
+
+                # 实时 WebSocket 推送
+                if channel_layer:
+                    async_to_sync(channel_layer.group_send)(
+                        f'chat_user_{admin_member.user.id}',
+                        {
+                            'type': 'group_join_request',
+                            'group_id': group.id,
+                            'group_name': group.name,
+                            'request_id': join_request.id,
+                            'user': {
+                                'id': request.user.id,
+                                'username': request.user.username,
+                                'avatar': _get_avatar_url(request.user),
+                            },
+                            'request_message': request_message,
+                        }
+                    )
             except Exception as e:
                 logger.warning(f'发送入群申请通知失败: {e}')
 
@@ -83,6 +106,58 @@ def request_join_group_api(request, group_id):
         raise
     except Exception as e:
         return _server_error_response('申请加入群组错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def all_pending_join_requests_api(request):
+    """获取用户管理的所有群组的待审核申请（用于消息列表待审核标签）"""
+    try:
+        from messaging.models import GroupJoinRequest, MessageGroup, MessageGroupMember
+
+        # 获取用户作为管理员或群主的所有群组
+        managed_groups = MessageGroup.objects.filter(
+            memberships__user=request.user,
+            memberships__role__in=['owner', 'admin'],
+            memberships__left_at__isnull=True,
+            is_active=True
+        ).distinct()
+
+        # 获取这些群组的所有待审核申请
+        requests_qs = GroupJoinRequest.objects.filter(
+            group__in=managed_groups,
+            status='pending'
+        ).select_related('user', 'group').order_by('-created_at')
+
+        # 限制返回数量，避免数据过多
+        requests_qs = requests_qs[:100]
+
+        results = []
+        for req in requests_qs:
+            results.append({
+                'id': req.id,
+                'user': {
+                    'id': req.user.id,
+                    'username': req.user.username,
+                    'avatar': _get_avatar_url(req.user),
+                },
+                'group': {
+                    'id': req.group.id,
+                    'name': req.group.name,
+                    'avatar': _group_avatar_url(req.group),
+                },
+                'request_message': req.request_message,
+                'created_at': req.created_at.isoformat(),
+            })
+
+        return JsonResponse({
+            'status': 'success',
+            'requests': results,
+            'count': len(results),
+            'managed_group_count': managed_groups.count(),
+        })
+    except Exception as e:
+        return _server_error_response('获取待审核申请列表错误', e)
 
 
 @require_http_methods(["GET"])
