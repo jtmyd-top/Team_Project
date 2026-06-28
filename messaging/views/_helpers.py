@@ -224,6 +224,50 @@ def _message_search_q(query):
     return Q(content__icontains=query) | Q(searchable_text__icontains=query)
 
 
+def _parse_message_page(request, default_limit=50, max_limit=100):
+    raw_limit = request.GET.get('limit')
+    if raw_limit in (None, ''):
+        # 默认使用分页，每次加载 default_limit 条
+        return default_limit, 0
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        limit = default_limit or max_limit
+    if limit <= 0:
+        limit = default_limit or max_limit
+    limit = min(limit, max_limit)
+
+    try:
+        offset = int(request.GET.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
+    return limit, max(offset, 0)
+
+
+def _slice_latest_page(qs, limit, offset):
+    if limit is None:
+        items = list(qs)
+        return items, {
+            'limit': len(items),
+            'offset': 0,
+            'next_offset': len(items),
+            'has_more': False,
+            'total': len(items),
+        }
+
+    total = qs.count()
+    end = max(total - offset, 0)
+    start = max(end - limit, 0)
+    items = list(qs[start:end])
+    return items, {
+        'limit': limit,
+        'offset': offset,
+        'next_offset': offset + len(items),
+        'has_more': start > 0,
+        'total': total,
+    }
+
+
 def _message_search_snippet(message, query, max_length=220):
     text = (message.searchable_text or '').strip()
     if query and query.lower() not in text.lower():
@@ -354,7 +398,7 @@ def _visible_messages_qs(viewer, peer, viewer_settings=None):
     if viewer_settings and viewer_settings.cleared_before:
         qs = qs.filter(created_at__gt=viewer_settings.cleared_before)
 
-    return qs.order_by('created_at')
+    return qs.select_related('sender', 'recipient').prefetch_related('attachments').order_by('created_at', 'id')
 
 
 def _apply_disappearing(viewer, peer, viewer_settings=None, peer_settings=None):

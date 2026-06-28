@@ -15,7 +15,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import Folder, Note
+from notes.models import Folder, Note
 
 from ._helpers import login, make_user, parse, post_json
 

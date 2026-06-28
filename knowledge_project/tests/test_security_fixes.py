@@ -14,7 +14,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from Team_Project.middleware import SessionTimeoutMiddleware, VaultLockMiddleware
-from knowledge_project.models import Note, NoteComment
+from notes.models import Note, NoteComment
 from knowledge_project.views.auth.login import (
     LOGIN_2FA_EMAIL_CODE_SESSION_KEY,
     _login_2fa_email_cache_key,

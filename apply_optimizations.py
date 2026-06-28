@@ -123,7 +123,7 @@ def performance_test():
     """简单的性能测试"""
     print_section("性能测试")
     try:
-        from knowledge_project.models import Note
+        from notes.models import Note
         from django.db.models import Count
         import time
 

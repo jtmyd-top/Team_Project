@@ -14,7 +14,8 @@ def get_group_messages_api(request, group_id):
         qs = _visible_group_messages_qs(group, membership)
         if query:
             qs = qs.filter(Q(content__icontains=query) | Q(searchable_text__icontains=query))
-        messages = list(qs)
+        limit, offset = _parse_message_page(request)
+        messages, pagination = _slice_latest_page(qs, limit, offset)
         current_announcement = _latest_active_announcement(group)
 
         membership.last_read_at = timezone.now()
@@ -34,9 +35,11 @@ def get_group_messages_api(request, group_id):
                 'announcement_message_id': current_announcement.message_id if current_announcement else None,
                 'announcement_updated_at': current_announcement.updated_at.isoformat() if current_announcement else None,
                 'mute_mode': group.mute_mode,
+                'allow_new_members_view_history': group.allow_new_members_view_history,
             },
             'messages': [_group_message_payload(message, viewer=request.user) for message in messages],
             'settings': _group_settings_payload(membership),
+            'pagination': pagination,
         })
     except Http404:
         raise
@@ -73,6 +76,7 @@ def send_group_message_api(request, group_id):
         # Phase 2: 获取回复和转发参数
         reply_to_id = data.get('reply_to')
         forwarded_from_id = data.get('forwarded_from')
+        forwarded_private_from_id = data.get('forwarded_private_from')
         raw_mentions = data.get('mentions', [])  # @提及的用户名列表
         mentioned_usernames = [
             str(username).strip()
@@ -99,7 +103,7 @@ def send_group_message_api(request, group_id):
         reply_to_message = None
         if reply_to_id:
             try:
-                reply_to_message = GroupMessage.objects.select_related('sender').get(id=reply_to_id, group=group, is_recalled=False)
+                reply_to_message = _visible_group_messages_qs(group, membership).get(id=reply_to_id)
             except GroupMessage.DoesNotExist:
                 return JsonResponse({'error': '回复的消息不存在或已撤回'}, status=400)
 
@@ -132,9 +136,29 @@ def send_group_message_api(request, group_id):
             return JsonResponse({'error': str(exc)}, status=400)
         if forwarded_from_id:
             try:
-                forwarded_message = GroupMessage.objects.get(id=forwarded_from_id, is_recalled=False)
+                forwarded_message = GroupMessage.objects.select_related('group').get(id=forwarded_from_id, is_recalled=False)
             except GroupMessage.DoesNotExist:
                 return JsonResponse({'error': '转发的消息不存在或已撤回'}, status=400)
+            source_membership = _get_active_membership(forwarded_message.group, request.user)
+            if (
+                source_membership is None
+                or not _visible_group_messages_qs(forwarded_message.group, source_membership)
+                .filter(id=forwarded_message.id)
+                .exists()
+            ):
+                return JsonResponse({'error': '无权转发该消息'}, status=403)
+        if forwarded_private_from_id:
+            from messaging.models import Message
+            try:
+                private_message = Message.objects.select_related('sender', 'recipient').get(id=forwarded_private_from_id)
+            except Message.DoesNotExist:
+                return JsonResponse({'error': '转发的消息不存在或已撤回'}, status=400)
+            if request.user.id not in (private_message.sender_id, private_message.recipient_id):
+                return JsonResponse({'error': '无权转发该消息'}, status=403)
+            if not content:
+                content = private_message.content or _attachment_preview(private_message.attachments.first())
+            if not content:
+                return JsonResponse({'error': '原消息为空，无法转发'}, status=400)
 
         with transaction.atomic():
             message = GroupMessage.objects.create(
@@ -231,7 +255,12 @@ def send_group_message_api(request, group_id):
             membership.last_read_at = timezone.now()
             membership.save(update_fields=['force_unread', 'last_read_at'])
 
-        message = GroupMessage.objects.select_related('sender', 'group').prefetch_related('attachments').get(id=message.id)
+        message = (
+            GroupMessage.objects
+            .select_related('sender', 'group')
+            .prefetch_related('attachments', 'mentions__mentioned_user', 'reactions__user')
+            .get(id=message.id)
+        )
         return JsonResponse({
             'status': 'success',
             'message': _group_message_payload(message, viewer=request.user),
@@ -259,7 +288,7 @@ def pin_group_message_api(request, group_id, message_id):
         if manager_error is not None:
             return manager_error
 
-        message = get_object_or_404(GroupMessage, id=message_id, group=group, is_recalled=False)
+        message = get_object_or_404(_visible_group_messages_qs(group, membership), id=message_id)
         if action == 'unpin' or group.pinned_message_id == message.id:
             group.pinned_message = None
             audit_action = 'group_message_unpin'
@@ -290,13 +319,28 @@ def pin_group_message_api(request, group_id, message_id):
 
 @require_http_methods(["GET"])
 @login_required
+@rate_limit('group_shared_items', max_requests=20, window_seconds=60)
 def group_shared_items_api(request, group_id):
     try:
         from messaging.models import MessageGroup
+        import logging
+        logger = logging.getLogger(__name__)
+
         group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
         membership, error = _require_group_member(group, request.user)
         if error is not None:
             return error
+
+        cleared_marker = membership.cleared_before.timestamp() if membership.cleared_before else 'none'
+        cache_key = (
+            f'group_shared_items:{group_id}:{request.user.id}:'
+            f'{group.updated_at.timestamp()}:{cleared_marker}'
+        )
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            logger.info(f'[群文件] 从缓存返回群组 {group_id} 的共享文件')
+            return JsonResponse(cached_data)
 
         def _shared_attachment_payload(attachment, message):
             payload = _attachment_payload(attachment)
@@ -314,14 +358,25 @@ def group_shared_items_api(request, group_id):
         files = []
         seen = set()
         qs = _visible_group_messages_qs(group, membership).order_by('-created_at')[:200]
+
+        logger.info(f'[群文件] 开始处理群组 {group_id} 的共享文件，共 {qs.count()} 条消息')
+
         for message in qs:
+            attachment_count = message.attachments.count()
+            if attachment_count > 0:
+                logger.info(f'[群文件] 消息 {message.id} 有 {attachment_count} 个附件')
+
             for attachment in message.attachments.all():
+                logger.info(f'[群文件] 处理附件: ID={attachment.id}, 类型={attachment.attachment_type}, 名称={attachment.original_name}')
                 item = _shared_attachment_payload(attachment, message)
-                if attachment.attachment_type in ('image', 'video'):
+                # 图片、视频、音频都归类为媒体
+                if attachment.attachment_type in ('image', 'video', 'audio'):
                     if len(media) < 60:
                         media.append(item)
+                        logger.info(f'[群文件] 添加媒体文件: {attachment.original_name}')
                 elif len(files) < 60:
                     files.append(item)
+                    logger.info(f'[群文件] 添加普通文件: {attachment.original_name}')
 
             for url in _extract_links_from_text(message.content):
                 if url in seen:
@@ -338,13 +393,20 @@ def group_shared_items_api(request, group_id):
             if len(links) >= 50:
                 break
 
-        return JsonResponse({
+        logger.info(f'[群文件] 最终结果: {len(media)} 个媒体, {len(files)} 个文件, {len(links)} 个链接')
+
+        response_data = {
             'status': 'success',
             'links': links,
             'media': media,
             'files': files,
             'images': [item for item in media if item.get('type') == 'image'],
-        })
+        }
+
+        # 缓存结果5分钟
+        cache.set(cache_key, response_data, 300)
+
+        return JsonResponse(response_data)
     except Http404:
         raise
     except Exception as e:
@@ -367,7 +429,7 @@ def edit_group_message_api(request, group_id, message_id):
         membership, error = _require_group_member(group, request.user)
         if error is not None:
             return error
-        message = get_object_or_404(GroupMessage, id=message_id, group=group, is_recalled=False)
+        message = get_object_or_404(_visible_group_messages_qs(group, membership), id=message_id)
         if message.sender_id != request.user.id:
             return JsonResponse({'error': '只能编辑自己发送的消息'}, status=403)
 
@@ -405,7 +467,7 @@ def delete_group_message_api(request, group_id, message_id):
         membership, error = _require_group_member(group, request.user)
         if error is not None:
             return error
-        message = get_object_or_404(GroupMessage, id=message_id, group=group)
+        message = get_object_or_404(_visible_group_messages_qs(group, membership), id=message_id)
 
         if scope == 'both':
             # 检查撤回权限
@@ -459,10 +521,10 @@ def report_group_message_api(request, group_id, message_id):
             return JsonResponse({'error': '无效的举报原因'}, status=400)
 
         group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
-        _, error = _require_group_member(group, request.user)
+        membership, error = _require_group_member(group, request.user)
         if error is not None:
             return error
-        message = get_object_or_404(GroupMessage, id=message_id, group=group)
+        message = get_object_or_404(_visible_group_messages_qs(group, membership), id=message_id)
         if message.sender_id == request.user.id:
             return JsonResponse({'error': '不能举报自己发送的消息'}, status=400)
 

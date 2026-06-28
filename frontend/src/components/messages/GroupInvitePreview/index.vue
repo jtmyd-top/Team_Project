@@ -362,6 +362,17 @@ export default {
         });
 
         const data = await resp.json();
+
+        // 处理等待审批状态
+        if (data.status === 'pending' || data.pending_approval === true) {
+          ElMessage.success(data.message || '入群申请已提交，请等待管理员审批');
+          await loadPreview();
+          setTimeout(() => {
+            emit('close');
+          }, 1500);
+          return;
+        }
+
         if (data.status === 'success') {
           joinSuccess.value = true;
           ElMessage.success('成功加入群组');
@@ -826,4 +837,3 @@ export default {
   }
 }
 </style>
-

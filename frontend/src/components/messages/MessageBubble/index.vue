@@ -52,25 +52,33 @@
             v-for="attachment in attachments"
             :key="attachment.id"
             class="message-attachment"
-            :class="`type-${attachment.type}`"
+            :class="`type-${attachmentKind(attachment)}`"
           >
-            <a v-if="attachment.type === 'image'" :href="attachment.url" target="_blank">
+            <button
+              v-if="isImageAttachment(attachment)"
+              class="message-media-trigger"
+              type="button"
+              :title="attachment.name || '预览图片'"
+              @click.prevent.stop="openMediaPreview(attachment)"
+              @mousedown.stop
+              @touchstart.stop
+            >
               <img
                 :src="attachment.url"
                 :alt="attachment.name"
                 class="message-image"
                 loading="lazy"
               />
-            </a>
+            </button>
             <audio
-              v-else-if="attachment.type === 'audio'"
+              v-else-if="attachmentKind(attachment) === 'audio'"
               :src="attachment.url"
               class="message-audio"
               controls
               preload="metadata"
             ></audio>
             <video
-              v-else-if="attachment.type === 'video'"
+              v-else-if="attachmentKind(attachment) === 'video'"
               :src="attachment.url"
               class="message-video"
               controls
@@ -174,7 +182,7 @@ const props = defineProps({
   selected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['context-menu', 'toggle-selected', 'open-merged-forward', 'reaction-toggle'])
+const emit = defineEmits(['context-menu', 'toggle-selected', 'open-merged-forward', 'reaction-toggle', 'open-media-preview'])
 
 // Backend fields (recommended):
 // msg.is_read: boolean read receipt flag; msg.read_at: optional ISO timestamp.
@@ -268,13 +276,34 @@ function formatFileSize(size) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+function attachmentKind(attachment) {
+  const type = String(attachment?.type || '').toLowerCase()
+  if (['image', 'audio', 'video'].includes(type)) return type
+
+  const mime = String(attachment?.mime_type || attachment?.content_type || '').toLowerCase()
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (mime.startsWith('video/')) return 'video'
+
+  const name = String(attachment?.name || attachment?.url || '').toLowerCase()
+  if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)(\?|#|$)/.test(name)) return 'image'
+  if (/\.(mp3|wav|ogg|m4a|aac|flac)(\?|#|$)/.test(name)) return 'audio'
+  if (/\.(mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/.test(name)) return 'video'
+  return type || 'file'
+}
+
+function isImageAttachment(attachment) {
+  return attachmentKind(attachment) === 'image'
+}
+
 function attachmentSummary(item) {
   const itemAttachments = Array.isArray(item?.attachments) ? item.attachments : []
   if (!itemAttachments.length) return ''
   const first = itemAttachments[0]
-  if (first?.type === 'image') return '[图片]'
-  if (first?.type === 'audio') return '[语音]'
-  if (first?.type === 'video') return '[视频]'
+  const kind = attachmentKind(first)
+  if (kind === 'image') return '[图片]'
+  if (kind === 'audio') return '[语音]'
+  if (kind === 'video') return '[视频]'
   return `[文件] ${first?.name || '附件'}`
 }
 
@@ -293,6 +322,17 @@ function openMergedForward() {
   }
   if (!mergedForward.value) return
   emit('open-merged-forward', { message: props.msg, payload: mergedForward.value })
+}
+
+function openMediaPreview(attachment) {
+  if (props.selectable) {
+    emitToggleSelected()
+    return
+  }
+  emit('open-media-preview', {
+    attachment: { ...attachment, type: attachmentKind(attachment) },
+    message: props.msg,
+  })
 }
 
 function toggleSelected() {
@@ -565,8 +605,14 @@ onUpdated(() => {
   background: rgba(15, 23, 42, 0.08);
 }
 
-.message-attachment.type-image a {
+.message-media-trigger {
   display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  color: inherit;
 }
 
 .message-image {

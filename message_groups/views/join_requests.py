@@ -261,11 +261,13 @@ def review_join_request_api(request, group_id, request_id):
                     defaults={'role': 'member'},
                 )
                 if not created_member:
+                    now = timezone.now()
                     target_member.left_at = None
                     target_member.role = 'member'
                     target_member.muted_until = None
-                    target_member.joined_at = timezone.now()
-                    target_member.save(update_fields=['left_at', 'role', 'muted_until', 'joined_at'])
+                    target_member.joined_at = now
+                    target_member.cleared_before = None if locked_group.allow_new_members_view_history else now
+                    target_member.save(update_fields=['left_at', 'role', 'muted_until', 'joined_at', 'cleared_before'])
                 join_request.status = 'approved'
                 join_request.reviewed_by = request.user
                 join_request.reviewed_at = timezone.now()

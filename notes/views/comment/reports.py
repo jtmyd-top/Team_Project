@@ -14,7 +14,7 @@ def _report_payload(request):
 def note_report_api(request, note_id):
     """Create a moderation ticket for a public note/article."""
     try:
-        note = get_object_or_404(Note, id=note_id, is_public=True, is_trashed=False)
+        note = get_object_or_404(Note, id=note_id, is_public=True, is_secret=False, is_trashed=False)
         if note.author == request.user:
             return JsonResponse({'error': '不能举报自己的文章'}, status=400)
 
@@ -62,6 +62,8 @@ def note_comment_report_api(request, comment_id):
             NoteComment.objects.select_related('note', 'author'),
             id=comment_id,
             note__is_public=True,
+            note__is_trashed=False,
+            note__is_secret=False,
         )
         if comment.author == request.user:
             return JsonResponse({'error': '不能举报自己的评论'}, status=400)
@@ -101,4 +103,3 @@ def note_comment_report_api(request, comment_id):
     except Exception as e:
         logger.error("举报评论失败: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
-

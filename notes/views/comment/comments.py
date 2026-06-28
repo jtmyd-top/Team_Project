@@ -1,12 +1,13 @@
 """Comment comments views."""
 from .common import *  # noqa: F401, F403
+from notes.views.note.common import _invalidate_public_notes_cache
 
 
 @require_http_methods(["GET"])
 def note_comments_api(request, note_id):
     """获取指定公开笔记的评论列表（树形结构：顶级评论 + 回复）"""
     try:
-        note = get_object_or_404(Note, id=note_id, is_public=True)
+        note = get_object_or_404(Note, id=note_id, is_public=True, is_secret=False, is_trashed=False)
         try:
             page = max(1, int(request.GET.get('page', 1) or 1))
         except (TypeError, ValueError):
@@ -88,7 +89,7 @@ def note_comment_create_api(request, note_id):
                 message = f'你已被禁止发表评论，限制将于 {comment_ban.expires_at:%Y-%m-%d %H:%M} 解除。'
             return JsonResponse({'error': message, 'message': message}, status=403)
 
-        note = get_object_or_404(Note, id=note_id, is_public=True)
+        note = get_object_or_404(Note, id=note_id, is_public=True, is_secret=False, is_trashed=False)
         data = json.loads(request.body)
         content = data.get('content', '').strip()
         parent_id = data.get('parent_id')
@@ -108,6 +109,7 @@ def note_comment_create_api(request, note_id):
             content=content,
             parent=parent
         )
+        _invalidate_public_notes_cache()
 
         if parent and parent.author_id != request.user.id:
             notify_user(
@@ -167,10 +169,10 @@ def note_comment_delete_api(request, comment_id):
         if comment.author != request.user and not request.user.is_staff:
             return JsonResponse({'error': '无权删除此评论'}, status=403)
         comment.delete()
+        _invalidate_public_notes_cache()
         return JsonResponse({'status': 'deleted'})
     except Http404:
         raise
     except Exception as e:
         logger.error("删除评论失败: %s", e, exc_info=True)
         return JsonResponse({'error': '服务器错误'}, status=500)
-

@@ -277,6 +277,7 @@ class VaultLockMiddleware:
         '/healthz',
         '/readyz',
         '/notes/public/',
+        '/uploads/',
         '/protected_uploads/',
     )
 

@@ -2,7 +2,7 @@
   <div class="dialog-overlay" @click.self="closeDialog">
     <div class="dialog-content">
       <div class="dialog-header">
-        <h3>{{ mode === 'group' ? '创建群组' : '开始新的对话' }}</h3>
+        <h3>{{ dialogTitle }}</h3>
         <button class="close-btn" @click="closeDialog">
           <i class="fas fa-times"></i>
         </button>
@@ -19,19 +19,23 @@
         </button>
       </div>
 
-      <div v-if="mode === 'group'" class="group-policy">
+      <div v-if="mode === 'group' && !isForwardMode" class="group-policy">
         <template v-if="groupPolicy">
           <div class="policy-line" :class="{ ok: groupPolicy.eligible, blocked: !groupPolicy.eligible }">
             <i :class="groupPolicy.eligible ? 'fas fa-circle-check' : 'fas fa-circle-info'"></i>
             <span v-if="groupPolicy.enabled && groupPolicy.eligible">你已满足创建群组条件</span>
-            <span v-else-if="groupPolicy.enabled">创建群组需满足以下任一条件</span>
+            <span v-else-if="groupPolicy.enabled">创建群组需同时满足以下条件</span>
             <span v-else>管理员已暂时关闭用户创建群组</span>
           </div>
           <div class="policy-progress">
-            <span>公开文章 {{ groupPolicy.stats.public_notes }}/{{ groupPolicy.min_public_notes }}</span>
-            <span>关注者 {{ groupPolicy.stats.followers }}/{{ groupPolicy.min_followers }}</span>
-            <span :class="{ blocked: groupPolicy.reasons && !groupPolicy.reasons.owned_groups }">
-              已创建群聊 {{ groupPolicy.owned_group_count || 0 }}/{{ groupPolicy.max_owned_groups || 3 }}
+            <span :class="{ ok: publicNotesRequirementMet, blocked: !publicNotesRequirementMet }">
+              公开文章 {{ groupPolicy.stats.public_notes }}/{{ groupPolicy.min_public_notes }}
+            </span>
+            <span :class="{ ok: followersRequirementMet, blocked: !followersRequirementMet }">
+              关注者 {{ groupPolicy.stats.followers }}/{{ groupPolicy.min_followers }}
+            </span>
+            <span :class="{ ok: ownedGroupRequirementMet, blocked: !ownedGroupRequirementMet }">
+              已创建群聊 {{ groupPolicy.owned_group_count ?? 0 }}/{{ groupPolicy.max_owned_groups ?? 3 }}
             </span>
           </div>
         </template>
@@ -41,7 +45,7 @@
         </div>
       </div>
 
-      <div v-if="mode === 'group'" class="group-name-row">
+      <div v-if="mode === 'group' && !isForwardMode" class="group-name-row">
         <input
           v-model="groupName"
           type="text"
@@ -70,7 +74,7 @@
         </div>
         <div class="search-hint">
           <i class="fas fa-shield-alt"></i>
-          为防止用户枚举，仅支持精准匹配。对方须开启相应的可发现性，或你拥有对方分享的搜索码。
+          {{ searchHintText }}
         </div>
       </div>
 
@@ -92,7 +96,7 @@
               </h4>
               <p v-if="searchResult.bio">{{ searchResult.bio }}</p>
             </div>
-            <i :class="mode === 'group' ? 'fas fa-plus' : 'fas fa-chevron-right'"></i>
+            <i :class="mode === 'group' && !isForwardMode ? 'fas fa-plus' : (isForwardMode ? 'fas fa-share' : 'fas fa-chevron-right')"></i>
           </div>
 
           <div v-else-if="searchError" class="empty-search">
@@ -103,12 +107,35 @@
           <div v-else class="empty-search">
             <i class="fas fa-user-slash"></i>
             <p>未找到用户</p>
-            <p class="neutral-hint">请确认输入的内容完全正确，或对方已允许被搜索</p>
+            <p class="neutral-hint">{{ emptySearchHint }}</p>
+          </div>
+        </template>
+
+        <template v-else-if="isForwardMode && mode === 'group'">
+          <div v-if="recentGroups.length" class="recent-title">最近群组</div>
+          <div
+            v-for="group in recentGroups"
+            :key="group.id"
+            class="user-item"
+            @click="selectGroup(group)"
+          >
+            <img :src="group.avatar" :alt="group.name" class="user-avatar">
+            <div class="user-details">
+              <h4>{{ group.name }}</h4>
+              <p>{{ group.member_count ? `${group.member_count} 名成员` : '群组会话' }}</p>
+            </div>
+            <i class="fas fa-share"></i>
+          </div>
+
+          <div v-if="!recentGroups.length" class="empty-search">
+            <i class="fas fa-users-slash"></i>
+            <p>暂无可转发的群组</p>
+            <p class="neutral-hint">你加入的群组会显示在这里</p>
           </div>
         </template>
 
         <template v-else>
-          <div v-if="recentUsers.length" class="recent-title">最近联系人</div>
+          <div v-if="recentUsers.length" class="recent-title">{{ isForwardMode ? '最近私信' : '最近联系人' }}</div>
           <div
             v-for="user in recentUsers"
             :key="user.id"
@@ -120,7 +147,7 @@
               <h4>{{ user.username }}</h4>
               <p v-if="user.bio">{{ user.bio }}</p>
             </div>
-            <i :class="mode === 'group' ? 'fas fa-plus' : 'fas fa-chevron-right'"></i>
+            <i :class="mode === 'group' && !isForwardMode ? 'fas fa-plus' : (isForwardMode ? 'fas fa-share' : 'fas fa-chevron-right')"></i>
           </div>
 
           <div v-if="!recentUsers.length" class="empty-search">
@@ -130,7 +157,7 @@
         </template>
       </div>
 
-      <div v-if="mode === 'group'" class="group-footer">
+      <div v-if="mode === 'group' && !isForwardMode" class="group-footer">
         <div class="selected-members">
           <span v-if="selectedMembers.length === 0" class="selected-empty">至少选择 1 名成员</span>
           <button
@@ -156,6 +183,12 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 
+const props = defineProps({
+  purpose: {
+    type: String,
+    default: 'new',
+  },
+})
 const emit = defineEmits(['close', 'select', 'group-created'])
 
 const mode = ref('direct')
@@ -165,12 +198,25 @@ const hasSearched = ref(false)
 const searchResult = ref(null)
 const searchError = ref('')
 const recentUsers = ref([])
+const recentGroups = ref([])
 const inputRef = ref(null)
 const groupPolicy = ref(null)
 const groupName = ref('')
 const selectedMembers = ref([])
 const creatingGroup = ref(false)
 
+const isForwardMode = computed(() => props.purpose === 'forward')
+const dialogTitle = computed(() => {
+  if (isForwardMode.value) return '选择转发对象'
+  return mode.value === 'group' ? '创建群组' : '开始新的对话'
+})
+const searchHintText = computed(() => {
+  if (isForwardMode.value && mode.value === 'group') return '可选择已有群组，或搜索用户后转发给私信对象。'
+  return '为防止用户枚举，仅支持精准匹配。对方须开启相应的可发现性，或你拥有对方分享的搜索码。'
+})
+const emptySearchHint = computed(() => (
+  isForwardMode.value ? '请确认输入的用户信息完全正确，或从最近列表中选择目标' : '请确认输入的内容完全正确，或对方已允许被搜索'
+))
 const canSearch = computed(() => searchInput.value.trim().length >= 3)
 const canCreateGroup = computed(() =>
   !!groupPolicy.value?.enabled &&
@@ -178,6 +224,23 @@ const canCreateGroup = computed(() =>
   groupName.value.trim().length > 0 &&
   selectedMembers.value.length > 0
 )
+const publicNotesRequirementMet = computed(() => {
+  const policy = groupPolicy.value
+  return policy?.reasons?.public_notes ?? ((policy?.stats?.public_notes ?? 0) >= (policy?.min_public_notes ?? 0))
+})
+const followersRequirementMet = computed(() => {
+  const policy = groupPolicy.value
+  return policy?.reasons?.followers ?? ((policy?.stats?.followers ?? 0) >= (policy?.min_followers ?? 0))
+})
+const ownedGroupRequirementMet = computed(() => {
+  const policy = groupPolicy.value
+  const ownedCount = Number(policy?.owned_group_count ?? 0)
+  const maxOwnedGroups = Number(policy?.max_owned_groups ?? 3)
+  if (Number.isFinite(ownedCount) && Number.isFinite(maxOwnedGroups)) {
+    return ownedCount < maxOwnedGroups
+  }
+  return policy?.reasons?.owned_groups ?? true
+})
 
 const matchedByLabel = (via) => {
   if (via === 'username') return '用户名'
@@ -218,11 +281,15 @@ const doSearch = async () => {
 }
 
 const selectUser = (user) => {
-  emit('select', user.id)
+  emit('select', isForwardMode.value ? { type: 'user', id: user.id, user } : user.id)
+}
+
+const selectGroup = (group) => {
+  emit('select', { type: 'group', id: group.id, group })
 }
 
 const handleUserClick = (user) => {
-  if (mode.value === 'group') {
+  if (mode.value === 'group' && !isForwardMode.value) {
     addMember(user)
     return
   }
@@ -290,6 +357,7 @@ const loadRecentUsers = async () => {
     const response = await fetch('/api/messages/conversations/')
     if (response.ok) {
       const data = await response.json()
+      const conversations = data.conversations || []
       recentUsers.value = (data.conversations || [])
         .filter(conv => conv.conversation_type !== 'group' && conv.user_id)
         .slice(0, 5)
@@ -299,6 +367,15 @@ const loadRecentUsers = async () => {
           avatar: conv.avatar,
           bio: '',
         }))
+      recentGroups.value = conversations
+        .filter(conv => conv.conversation_type === 'group' && (conv.group_id || conv.id))
+        .slice(0, 8)
+        .map(conv => ({
+          id: conv.group_id || conv.id,
+          name: conv.group_name || conv.name || conv.username || '群组',
+          avatar: conv.avatar,
+          member_count: conv.member_count,
+        }))
     }
   } catch (error) {
     console.error('加载最近联系人失败:', error)
@@ -306,7 +383,7 @@ const loadRecentUsers = async () => {
 }
 
 onMounted(() => {
-  loadGroupPolicy()
+  if (!isForwardMode.value) loadGroupPolicy()
   loadRecentUsers()
   nextTick(() => inputRef.value?.focus())
 })
@@ -436,8 +513,24 @@ onMounted(() => {
 
 .policy-progress span {
   padding: 7px 9px;
+  border: 1px solid transparent;
   border-radius: 8px;
   background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.policy-progress span.ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.policy-progress span.blocked {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  font-weight: 600;
 }
 
 .group-name-row {

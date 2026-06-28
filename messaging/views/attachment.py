@@ -100,16 +100,27 @@ def message_attachment_file_api(request, attachment_id):
         if attachment.uploader_id != request.user.id:
             return HttpResponse('无权访问此附件', status=403)
     elif group_message is not None:
-        is_member = MessageGroupMember.objects.filter(
+        membership = MessageGroupMember.objects.filter(
             group=group_message.group,
             user=request.user,
             left_at__isnull=True,
-        ).exists()
+        ).first()
         is_deleted_for_user = GroupMessageDeletion.objects.filter(
             message=group_message,
             user=request.user,
         ).exists()
-        if not is_member or group_message.is_recalled or is_deleted_for_user:
+        history_hidden = (
+            membership is not None
+            and not group_message.group.allow_new_members_view_history
+            and membership.joined_at
+            and group_message.created_at < membership.joined_at
+        )
+        cleared = (
+            membership is not None
+            and membership.cleared_before
+            and group_message.created_at <= membership.cleared_before
+        )
+        if not membership or group_message.is_recalled or is_deleted_for_user or history_hidden or cleared:
             return HttpResponse('无权访问此附件', status=403)
     elif request.user.id not in (message.sender_id, message.recipient_id) or not message.visible_to(request.user):
         return HttpResponse('无权访问此附件', status=403)

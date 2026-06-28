@@ -39,7 +39,7 @@ from vault.services import (
     revoke_vault_access,
     verify_vault_2fa,
 )
-from knowledge_project.models import Note
+from notes.models import Note
 from Team_Project.middleware import VaultLockMiddleware
 
 from ._helpers import login, make_user, parse, post_json
@@ -223,6 +223,13 @@ class VaultLockMiddlewareWhitelistTests(_VaultTestBase):
         request = self._build_request('/static/css/main.css', user)
         response = VaultLockMiddleware(lambda req: _ok_response())(request)
         # SAFE_PREFIXES 包含 '/static/' → 应放行
+        self.assertEqual(response.status_code, 200)
+
+    @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))
+    def test_locked_uploads_prefix_passes(self, _m):
+        user = make_user('vmw02_uploads')
+        request = self._build_request('/uploads/group_avatars/preview.jpg', user)
+        response = VaultLockMiddleware(lambda req: _ok_response())(request)
         self.assertEqual(response.status_code, 200)
 
     @patch('vault.services.check_vault_locked', return_value=(True, 60, 3))

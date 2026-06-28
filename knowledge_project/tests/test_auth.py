@@ -27,7 +27,8 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import PasswordResetAttempt, UserSanction
+from accounts.models import PasswordResetAttempt
+from moderation.models import UserSanction
 from knowledge_project.views.auth.rate_limit import (
     check_rate_limit,
     get_client_fingerprint,

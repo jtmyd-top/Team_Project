@@ -32,7 +32,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from knowledge_project.models import (
+from messaging.models import (
     ConversationSettings,
     GroupMessage,
     GroupMessageMention,
@@ -44,23 +44,26 @@ from knowledge_project.models import (
     MessageGroupAuditLog,
     MessageGroupBan,
     MessageGroupInviteLink,
+    MessageGroupInviteUse,
     MessageGroupMember,
     MessageGroupPolicy,
-    NoteComment,
+    GroupJoinRequest,
     MessagePreference,
+    NewConversationQuotaLog,
+    UserBlocklist,
+    UserFollow,
+)
+from moderation.models import (
+    CommentReport,
     MessageReport,
     ModerationAppeal,
     ModerationLog,
     ModerationTemplate,
-    CommentReport,
-    Note,
     NoteReport,
-    NewConversationQuotaLog,
-    UserBlocklist,
-    UserFollow,
-    UserNotification,
     UserSanction,
 )
+from notes.models import Note, NoteComment
+from notifications.models import UserNotification
 
 from ._helpers import login, make_user, parse, post_json
 
@@ -305,7 +308,7 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(MessageGroup.objects.exists())
 
-    def test_user_with_required_public_notes_can_create_group(self):
+    def test_user_missing_followers_cannot_create_group_even_with_required_public_notes(self):
         owner = make_user('grp_notes_owner')
         member = make_user('grp_notes_member')
         self._make_public_notes(owner, 10)
@@ -314,15 +317,17 @@ class MessageGroupTests(_MessageTestBase):
             'name': 'notes group',
             'member_ids': [member.id],
         })
-        self.assertEqual(response.status_code, 201, response.content)
-        group = MessageGroup.objects.get(name='notes group')
-        self.assertEqual(group.owner, owner)
-        self.assertEqual(group.memberships.filter(left_at__isnull=True).count(), 2)
+        self.assertEqual(response.status_code, 403)
+        policy = parse(response)['policy']
+        self.assertTrue(policy['reasons']['public_notes'])
+        self.assertFalse(policy['reasons']['followers'])
+        self.assertFalse(MessageGroup.objects.exists())
 
-    def test_admin_adjusted_follower_threshold_is_used(self):
+    def test_user_meeting_public_notes_and_followers_can_create_group(self):
         owner = make_user('grp_follow_owner')
         member = make_user('grp_follow_member')
-        MessageGroupPolicy.objects.create(min_public_notes=99, min_followers=2)
+        MessageGroupPolicy.objects.create(min_public_notes=3, min_followers=2)
+        self._make_public_notes(owner, 3)
         for i in range(2):
             follower = make_user(f'grp_follow_follower_{i}')
             UserFollow.objects.create(follower=follower, following=owner)
@@ -333,6 +338,9 @@ class MessageGroupTests(_MessageTestBase):
             'member_ids': [member.id],
         })
         self.assertEqual(response.status_code, 201, response.content)
+        group = MessageGroup.objects.get(name='followers group')
+        self.assertEqual(group.owner, owner)
+        self.assertEqual(group.memberships.filter(left_at__isnull=True).count(), 2)
 
     def test_disabled_group_policy_blocks_creation_even_when_threshold_met(self):
         owner = make_user('grp_disabled_owner')
@@ -382,6 +390,166 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(recall_response.status_code, 200, recall_response.content)
         message.refresh_from_db()
         self.assertTrue(message.is_recalled)
+
+    def test_group_message_cannot_forward_message_from_invisible_group(self):
+        owner = make_user('grp_forward_owner')
+        member = make_user('grp_forward_member')
+        other_owner = make_user('grp_forward_other_owner')
+        group = self._create_group_directly(owner, [member])
+        other_group = self._create_group_directly(other_owner, [])
+        source_message = GroupMessage.objects.create(
+            group=other_group,
+            sender=other_owner,
+            content='hidden source',
+        )
+
+        login(self.client, member)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'forward attempt',
+            'forwarded_from': source_message.id,
+        })
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(GroupMessage.objects.filter(group=group, content='forward attempt').exists())
+
+    def test_group_message_can_forward_to_private_user(self):
+        owner = make_user('grp_forward_private_owner')
+        member = make_user('grp_forward_private_member')
+        recipient = make_user('grp_forward_private_recipient')
+        _enable_messaging(recipient)
+        group = self._create_group_directly(owner, [member])
+        source_message = GroupMessage.objects.create(
+            group=group,
+            sender=owner,
+            content='group source text',
+        )
+
+        login(self.client, member)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'group_message_id': source_message.id,
+            'recipient_id': recipient.id,
+            'content': 'forwarded from group',
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertTrue(Message.objects.filter(
+            sender=member,
+            recipient=recipient,
+            content='forwarded from group',
+        ).exists())
+
+    def test_private_message_can_forward_to_group(self):
+        sender = make_user('private_forward_sender')
+        recipient = make_user('private_forward_recipient')
+        group_owner = make_user('private_forward_group_owner')
+        group = self._create_group_directly(group_owner, [sender])
+        source_message = Message.objects.create(
+            sender=recipient,
+            recipient=sender,
+            content='private source text',
+        )
+
+        login(self.client, sender)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': 'forwarded from private',
+            'forwarded_private_from': source_message.id,
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertTrue(GroupMessage.objects.filter(
+            group=group,
+            sender=sender,
+            content='forwarded from private',
+        ).exists())
+
+    def test_group_messages_support_latest_page_pagination(self):
+        owner = make_user('grp_page_owner')
+        member = make_user('grp_page_member')
+        group = self._create_group_directly(owner, [member])
+        for i in range(5):
+            GroupMessage.objects.create(group=group, sender=owner, content=f'group page {i}')
+
+        login(self.client, member)
+        url = reverse('get_group_messages_api', args=[group.id])
+        first_page = parse(self.client.get(f'{url}?limit=2'))
+        self.assertEqual([m['content'] for m in first_page['messages']], ['group page 3', 'group page 4'])
+        self.assertTrue(first_page['pagination']['has_more'])
+        self.assertEqual(first_page['pagination']['next_offset'], 2)
+
+        second_page = parse(self.client.get(f'{url}?limit=2&offset=2'))
+        self.assertEqual([m['content'] for m in second_page['messages']], ['group page 1', 'group page 2'])
+        self.assertTrue(second_page['pagination']['has_more'])
+
+    def test_new_members_cannot_view_pre_join_history_by_default(self):
+        owner = make_user('grp_hist_owner')
+        member = make_user('grp_hist_member')
+        group = MessageGroup.objects.create(name='history default', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        now = timezone.now()
+        old_message = GroupMessage.objects.create(group=group, sender=owner, content='before join')
+        new_message = GroupMessage.objects.create(group=group, sender=owner, content='after join')
+        GroupMessage.objects.filter(pk=old_message.pk).update(created_at=now - timedelta(hours=2))
+        GroupMessage.objects.filter(pk=new_message.pk).update(created_at=now - timedelta(minutes=10))
+        attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=old_message,
+            file=SimpleUploadedFile('old.txt', b'old', content_type='text/plain'),
+            original_name='old.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=3,
+        )
+        membership = MessageGroupMember.objects.create(group=group, user=member, role='member')
+        MessageGroupMember.objects.filter(pk=membership.pk).update(joined_at=now - timedelta(hours=1))
+
+        login(self.client, member)
+        conversations = parse(self.client.get(reverse('get_message_conversations_api')))['conversations']
+        conversation = next(item for item in conversations if item.get('group_id') == group.id)
+        self.assertEqual(conversation['last_message'], 'after join')
+        self.assertEqual(conversation['unread_count'], 1)
+
+        list_body = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))
+        self.assertEqual([message['content'] for message in list_body['messages']], ['after join'])
+
+        file_response = self.client.get(reverse('message_attachment_file_api', args=[attachment.id]))
+        self.assertEqual(file_response.status_code, 403, file_response.content)
+        report_response = post_json(
+            self.client,
+            reverse('report_group_message_api', args=[group.id, old_message.id]),
+            {'reason': 'abuse'},
+        )
+        self.assertEqual(report_response.status_code, 404)
+
+    def test_group_setting_allows_new_members_to_view_history_without_unread_backfill(self):
+        owner = make_user('grp_hist_on_owner')
+        member = make_user('grp_hist_on_member')
+        group = MessageGroup.objects.create(
+            name='history enabled',
+            owner=owner,
+            created_by=owner,
+            allow_new_members_view_history=True,
+        )
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        now = timezone.now()
+        old_message = GroupMessage.objects.create(group=group, sender=owner, content='before enabled join')
+        new_message = GroupMessage.objects.create(group=group, sender=owner, content='after enabled join')
+        GroupMessage.objects.filter(pk=old_message.pk).update(created_at=now - timedelta(hours=2))
+        GroupMessage.objects.filter(pk=new_message.pk).update(created_at=now - timedelta(minutes=10))
+        membership = MessageGroupMember.objects.create(group=group, user=member, role='member')
+        MessageGroupMember.objects.filter(pk=membership.pk).update(joined_at=now - timedelta(hours=1))
+
+        login(self.client, member)
+        conversations = parse(self.client.get(reverse('get_message_conversations_api')))['conversations']
+        conversation = next(item for item in conversations if item.get('group_id') == group.id)
+        self.assertEqual(conversation['last_message'], 'after enabled join')
+        self.assertEqual(conversation['unread_count'], 1)
+
+        list_body = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))
+        self.assertTrue(list_body['group']['allow_new_members_view_history'])
+        self.assertEqual(
+            [message['content'] for message in list_body['messages']],
+            ['before enabled join', 'after enabled join'],
+        )
 
     def test_group_message_can_send_and_serve_attachments(self):
         owner = make_user('grp_attach_owner')
@@ -495,6 +663,41 @@ class MessageGroupTests(_MessageTestBase):
         login(self.client, outsider)
         forbidden = self.client.get(reverse('group_shared_items_api', args=[group.id]))
         self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
+    def test_group_shared_items_cache_is_member_scoped(self):
+        owner = make_user('grp_shared_cache_owner')
+        member = make_user('grp_shared_cache_member')
+        group = self._create_group_directly(owner, [member])
+        visible_to_all = GroupMessage.objects.create(group=group, sender=owner, content='public link https://example.com/a')
+        hidden_from_member = GroupMessage.objects.create(group=group, sender=owner, content='private link https://example.com/b')
+        hidden_from_member.deletions.create(user=member)
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=visible_to_all,
+            file=SimpleUploadedFile('all.txt', b'all', content_type='text/plain'),
+            original_name='all.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=3,
+        )
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=hidden_from_member,
+            file=SimpleUploadedFile('owner-only.txt', b'owner', content_type='text/plain'),
+            original_name='owner-only.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=5,
+        )
+
+        login(self.client, owner)
+        owner_body = parse(self.client.get(reverse('group_shared_items_api', args=[group.id])))
+        self.assertEqual({item['name'] for item in owner_body['files']}, {'all.txt', 'owner-only.txt'})
+
+        self.client.logout()
+        login(self.client, member)
+        member_body = parse(self.client.get(reverse('group_shared_items_api', args=[group.id])))
+        self.assertEqual({item['name'] for item in member_body['files']}, {'all.txt'})
 
     def test_group_owner_can_manage_members_and_group_name(self):
         owner = make_user('grp_manage_owner')
@@ -629,6 +832,82 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertFalse(MessageGroupMember.objects.filter(group=group, user=late_user, left_at__isnull=True).exists())
 
+    def test_approval_invite_consumes_one_use_for_new_pending_request(self):
+        owner = make_user('grp_invite_approval_owner')
+        applicant = make_user('grp_invite_approval_applicant')
+        second = make_user('grp_invite_approval_second')
+        group = self._create_group_directly(owner, [])
+        group.require_approval = True
+        group.save(update_fields=['require_approval'])
+        invite = MessageGroupInviteLink.objects.create(group=group, created_by=owner, max_uses=1)
+
+        login(self.client, applicant)
+        response = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})
+        self.assertEqual(response.status_code, 202, response.content)
+        invite.refresh_from_db()
+        self.assertEqual(invite.uses_count, 1)
+        self.assertEqual(MessageGroupInviteUse.objects.filter(invite=invite, user=applicant).count(), 1)
+        join_request = GroupJoinRequest.objects.get(group=group, user=applicant, status='pending')
+        self.assertEqual(join_request.source_invite, invite)
+        self.assertIsNotNone(join_request.source_invite_use)
+        self.assertEqual(join_request.source_invite_use.user, applicant)
+
+        repeat = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {'request_message': 'again'})
+        self.assertEqual(repeat.status_code, 400, repeat.content)
+        invite.refresh_from_db()
+        self.assertEqual(invite.uses_count, 1)
+
+        self.client.logout()
+        login(self.client, second)
+        blocked = post_json(self.client, reverse('join_group_by_invite_api', args=[invite.token]), {})
+        self.assertEqual(blocked.status_code, 400, blocked.content)
+        self.assertFalse(GroupJoinRequest.objects.filter(group=group, user=second).exists())
+
+    def test_group_join_request_can_be_approved_after_previous_approval_history(self):
+        owner = make_user('grp_rejoin_owner')
+        applicant = make_user('grp_rejoin_applicant')
+        group = self._create_group_directly(owner, [])
+        group.require_approval = True
+        group.save(update_fields=['require_approval'])
+
+        GroupJoinRequest.objects.create(
+            group=group,
+            user=applicant,
+            status='approved',
+            reviewed_by=owner,
+            reviewed_at=timezone.now(),
+        )
+        MessageGroupMember.objects.create(
+            group=group,
+            user=applicant,
+            role='member',
+            left_at=timezone.now(),
+        )
+        pending_request = GroupJoinRequest.objects.create(
+            group=group,
+            user=applicant,
+            status='pending',
+        )
+
+        login(self.client, owner)
+        response = post_json(
+            self.client,
+            reverse('review_join_request_api', args=[group.id, pending_request.id]),
+            {'action': 'approve'},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        pending_request.refresh_from_db()
+        self.assertEqual(pending_request.status, 'approved')
+        self.assertEqual(
+            GroupJoinRequest.objects.filter(group=group, user=applicant, status='approved').count(),
+            2,
+        )
+        self.assertTrue(
+            MessageGroupMember.objects.filter(group=group, user=applicant, left_at__isnull=True).exists()
+        )
+        membership = MessageGroupMember.objects.get(group=group, user=applicant)
+        self.assertIsNotNone(membership.cleared_before)
+
     def test_group_message_sender_can_edit_sent_message(self):
         owner = make_user('grp_edit_owner')
         member = make_user('grp_edit_member')
@@ -690,13 +969,36 @@ class MessageGroupTests(_MessageTestBase):
         group.refresh_from_db()
         self.assertFalse(group.is_active)
 
+    def test_readding_left_member_sets_cleared_before(self):
+        owner = make_user('grp_readd_owner')
+        member = make_user('grp_readd_member')
+        group = self._create_group_directly(owner, [member])
+        membership = MessageGroupMember.objects.get(group=group, user=member)
+        membership.left_at = timezone.now()
+        membership.cleared_before = None
+        membership.save(update_fields=['left_at', 'cleared_before'])
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('add_group_members_api', args=[group.id]), {
+            'member_ids': [member.id],
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        membership.refresh_from_db()
+        self.assertIsNone(membership.left_at)
+        self.assertIsNotNone(membership.cleared_before)
+
     def test_group_profile_transfer_mute_mode_and_audit_logs(self):
         owner = make_user('grp_ext_owner')
         member = make_user('grp_ext_member')
         admin_user = make_user('grp_ext_admin')
         group = self._create_group_directly(owner, [member, admin_user])
+        MessageGroupPolicy.objects.create(min_public_notes=10, min_followers=2)
         for i in range(10):
             Note.objects.create(author=member, title=f'public note {i}', content='', is_public=True)
+        for i in range(2):
+            follower = make_user(f'grp_ext_follower_{i}')
+            UserFollow.objects.create(follower=follower, following=member)
         MessageGroupMember.objects.filter(group=group, user=admin_user).update(role='admin')
         login(self.client, owner)
 
@@ -1016,6 +1318,23 @@ class GetMessagesApiTests(_MessageTestBase):
         body = parse(self.client.get(reverse('get_messages_api') + f'?user_id={bob.id}&q=篮球'))
         contents = {m['content'] for m in body['messages']}
         self.assertEqual(contents, {'今天去打篮球'})
+
+    def test_get_messages_support_latest_page_pagination(self):
+        alice = make_user('gm_page_a')
+        bob = make_user('gm_page_b')
+        for i in range(5):
+            Message.objects.create(sender=alice, recipient=bob, content=f'private page {i}')
+
+        login(self.client, alice)
+        url = reverse('get_messages_api') + f'?user_id={bob.id}&limit=2'
+        first_page = parse(self.client.get(url))
+        self.assertEqual([m['content'] for m in first_page['messages']], ['private page 3', 'private page 4'])
+        self.assertTrue(first_page['pagination']['has_more'])
+        self.assertEqual(first_page['pagination']['next_offset'], 2)
+
+        second_page = parse(self.client.get(url + '&offset=2'))
+        self.assertEqual([m['content'] for m in second_page['messages']], ['private page 1', 'private page 2'])
+        self.assertTrue(second_page['pagination']['has_more'])
 
     def test_missing_user_id_returns_400(self):
         user = make_user('gm05')

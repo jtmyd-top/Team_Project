@@ -347,7 +347,7 @@ class MessageGroupPolicy(models.Model):
 
     def __str__(self):
         status = "开启" if self.enabled else "关闭"
-        return f"群组创建策略（{status}，公开文章≥{self.min_public_notes} 或关注者≥{self.min_followers}）"
+        return f"群组创建策略（{status}，公开文章≥{self.min_public_notes} 且关注者≥{self.min_followers}）"
 
     def save(self, *args, **kwargs):
         self.pk = 1
@@ -371,7 +371,7 @@ class MessageGroupPolicy(models.Model):
     def can_create_group(self, user):
         stats = self.user_stats(user)
         eligible = self.enabled and (
-            stats['public_notes'] >= self.min_public_notes or
+            stats['public_notes'] >= self.min_public_notes and
             stats['followers'] >= self.min_followers
         )
         return eligible, stats
@@ -399,6 +399,7 @@ class MessageGroup(models.Model):
     # Phase 3: 入群审批
     require_approval = models.BooleanField(default=False, verbose_name="需要入群审批")
     members_visible = models.BooleanField(default=True, verbose_name="成员列表对普通成员可见")
+    allow_new_members_view_history = models.BooleanField(default=False, verbose_name="新成员可见群历史消息")
     allow_member_mention_all = models.BooleanField(default=False, verbose_name="Allow members to mention everyone")
     pinned_message = models.ForeignKey(
         'GroupMessage', null=True, blank=True, on_delete=models.SET_NULL,
@@ -851,6 +852,14 @@ class GroupJoinRequest(models.Model):
     request_message = models.TextField(
         max_length=200, blank=True, default='', verbose_name="申请留言"
     )
+    source_invite = models.ForeignKey(
+        MessageGroupInviteLink, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='join_requests', verbose_name="来源邀请链接"
+    )
+    source_invite_use = models.ForeignKey(
+        MessageGroupInviteUse, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='join_requests', verbose_name="来源邀请使用记录"
+    )
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="状态"
     )
@@ -872,7 +881,6 @@ class GroupJoinRequest(models.Model):
             models.Index(fields=['group', 'status', '-created_at']),
             models.Index(fields=['user', '-created_at']),
         ]
-        unique_together = [('group', 'user', 'status')]
 
     def __str__(self):
         return f"{self.user.username} -> {self.group.name} ({self.get_status_display()})"

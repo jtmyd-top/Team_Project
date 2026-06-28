@@ -27,7 +27,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import Asset, Folder, Note, NoteAsset, NoteHistory
+from notes.models import Asset, Folder, Note, NoteAsset, NoteHistory
 
 from ._helpers import login, make_user, parse, post_json
 
@@ -110,6 +110,17 @@ class CreateNoteApiTests(_NoteTestBase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertTrue(parse(response)['is_secret'])
+
+    def test_create_note_rejects_secret_public_combination(self):
+        user = make_user('secret_public_owner')
+        login(self.client, user)
+        response = post_json(self.client, reverse('create_note_api'), {
+            'title': 'do not publish',
+            'is_secret': True,
+            'is_public': True,
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Note.objects.filter(author=user, title='do not publish').exists())
 
 
 # =========================================================================
@@ -365,6 +376,19 @@ class PublicNoteViewTests(_NoteTestBase):
         response = self.client.get(reverse('public_note_view', args=[note.public_id]))
         self.assertEqual(response.status_code, 200)
 
+    def test_public_note_view_rejects_secret_public_note(self):
+        user = make_user('pubview_secret')
+        note = Note.objects.create(
+            author=user,
+            title='secret public',
+            content='<p>x</p>',
+            is_public=True,
+            is_secret=True,
+        )
+        response = self.client.get(reverse('public_note_view', args=[note.public_id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('error_message', response.context)
+
     def test_author_note_count_excludes_trashed_public_notes(self):
         user = make_user('pubview03')
         note = Note.objects.create(author=user, title='visible', content='<p>x</p>', is_public=True)
@@ -496,6 +520,41 @@ class NoteHistoryTests(_NoteTestBase):
         body_text = response.content.decode('utf-8')
         self.assertIn('public', body_text)
 
+    def test_history_api_excludes_notes_no_longer_public(self):
+        author = make_user('histauth07')
+        viewer = make_user('histview07')
+        visible = Note.objects.create(author=author, title='visible', content='ok', is_public=True)
+        private = Note.objects.create(author=author, title='private-now', content='secret text', is_public=False)
+        secret = Note.objects.create(author=author, title='secret-now', content='vault text', is_public=True, is_secret=True)
+        trashed = Note.objects.create(author=author, title='trashed-now', content='trash text', is_public=True, is_trashed=True)
+        for note in (visible, private, secret, trashed):
+            NoteHistory.objects.create(user=viewer, note=note)
+
+        login(self.client, viewer)
+        response = self.client.get(reverse('note_history_api'))
+
+        self.assertEqual(response.status_code, 200)
+        titles = {item['title'] for item in parse(response)}
+        self.assertEqual(titles, {'visible'})
+
+    def test_record_history_invalidates_cached_history(self):
+        author = make_user('histauth08')
+        viewer = make_user('histview08')
+        first_note = Note.objects.create(author=author, title='first', content='', is_public=True)
+        second_note = Note.objects.create(author=author, title='second', content='', is_public=True)
+        NoteHistory.objects.create(user=viewer, note=first_note)
+        login(self.client, viewer)
+        first = self.client.get(reverse('note_history_api'))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual({item['title'] for item in parse(first)}, {'first'})
+
+        response = post_json(self.client, reverse('record_note_history_api'), {'note_id': second_note.id})
+        self.assertEqual(response.status_code, 200)
+        second = self.client.get(reverse('note_history_api'))
+
+        titles = {item['title'] for item in parse(second)}
+        self.assertEqual(titles, {'first', 'second'})
+
 
 # =========================================================================
 # public_notes_api (只补充 test_security_fixes 未覆盖的过滤项)
@@ -515,6 +574,18 @@ class PublicNotesApiFilterTests(_NoteTestBase):
         author = make_user('pubapi02')
         Note.objects.create(author=author, title='public', content='', is_public=True)
         Note.objects.create(author=author, title='trashed', content='', is_public=True, is_trashed=True)
+
+        response = self.client.get(reverse('public_notes_api'))
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        titles = {n['title'] for n in body['notes']}
+        self.assertEqual(titles, {'public'})
+
+    def test_does_not_include_secret_public_notes(self):
+        author = make_user('pubapi_secret')
+        Note.objects.create(author=author, title='public', content='', is_public=True)
+        Note.objects.create(author=author, title='secret', content='', is_public=True, is_secret=True)
 
         response = self.client.get(reverse('public_notes_api'))
 

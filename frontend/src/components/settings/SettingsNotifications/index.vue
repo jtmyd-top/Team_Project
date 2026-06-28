@@ -40,7 +40,7 @@
         </el-form-item>
 
         <el-form-item label="新消息邮件提醒">
-          <el-switch v-model="notifications.email_messages" @change="saveNotifications" />
+          <el-switch v-model="notifications.email_messages" @change="handleEmailMessagesToggle" />
           <div class="form-hint">收到新私信时发送邮件提醒，同一用户短时间内会自动合并。</div>
           <div class="message-email-suboptions">
             <div class="suboption-row" :class="{ disabled: !notifications.email_messages }">
@@ -48,7 +48,7 @@
               <el-switch
                 v-model="notifications.notify_group_mentions_email"
                 :disabled="!notifications.email_messages"
-                @change="saveNotifications"
+                @change="handleGroupMentionsEmailToggle"
               />
             </div>
             <el-select
@@ -59,7 +59,7 @@
               filterable
               placeholder="选择需要提醒的群组"
               class="group-mention-select"
-              :disabled="!notifications.email_messages || !notifications.notify_group_mentions_email"
+              :disabled="isGroupMentionSelectDisabled"
               @change="saveNotifications"
             >
               <el-option
@@ -165,6 +165,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue';
 import { useSettingsNotifications } from '@/features/notifications/useSettingsNotifications.js';
 import '@/assets/styles/components/settings-notifications.css';
 
@@ -179,4 +180,24 @@ const {
   saveNotifications,
   handleBrowserNotificationToggle
 } = useSettingsNotifications();
+
+const isGroupMentionSelectDisabled = computed(() =>
+  !notifications.email_messages || !notifications.notify_group_mentions_email
+);
+
+function handleEmailMessagesToggle(enabled) {
+  if (!enabled) {
+    notifications.notify_group_mentions_email = false;
+  } else if (notifications.email_mention_group_ids.length > 0) {
+    notifications.notify_group_mentions_email = true;
+  }
+  saveNotifications();
+}
+
+function handleGroupMentionsEmailToggle(enabled) {
+  if (!notifications.email_messages && enabled) {
+    notifications.notify_group_mentions_email = false;
+  }
+  saveNotifications();
+}
 </script>

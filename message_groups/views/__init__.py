@@ -7,7 +7,7 @@ from .lifecycle import (leave_message_group_api, dissolve_message_group_api, tog
 from .messages import (get_group_messages_api, send_group_message_api, pin_group_message_api, group_shared_items_api, edit_group_message_api, delete_group_message_api, report_group_message_api)
 from .transfer_check import (check_transfer_eligibility_api)
 from .reactions import (toggle_message_reaction_api)
-from .join_requests import (request_join_group_api, group_join_requests_api, review_join_request_api)
+from .join_requests import (request_join_group_api, group_join_requests_api, all_pending_join_requests_api, review_join_request_api)
 from .announcements import (update_group_announcement_api, group_announcement_detail_api, group_announcement_reads_api)
 
 __all__ = [
@@ -42,6 +42,7 @@ __all__ = [
     'toggle_message_reaction_api',
     'request_join_group_api',
     'group_join_requests_api',
+    'all_pending_join_requests_api',
     'review_join_request_api',
     'update_group_announcement_api',
     'group_announcement_detail_api',

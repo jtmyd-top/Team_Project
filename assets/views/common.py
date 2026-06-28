@@ -21,6 +21,7 @@ from accounts.models import Profile
 from assets.models import Asset, NoteAsset
 from core.utils.accelerated_media import media_file_response
 from core.utils.request_utils import check_rate_limit_atomic, get_client_ip
+from messaging.models import MessageGroup
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ __all__ = [
     'JsonResponse',
     'require_http_methods',
     'Profile',
+    'MessageGroup',
     'Asset',
     'NoteAsset',
     'media_file_response',

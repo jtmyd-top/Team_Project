@@ -185,11 +185,17 @@ def get_message_conversations_api(request):
             unread_filters = []
             for membership in scoped_memberships:
                 visible_filter = Q(group_id=membership.group_id, is_recalled=False)
+                if not membership.group.allow_new_members_view_history and membership.joined_at:
+                    visible_filter &= Q(created_at__gte=membership.joined_at)
                 if membership.cleared_before:
                     visible_filter &= Q(created_at__gt=membership.cleared_before)
                 visible_filters.append(visible_filter)
 
                 threshold = membership.last_read_at
+                if membership.joined_at and (
+                    threshold is None or membership.joined_at > threshold
+                ):
+                    threshold = membership.joined_at
                 if membership.cleared_before and (
                     threshold is None or membership.cleared_before > threshold
                 ):

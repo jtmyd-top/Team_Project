@@ -12,7 +12,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import Note, NoteComment
+from notes.models import Note, NoteComment
 
 from ._helpers import login, make_user, parse, post_json
 
@@ -42,6 +42,12 @@ class CommentListApiTests(_CommentTestBase):
     def test_list_private_note_returns_404(self):
         author = make_user('cl02_a')
         note = Note.objects.create(author=author, title='priv', content='', is_public=False)
+        response = self.client.get(reverse('note_comments_api', args=[note.id]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_trashed_public_note_returns_404(self):
+        author = make_user('cl02_trash_a')
+        note = Note.objects.create(author=author, title='trash', content='', is_public=True, is_trashed=True)
         response = self.client.get(reverse('note_comments_api', args=[note.id]))
         self.assertEqual(response.status_code, 404)
 
@@ -92,6 +98,15 @@ class CommentCreateApiTests(_CommentTestBase):
         author = make_user('cc03_a')
         commenter = make_user('cc03_c')
         note = Note.objects.create(author=author, title='priv', content='', is_public=False)
+        login(self.client, commenter)
+        response = post_json(self.client, reverse('note_comment_create_api', args=[note.id]),
+                             {'content': 'x'})
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_on_trashed_public_note_returns_404(self):
+        author = make_user('cc03_trash_a')
+        commenter = make_user('cc03_trash_c')
+        note = Note.objects.create(author=author, title='trash', content='', is_public=True, is_trashed=True)
         login(self.client, commenter)
         response = post_json(self.client, reverse('note_comment_create_api', args=[note.id]),
                              {'content': 'x'})

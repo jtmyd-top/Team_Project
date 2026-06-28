@@ -21,7 +21,7 @@ def toggle_message_reaction_api(request, group_id, message_id):
         if error is not None:
             return error
 
-        message = get_object_or_404(GroupMessage, id=message_id, group=group, is_recalled=False)
+        message = get_object_or_404(_visible_group_messages_qs(group, membership), id=message_id)
 
         # 尝试移除已有的反应
         existing = GroupMessageReaction.objects.filter(

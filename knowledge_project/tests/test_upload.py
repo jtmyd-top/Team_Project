@@ -19,7 +19,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
-from knowledge_project.models import Asset, Note, NoteAsset
+from messaging.models import MessageGroup, MessageGroupMember
+from notes.models import Asset, Note, NoteAsset
 from knowledge_project.views import upload as upload_views
 
 from ._helpers import login, make_user, parse
@@ -218,6 +219,23 @@ class ProtectedMediaViewTests(_UploadTestBase):
         response = self.client.get(reverse('protected_media_view', args=[file_path]))
         self.assertEqual(response.status_code, 200)
 
+    def test_secret_note_asset_requires_vault_unlock_for_uploader(self):
+        user = make_user('pm_secret_asset')
+        file_path = self._upload_as(user)
+        asset = Asset.objects.get(file=file_path)
+        note = Note.objects.create(author=user, title='secret', content='', is_secret=True)
+        NoteAsset.objects.create(note=note, asset=asset)
+
+        login(self.client, user)
+        locked_response = self.client.get(reverse('protected_media_view', args=[file_path]))
+        self.assertEqual(locked_response.status_code, 403)
+
+        from vault.services import grant_vault_access
+
+        grant_vault_access(locked_response.wsgi_request)
+        unlocked_response = self.client.get(reverse('protected_media_view', args=[file_path]))
+        self.assertEqual(unlocked_response.status_code, 200)
+
     def test_anonymous_cannot_access_private(self):
         user = make_user('pm02')
         file_path = self._upload_as(user)
@@ -337,6 +355,25 @@ class PublicProfileMediaViewTests(_UploadTransactionTestBase):
         finally:
             response.close()
             user.profile.avatar.close()
+
+    def test_group_avatar_file_can_be_served_publicly(self):
+        owner = make_user('group_avatar_owner')
+        group = MessageGroup.objects.create(name='avatar group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        group.avatar.save(
+            'group.png',
+            SimpleUploadedFile('group.png', PNG_BYTES, content_type='image/png'),
+            save=True,
+        )
+
+        response = self.client.get(f'/uploads/{group.avatar.name}')
+
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['Content-Type'], 'image/png')
+        finally:
+            response.close()
+            group.avatar.close()
 
     def test_unregistered_upload_file_is_not_public(self):
         private_path = os.path.join(self._tmpdir.name, 'user_999', 'private.png')

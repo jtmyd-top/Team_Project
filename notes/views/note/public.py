@@ -1,11 +1,15 @@
 """Notes public views."""
 from .common import *  # noqa: F401, F403
-from .common import _coerce_non_negative_int, _get_public_notes_cache_version
+from .common import (
+    _coerce_non_negative_int,
+    _get_public_notes_cache_version,
+    _invalidate_public_notes_cache,
+)
 
 
 def public_note_view(request, public_id):
     try:
-        note = Note.objects.get(public_id=public_id, is_public=True, is_trashed=False)
+        note = Note.objects.get(public_id=public_id, is_public=True, is_secret=False, is_trashed=False)
         # 原子递增，避免并发访问时丢失计数
         Note.objects.filter(pk=note.pk).update(views=F('views') + 1)
         note.refresh_from_db(fields=['views'])
@@ -13,6 +17,7 @@ def public_note_view(request, public_id):
         # 获取所有公开文章的导航数据
         all_public_notes = Note.objects.filter(
             is_public=True,
+            is_secret=False,
             is_trashed=False,
         ).select_related('author').order_by('-updated_at')
 
@@ -68,6 +73,7 @@ def public_note_view(request, public_id):
         author_note_count = Note.objects.filter(
             author=note.author,
             is_public=True,
+            is_secret=False,
             is_trashed=False,
         ).count()
 
@@ -130,6 +136,7 @@ def toggle_note_like(request):
         note = Note.objects.select_related('author__profile').get(
             id=note_id,
             is_public=True,
+            is_secret=False,
             is_trashed=False,
         )
 
@@ -172,6 +179,7 @@ def toggle_note_like(request):
 
         # 计算新的点赞数
         total_likes = ProfileLike.objects.filter(profile__user=note.author).count()
+        _invalidate_public_notes_cache()
 
         return JsonResponse({
             'status': 'success',
@@ -213,7 +221,7 @@ def public_notes_api(request):
     # 优化查询：使用 annotate 预计算评论数，避免N+1问题
     notes_qs = (
         Note.objects
-        .filter(is_public=True, is_trashed=False)
+        .filter(is_public=True, is_secret=False, is_trashed=False)
         .select_related('author', 'author__profile')
         .prefetch_related('tags')
         .annotate(comments_count_cached=Count('comments'))  # 预计算评论数

@@ -34,6 +34,11 @@ urlpatterns = [
         name='group_join_requests_api',
     ),
     path(
+        'api/messages/groups/join-requests/pending/',
+        views.all_pending_join_requests_api,
+        name='all_pending_join_requests_api',
+    ),
+    path(
         'api/messages/groups/<int:group_id>/join-requests/<int:request_id>/review/',
         views.review_join_request_api,
         name='review_join_request_api',

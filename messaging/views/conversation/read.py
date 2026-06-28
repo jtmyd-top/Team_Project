@@ -22,8 +22,8 @@ def get_messages_api(request):
         if query:
             messages_qs = messages_qs.filter(_message_search_q(query))
 
-        # 强制求值为列表，后续的 is_read / is_recalled 更新不影响这份快照
-        messages_list = list(messages_qs)
+        limit, offset = _parse_message_page(request)
+        messages_list, pagination = _slice_latest_page(messages_qs, limit, offset)
         unread_ids = [m.id for m in messages_list if m.sender_id == other_user.id and not m.is_read]
 
         # 标记接收到的消息为已读（仅对 recipient=viewer 的未读消息）
@@ -51,9 +51,9 @@ def get_messages_api(request):
                 'avatar': _get_avatar_url(other_user),
             },
             'settings': _conversation_settings_payload(viewer_settings),
+            'pagination': pagination,
         })
     except Http404:
         raise
     except Exception as e:
         return _server_error_response('获取私信列表错误', e)
-

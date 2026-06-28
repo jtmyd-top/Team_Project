@@ -77,7 +77,7 @@ def _group_message_payload(message, viewer=None):
                 'user_id': mention.mentioned_user_id,
                 'username': mention.mentioned_user.username,
             }
-            for mention in message.mentions.select_related('mentioned_user').all()
+            for mention in message.mentions.all()
         ]
 
     # Phase 2: 获取表情回应统计
@@ -177,6 +177,7 @@ def _group_detail_payload(group, viewer_membership=None):
         'mute_mode': group.mute_mode,
         'require_approval': group.require_approval,
         'members_visible': group.members_visible,
+        'allow_new_members_view_history': group.allow_new_members_view_history,
         'can_view_members': can_view_members,
         'allow_member_mention_all': group.allow_member_mention_all,
         'pinned_message': _pinned_group_message_payload(group, viewer_membership.user if viewer_membership else None),
@@ -193,11 +194,18 @@ def _group_detail_payload(group, viewer_membership=None):
 
 def _visible_group_messages_qs(group, membership):
     from messaging.models import GroupMessage
-    qs = GroupMessage.objects.filter(group=group, is_recalled=False).select_related('sender', 'group').prefetch_related('attachments')
+    qs = (
+        GroupMessage.objects
+        .filter(group=group, is_recalled=False)
+        .select_related('sender', 'group')
+        .prefetch_related('attachments', 'mentions__mentioned_user', 'reactions__user')
+    )
+    if not getattr(group, 'allow_new_members_view_history', False) and membership.joined_at:
+        qs = qs.filter(created_at__gte=membership.joined_at)
     if membership.cleared_before:
         qs = qs.filter(created_at__gt=membership.cleared_before)
     qs = qs.exclude(deletions__user=membership.user)
-    return qs.order_by('created_at')
+    return qs.order_by('created_at', 'id')
 
 __all__ = [
     '_policy_payload',

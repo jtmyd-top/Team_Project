@@ -248,6 +248,8 @@ def create_note_api(request):
         folder_id = data.get('folder_id')
         is_secret = data.get('is_secret', False)  # 添加保密参数
         is_public = data.get('is_public', False)
+        if is_secret and is_public:
+            return JsonResponse({'error': '保密笔记不能同时公开'}, status=400)
 
         if is_public:
             allowed, error_msg = check_public_note_publish_permission(user)

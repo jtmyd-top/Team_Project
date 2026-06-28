@@ -45,7 +45,7 @@ def transfer_group_ownership_api(request, group_id):
                     'error': '新群主不满足创建群组条件',
                     'policy': _policy_payload(policy, target.user),
                     'stats': stats,
-                    'message': f'新群主需满足以下任一条件：公开文章数 ≥ {policy.min_public_notes} 或 关注者数 ≥ {policy.min_followers}。'
+                    'message': f'新群主需同时满足：公开文章数 ≥ {policy.min_public_notes} 且 关注者数 ≥ {policy.min_followers}。'
                                f'当前状态：公开文章 {stats["public_notes"]} 篇，关注者 {stats["followers"]} 人。',
                 }, status=403)
             owned_limit = _owned_group_limit_payload(target.user, exclude_group_id=group.id)

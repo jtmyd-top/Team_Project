@@ -393,8 +393,21 @@ def join_group_by_invite_api(request, token):
                     group=link.group,
                     user=request.user,
                     status='pending',
-                    defaults={'request_message': request_message},
+                    defaults={
+                        'request_message': request_message,
+                        'source_invite': link,
+                    },
                 )
+                if created_request:
+                    invite_use = MessageGroupInviteUse.objects.create(
+                        invite=link,
+                        group=link.group,
+                        user=request.user,
+                    )
+                    MessageGroupInviteLink.objects.filter(id=link.id).update(uses_count=F('uses_count') + 1)
+                    link.uses_count += 1
+                    join_request.source_invite_use = invite_use
+                    join_request.save(update_fields=['source_invite_use'])
                 if not created_request and request_message and join_request.request_message != request_message:
                     join_request.request_message = request_message
                     join_request.save(update_fields=['request_message'])
@@ -417,12 +430,16 @@ def join_group_by_invite_api(request, token):
                     },
                 }, status=202)
 
+            rejoining = membership is not None and membership.left_at is not None
+            now = timezone.now()
             if membership is None:
                 membership = MessageGroupMember(group=link.group, user=request.user, role='member')
             membership.left_at = None
             membership.role = 'member'
             membership.muted_until = None
-            membership.joined_at = timezone.now()
+            membership.joined_at = now
+            if rejoining:
+                membership.cleared_before = None if link.group.allow_new_members_view_history else now
             membership.save()
             link.uses_count += 1
             link.save(update_fields=['uses_count'])

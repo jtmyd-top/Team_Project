@@ -20,20 +20,22 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from knowledge_project.models import (
+from accounts.models import (
     LoginDevice,
-    MessageGroup,
-    MessageGroupMember,
-    MessagePreference,
-    Note,
     Profile,
     ProfileLike,
     ProfileVisit,
     SecurityAuditLog,
+)
+from messaging.models import (
+    MessageGroup,
+    MessageGroupMember,
+    MessagePreference,
     UserBlocklist,
     UserFollow,
-    UserNotification,
 )
+from notes.models import Note
+from notifications.models import UserNotification
 
 from ._helpers import login, make_user, parse, post_json
 
@@ -411,6 +413,27 @@ class NotificationPreferencesTests(_ProfileTestBase):
         self.assertEqual(response.status_code, 200, response.content)
         pref = MessagePreference.objects.get(user=user)
         self.assertTrue(pref.notify_group_mentions_email)
+        self.assertEqual(list(pref.email_mention_groups.values_list('id', flat=True)), [group.id])
+
+    def test_joined_group_is_available_for_group_mention_email(self):
+        user = make_user('np06_member')
+        owner = make_user('np06_owner')
+        group = MessageGroup.objects.create(name='joined notify group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        MessageGroupMember.objects.create(group=group, user=user, role='member')
+        login(self.client, user)
+
+        body = parse(self.client.get(reverse('notification_preferences')))
+        groups = body['preferences']['available_email_mention_groups']
+        self.assertIn(group.id, [item['id'] for item in groups])
+
+        response = post_json(self.client, reverse('notification_preferences'), {
+            'notify_group_mentions_email': True,
+            'email_mention_group_ids': [group.id],
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        pref = MessagePreference.objects.get(user=user)
         self.assertEqual(list(pref.email_mention_groups.values_list('id', flat=True)), [group.id])
 
     def test_reject_unavailable_group_mention_email_group(self):

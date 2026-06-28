@@ -168,15 +168,17 @@
           <i :class="emptyStateIcon"></i>
           <p>{{ emptyStateText }}</p>
         </div>
-        <ConversationItem
-          v-for="conv in filteredConversations"
-          :key="conversationKey(conv)"
-          :conv="conv"
-          :active="selectedConversationKey === conversationKey(conv)"
-          :current-user-id="currentUserId"
-          @select="selectConversation"
-          @context-menu="onConversationContextMenu"
-        />
+        <template v-else>
+          <ConversationItem
+            v-for="conv in filteredConversations"
+            :key="conversationKey(conv)"
+            :conv="conv"
+            :active="selectedConversationKey === conversationKey(conv)"
+            :current-user-id="currentUserId"
+            @select="selectConversation"
+            @context-menu="onConversationContextMenu"
+          />
+        </template>
       </div>
     </aside>
 
@@ -694,8 +696,9 @@
     <!-- 寮圭獥 -->
     <NewMessageDialog
       v-if="showNewMessageDialog"
+      :purpose="forwardDraft ? 'forward' : 'new'"
       @close="closeNewMessageDialog"
-      @select="startNewConversation"
+      @select="handleDialogSelect"
       @group-created="startGroupConversation"
     />
 
@@ -914,6 +917,13 @@
                 <span>
                   <strong>入群审批</strong>
                   <em>邀请链接加入前需管理员同意</em>
+                </span>
+              </label>
+              <label class="group-switch-row">
+                <input v-model="groupPanel.detail.allow_new_members_view_history" type="checkbox" />
+                <span>
+                  <strong>新成员可见群历史消息</strong>
+                  <em>关闭后仅可查看入群后的消息</em>
                 </span>
               </label>
               <label class="group-switch-row select-row">
@@ -1494,65 +1504,142 @@
       </div>
     </div>
 
-    <!-- 待审核提醒弹窗 -->
-    <div
-      v-if="pendingRequestsReminder.visible"
-      class="join-request-reminder-overlay"
-      @click.self="pendingRequestsReminder.visible = false"
-    >
-      <section class="join-request-reminder-modal" role="dialog" aria-modal="true">
-        <header class="join-request-reminder-header">
-          <div>
-            <h3>{{ pendingRequestsReminder.groupName }} - 待审核申请</h3>
-            <p>{{ pendingRequestsReminder.requests.length }} 个新成员等待处理</p>
-          </div>
-          <button type="button" title="关闭" @click="pendingRequestsReminder.visible = false">
-            <i class="fas fa-times"></i>
-          </button>
-        </header>
-        <div class="reminder-requests">
-          <div
-            v-for="req in pendingRequestsReminder.requests"
-            :key="req.id"
-            class="reminder-request-item"
-          >
-            <div class="reminder-header">
-              <img :src="req.user.avatar" :alt="req.user.username" class="reminder-avatar" />
-              <div class="reminder-info">
-                <div class="reminder-user-name">{{ req.user.username }}</div>
-                <div class="reminder-time">
-                  {{ new Date(req.created_at).toLocaleString() }}
+    <Teleport to="body">
+      <!-- 待审核提醒弹窗 -->
+      <Transition name="jr-fade">
+        <div
+          v-if="pendingRequestsReminder.visible && scope !== 'pending_approvals'"
+          class="jr-overlay"
+          @click.self="pendingRequestsReminder.visible = false"
+        >
+          <section class="jr-modal" role="dialog" aria-modal="true">
+            <header class="jr-header">
+              <div class="jr-header-main">
+                <div class="jr-icon-wrap" aria-hidden="true">
+                  <i class="fas fa-user-plus"></i>
+                </div>
+                <div class="jr-title-block">
+                  <h3>入群申请审核</h3>
+                </div>
+              </div>
+              <div class="jr-header-aside">
+                <div class="jr-group-meta">
+                  <strong>{{ pendingRequestsReminder.groupName }}</strong>
+                  <span>{{ pendingRequestsReminder.requests.length }} 个新成员等待处理</span>
+                </div>
+                <div class="jr-summary" aria-label="待处理人数">
+                  <strong>{{ pendingRequestsReminder.requests.length }}</strong>
+                </div>
+                <button
+                  type="button"
+                  class="jr-close-btn"
+                  title="关闭"
+                  @click="pendingRequestsReminder.visible = false"
+                >
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </header>
+
+            <div class="jr-body">
+              <div class="jr-toolbar">
+                <div class="jr-section-title">
+                  <span>申请列表</span>
+                  <small>{{ pendingRequestsReminder.requests.length }} 条记录</small>
+                </div>
+                <div class="jr-bulk-actions">
+                  <button
+                    type="button"
+                    class="jr-bulk-btn jr-bulk-approve"
+                    :disabled="reminderBatchProcessing || pendingRequestsReminder.requests.length === 0"
+                    @click="approveAllReminderRequests"
+                  >
+                    <i class="fas fa-check-double"></i>
+                    全部通过
+                  </button>
+                  <button
+                    type="button"
+                    class="jr-bulk-btn"
+                    :disabled="reminderBatchProcessing"
+                    @click="ignoreAllReminderRequests"
+                  >
+                    全部忽略
+                  </button>
+                </div>
+              </div>
+              <div
+                v-for="req in pendingRequestsReminder.requests"
+                :key="req.id"
+                class="jr-card"
+              >
+                <div class="jr-card-top">
+                  <img :src="req.user.avatar" :alt="req.user.username" class="jr-avatar" />
+                  <div class="jr-user-info">
+                    <div class="jr-user-line">
+                      <span class="jr-username">{{ req.user.username }}</span>
+                      <span class="jr-status-pill">待审核</span>
+                    </div>
+                    <span class="jr-time">
+                      <i class="far fa-clock"></i>
+                      {{ formatGroupDate(req.created_at) }}
+                    </span>
+                    <div
+                      v-if="req.request_message"
+                      class="jr-msg-preview"
+                      :title="req.request_message"
+                    >
+                      <i class="fas fa-quote-left jr-quote-icon"></i>
+                      {{ req.request_message }}
+                    </div>
+                    <div v-else class="jr-msg-preview jr-msg-empty">
+                      未填写申请留言
+                    </div>
+                  </div>
+                </div>
+                <div class="jr-card-actions">
+                  <button
+                    class="jr-btn jr-btn-approve"
+                    :disabled="reminderBatchProcessing || reminderProcessingIds.has(req.id)"
+                    title="通过"
+                    @click="handleReminderAction(req, 'approve')"
+                  >
+                    <i class="fas fa-check"></i>
+                    <span>通过</span>
+                  </button>
+                  <button
+                    class="jr-btn jr-btn-reject"
+                    :disabled="reminderBatchProcessing || reminderProcessingIds.has(req.id)"
+                    title="拒绝"
+                    @click="handleReminderAction(req, 'reject')"
+                  >
+                    <i class="fas fa-times"></i>
+                    <span>拒绝</span>
+                  </button>
                 </div>
               </div>
             </div>
-            <div v-if="req.request_message" class="reminder-message">
-              {{ req.request_message }}
-            </div>
-            <div class="reminder-actions">
-              <button class="btn-approve-small" @click="handleReminderAction(req, 'approve')">
-                <i class="fas fa-check"></i>
-                通过
-              </button>
-              <button class="btn-reject-small" @click="handleReminderAction(req, 'reject')">
-                <i class="fas fa-times"></i>
-                拒绝
-              </button>
-            </div>
-          </div>
+
+            <footer class="jr-footer">
+              <span class="jr-footer-label">
+                <i class="fas fa-bell-slash"></i>
+                稍后提醒
+              </span>
+              <div class="jr-footer-btns">
+                <button type="button" class="jr-snooze-btn" @click="snoozeReminder(pendingRequestsReminder.groupId, 24)">
+                  24小时
+                </button>
+                <button type="button" class="jr-snooze-btn" @click="snoozeReminder(pendingRequestsReminder.groupId, 168)">
+                  7天
+                </button>
+                <button type="button" class="jr-dismiss-btn" @click="pendingRequestsReminder.visible = false">
+                  关闭
+                </button>
+              </div>
+            </footer>
+          </section>
         </div>
-        <footer class="reminder-footer">
-          <button type="button" class="reminder-secondary-btn" @click="snoozeReminder(pendingRequestsReminder.groupId, 24)">
-            24小时内不再提醒
-          </button>
-          <button type="button" class="reminder-secondary-btn" @click="snoozeReminder(pendingRequestsReminder.groupId, 168)">
-            7天内不再提醒
-          </button>
-          <button type="button" class="reminder-primary-btn" @click="pendingRequestsReminder.visible = false">
-            关闭
-          </button>
-        </footer>
-      </section>
-    </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -1684,6 +1771,7 @@ const groupPanel = ref({
   originalPermissions: {
     require_approval: false,
     members_visible: true,
+    allow_new_members_view_history: false,
     mute_mode: 'none',
   },
 })
@@ -1742,6 +1830,8 @@ const pendingRequestsReminder = ref({
   groupName: '',
   requests: [],
 })
+const reminderBatchProcessing = ref(false)
+const reminderProcessingIds = ref(new Set())
 let voiceRecorder = null
 let voiceStream = null
 let voiceChunks = []
@@ -1863,6 +1953,7 @@ const hasGroupPermissionsChanges = computed(() => {
   return (
     !!detail.require_approval !== !!original.require_approval ||
     (detail.members_visible !== false) !== (original.members_visible !== false) ||
+    !!detail.allow_new_members_view_history !== !!original.allow_new_members_view_history ||
     (detail.mute_mode || 'none') !== (original.mute_mode || 'none')
   )
 })
@@ -2586,6 +2677,7 @@ function snoozeReminder(groupId, hours) {
 
 async function checkPendingRequestsReminder(groupId) {
   if (!groupId) return
+  if (scope.value === 'pending_approvals') return
 
   try {
     const r = await fetch(`/api/messages/groups/${groupId}/join-requests/?status=pending`)
@@ -2604,21 +2696,74 @@ async function checkPendingRequestsReminder(groupId) {
       visible: true,
       groupId: groupId,
       groupName: conv?.username || '群组',
-      requests: requests.slice(0, 3),
+      requests: requests.map((item) => ({
+        ...item,
+        group: item.group || { id: groupId },
+      })),
     }
   } catch (e) {
     console.error('[checkPendingRequestsReminder] 检查待审核申请失败:', e)
   }
 }
 
+function setReminderProcessing(requestId, processing) {
+  const next = new Set(reminderProcessingIds.value)
+  if (processing) next.add(requestId)
+  else next.delete(requestId)
+  reminderProcessingIds.value = next
+}
+
 async function handleReminderAction(requestItem, action) {
-  await reviewGroupJoinRequest(requestItem, action)
+  if (reminderBatchProcessing.value || reminderProcessingIds.value.has(requestItem.id)) return
+  setReminderProcessing(requestItem.id, true)
+  const ok = await reviewGroupJoinRequest(requestItem, action)
+  setReminderProcessing(requestItem.id, false)
+  if (!ok) return
   pendingRequestsReminder.value.requests = pendingRequestsReminder.value.requests.filter(
     (r) => r.id !== requestItem.id
   )
   if (pendingRequestsReminder.value.requests.length === 0) {
     pendingRequestsReminder.value.visible = false
   }
+}
+
+async function approveAllReminderRequests() {
+  if (reminderBatchProcessing.value) return
+  const requests = [...pendingRequestsReminder.value.requests]
+  if (requests.length === 0) return
+
+  reminderBatchProcessing.value = true
+  let approvedCount = 0
+  let failedCount = 0
+  for (const requestItem of requests) {
+    setReminderProcessing(requestItem.id, true)
+    const ok = await reviewGroupJoinRequest(requestItem, 'approve', { silent: true })
+    setReminderProcessing(requestItem.id, false)
+    if (ok) {
+      approvedCount += 1
+      pendingRequestsReminder.value.requests = pendingRequestsReminder.value.requests.filter(
+        (r) => r.id !== requestItem.id
+      )
+    } else {
+      failedCount += 1
+    }
+  }
+  reminderBatchProcessing.value = false
+
+  if (approvedCount > 0) {
+    ElMessage.success(`已通过 ${approvedCount} 个入群申请`)
+  }
+  if (failedCount > 0) {
+    ElMessage.warning(`${failedCount} 个申请处理失败，请稍后重试`)
+  }
+  if (pendingRequestsReminder.value.requests.length === 0) {
+    pendingRequestsReminder.value.visible = false
+  }
+}
+
+function ignoreAllReminderRequests() {
+  pendingRequestsReminder.value.visible = false
+  ElMessage.info('已忽略本次入群申请提醒')
 }
 
 function showJoinRequestNotification(event) {
@@ -2628,6 +2773,7 @@ function showJoinRequestNotification(event) {
 
   const requestItem = {
     id: event.request_id,
+    group: { id: groupId },
     user: event.user,
     request_message: event.request_message,
     created_at: new Date().toISOString(),
@@ -2770,13 +2916,9 @@ function selectConversation(conv) {
 
   // Check for pending join requests when entering a group chat
   if (conv.conversation_type === 'group') {
-    // 延迟检查，等待群组详情加载后再判断权限
+    // 后端会校验群主/管理员权限；这里不依赖会话列表是否携带 viewer_role，避免权限字段缺失时漏弹提醒。
     nextTick(() => {
-      // 只有在用户是群主或管理员时才检查待审核申请
-      const isAdmin = ['owner', 'admin'].includes(conv.viewer_role)
-      if (isAdmin) {
-        checkPendingRequestsReminder(conv.group_id)
-      }
+      checkPendingRequestsReminder(conv.group_id)
     })
   }
 }
@@ -2877,9 +3019,13 @@ async function sendMessage(turnstileToken = '') {
 
 async function sendForwardedMessage(sourceMessageId, recipientId, content, turnstileToken = '') {
   const payload = {
-    message_id: sourceMessageId,
     recipient_id: recipientId,
     content,
+  }
+  if (forwardDraft.value?.sourceConversationType === 'group') {
+    payload.group_message_id = sourceMessageId
+  } else {
+    payload.message_id = sourceMessageId
   }
   if (turnstileToken) payload.turnstile_token = turnstileToken
   const d = await apiPost('/api/messages/forward/', payload)
@@ -2893,6 +3039,67 @@ async function sendForwardedMessage(sourceMessageId, recipientId, content, turns
   upsertConversationPreviewFromMessage(forwardedMessage, recipientId, { preserveOrder: true })
   loadConversations({ silent: true, preserveOrder: true })
   return forwardedMessage
+}
+
+async function sendForwardedMessageToGroup(sourceMessageId, groupId, content) {
+  if (!sourceMessageId || !groupId) return null
+  const payload = {
+    content,
+  }
+  if (forwardDraft.value?.sourceConversationType === 'group') {
+    payload.forwarded_from = sourceMessageId
+  } else {
+    payload.forwarded_private_from = sourceMessageId
+  }
+  const d = await apiPost(`/api/messages/groups/${groupId}/send/`, payload)
+  const forwardedMessage = normalizeIncomingMessage(d.message)
+  if (selectedConversationKey.value === `group:${groupId}`) {
+    if (!messages.value.some((message) => message.id === forwardedMessage.id)) {
+      messages.value.push(forwardedMessage)
+    }
+    scrollToBottomSoon()
+  }
+  loadConversations({ silent: true, preserveOrder: true })
+  return forwardedMessage
+}
+
+async function sendChatlogForwardToGroup(groupId, content) {
+  if (!groupId || !content) return
+  isSending.value = true
+  try {
+    const d = await apiPost(`/api/messages/groups/${groupId}/send/`, {
+      content,
+      attachment_ids: [],
+    })
+    const sentMessage = normalizeIncomingMessage(d.message)
+    selectedUserId.value = null
+    selectedConversationKey.value = `group:${groupId}`
+    mobileChatOpen.value = true
+    scope.value = 'all'
+    hideTypingIndicator()
+    selectionMode.value = false
+    clearSelectedMessages()
+    if (!messages.value.some((message) => message.id === sentMessage.id)) {
+      messages.value = [...messages.value, sentMessage]
+    }
+    forwardDraft.value = null
+    newMessage.value = ''
+    pendingAttachments.value = []
+    showEmojiPicker.value = false
+    replyDraft.value = null
+    clearDraftForConversation(selectedConversationKey.value)
+    applyDraftPreviews()
+    resetComposerHeight()
+    loadMessages({ silent: true })
+    loadConversations({ silent: true, preserveOrder: true })
+    await nextTick()
+    scrollToBottomSoon()
+    ElMessage.success('已合并转发')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    isSending.value = false
+  }
 }
 
 async function openTurnstileGate(pendingContent, recipientId, quotaLimit, pendingAttachmentIds = [], options = {}) {
@@ -3302,6 +3509,7 @@ async function copyMessageContent(m) {
 function onForwardMessage(m) {
   forwardDraft.value = {
     sourceMessageId: m.id,
+    sourceConversationType: isCurrentGroup.value ? 'group' : 'direct',
     content: parseMergedForward(m?.content) ? mergedForwardPreview(m.content, '') : buildForwardMessage(m),
   }
   showNewMessageDialog.value = true
@@ -3526,6 +3734,8 @@ function resetComposerHeight() {
 }
 
 async function startNewConversation(userId) {
+  userId = normalizeUserId(typeof userId === 'object' ? userId?.id : userId)
+  if (!userId) return
   showNewMessageDialog.value = false
   scope.value = 'all'
   const pendingForward = forwardDraft.value
@@ -3554,6 +3764,56 @@ async function startNewConversation(userId) {
     inputRef.value?.focus()
     autoGrowComposer()
   })
+}
+
+async function handleDialogSelect(target) {
+  const pendingForward = forwardDraft.value
+  if (!pendingForward) {
+    await startNewConversation(target)
+    return
+  }
+
+  const targetType = typeof target === 'object' ? target.type : 'user'
+  const targetId = normalizeUserId(typeof target === 'object' ? target.id : target)
+  if (!targetId) return
+  showNewMessageDialog.value = false
+
+  try {
+    if (targetType === 'group') {
+      if (pendingForward.autoSendChatlog && pendingForward.content) {
+        await sendChatlogForwardToGroup(targetId, pendingForward.content)
+      } else if (pendingForward.sourceMessageId) {
+        await sendForwardedMessageToGroup(pendingForward.sourceMessageId, targetId, pendingForward.content)
+        forwardDraft.value = null
+        ElMessage.success('已转发到群组')
+      }
+      return
+    }
+
+    if (pendingForward.autoSendChatlog && pendingForward.content) {
+      await sendChatlogForwardToUser(targetId, pendingForward.content)
+      return
+    }
+    if (pendingForward.sourceMessageId) {
+      const forwardedMessage = await sendForwardedMessage(
+        pendingForward.sourceMessageId,
+        targetId,
+        pendingForward.content
+      )
+      forwardDraft.value = null
+      upsertConversationPreviewFromMessage(forwardedMessage, targetId, { preserveOrder: true })
+      ElMessage.success('已转发')
+    }
+  } catch (e) {
+    if (e?.data?.need_turnstile && targetType !== 'group') {
+      await openTurnstileGate(pendingForward.content, targetId, e.data.quota_limit, [], {
+        forwardMessageId: pendingForward.sourceMessageId,
+        autoSendChatlog: Boolean(pendingForward.autoSendChatlog),
+      })
+      return
+    }
+    ElMessage.error(e.message || '转发失败')
+  }
 }
 
 async function startGroupConversation(group) {
@@ -3645,6 +3905,9 @@ function highlightText(text, q) {
 // ==== Tab / 搜索 ====
 function switchScope(s) {
   scope.value = s
+  if (s === 'pending_approvals') {
+    pendingRequestsReminder.value.visible = false
+  }
   selectedUserId.value = null
   selectedConversationKey.value = null
   closeMessageCtxMenu()
@@ -3908,6 +4171,7 @@ async function forwardSelectedAsChatlog() {
   }
   forwardDraft.value = {
     sourceMessageId: null,
+    sourceConversationType: isCurrentGroup.value ? 'group' : 'direct',
     content,
     autoSendChatlog: true,
   }
@@ -4332,6 +4596,7 @@ async function openGroupInfo() {
     groupPanel.value.originalPermissions = {
       require_approval: !!d.group.require_approval,
       members_visible: d.group.members_visible !== false,
+      allow_new_members_view_history: !!d.group.allow_new_members_view_history,
       mute_mode: d.group.mute_mode || 'none',
     }
     cancelEditGroupAnnouncement()
@@ -4448,6 +4713,7 @@ async function refreshCurrentGroupDetail({ loading = false } = {}) {
       groupPanel.value.originalPermissions = {
         require_approval: !!d.group.require_approval,
         members_visible: d.group.members_visible !== false,
+        allow_new_members_view_history: !!d.group.allow_new_members_view_history,
         mute_mode: d.group.mute_mode || 'none',
       }
     }
@@ -4698,6 +4964,7 @@ async function saveGroupPermissions() {
     const profile = await apiPost(`/api/messages/groups/${groupId}/profile/`, {
       require_approval: !!detail.require_approval,
       members_visible: detail.members_visible !== false,
+      allow_new_members_view_history: !!detail.allow_new_members_view_history,
     })
     const mode = await apiPost(`/api/messages/groups/${groupId}/mute-mode/`, {
       mute_mode: detail.mute_mode || 'none',
@@ -4708,6 +4975,7 @@ async function saveGroupPermissions() {
     groupPanel.value.originalPermissions = {
       require_approval: !!savedDetail.require_approval,
       members_visible: savedDetail.members_visible !== false,
+      allow_new_members_view_history: !!savedDetail.allow_new_members_view_history,
       mute_mode: savedDetail.mute_mode || 'none',
     }
     loadConversations({ silent: true, preserveOrder: true })
@@ -4948,9 +5216,9 @@ async function loadGroupJoinRequests() {
   }
 }
 
-async function reviewGroupJoinRequest(requestItem, action) {
+async function reviewGroupJoinRequest(requestItem, action, options = {}) {
   const groupId = requestItem.group?.id || selectedGroupId()
-  if (!groupId || !requestItem?.id) return
+  if (!groupId || !requestItem?.id) return false
   let rejectionReason = ''
   if (action === 'reject') {
     try {
@@ -4962,7 +5230,7 @@ async function reviewGroupJoinRequest(requestItem, action) {
       })
       rejectionReason = String(result?.value || '').trim()
     } catch {
-      return
+      return false
     }
   }
   try {
@@ -4976,9 +5244,15 @@ async function reviewGroupJoinRequest(requestItem, action) {
     pendingApprovalsCount.value = Math.max(0, pendingApprovalsCount.value - 1)
     loadGroupAuditLogs()
     loadConversations({ silent: true, preserveOrder: true })
-    ElMessage.success(action === 'approve' ? '已同意入群' : '已拒绝入群')
+    if (!options.silent) {
+      ElMessage.success(action === 'approve' ? '已同意入群' : '已拒绝入群')
+    }
+    return true
   } catch (e) {
-    ElMessage.error(e.message)
+    if (!options.silent) {
+      ElMessage.error(e.message)
+    }
+    return false
   }
 }
 
@@ -9652,204 +9926,1081 @@ watch(
 }
 
 /* 待审核提醒弹窗 */
-.join-request-reminder-overlay {
+/* ===== Join Request Reminder Modal (Redesigned) ===== */
+.jr-fade-enter-active,
+.jr-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.jr-fade-enter-active .jr-modal,
+.jr-fade-leave-active .jr-modal {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.jr-fade-enter-from,
+.jr-fade-leave-to {
+  opacity: 0;
+}
+.jr-fade-enter-from .jr-modal {
+  transform: scale(0.95) translateY(8px);
+  opacity: 0;
+}
+.jr-fade-leave-to .jr-modal {
+  transform: scale(0.97);
+  opacity: 0;
+}
+
+.jr-overlay {
   position: fixed;
   inset: 0;
   z-index: 10020;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(4px);
+  padding: 24px;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(217, 0, 216, 0.2), transparent 34%),
+    radial-gradient(circle at 78% 72%, rgba(34, 211, 238, 0.16), transparent 32%),
+    rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(8px);
 }
 
-.join-request-reminder-modal {
-  width: min(500px, 100%);
-  max-height: min(720px, calc(100vh - 40px));
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
-  border-radius: 8px;
-  background: var(--bg-primary);
-  border: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
-  box-shadow: 0 24px 72px rgba(15, 23, 42, 0.28);
-}
-
-.join-request-reminder-header {
+.jr-modal {
+  --jr-panel-bg: rgba(255, 255, 255, 0.6);
+  --jr-panel-strong: rgba(255, 255, 255, 0.72);
+  --jr-panel-muted: rgba(248, 250, 252, 0.5);
+  --jr-border: rgba(255, 255, 255, 0.36);
+  --jr-divider: rgba(217, 70, 239, 0.22);
+  --jr-text: #0f172a;
+  --jr-muted: #64748b;
+  --jr-muted-soft: #94a3b8;
+  --jr-neon-pink: #e000ff;
+  --jr-neon-cyan: #22d3ee;
+  --jr-neon-green: #22c55e;
+  --jr-neon-red: #ff3b5c;
+  --jr-amber: #fbbf24;
+  width: min(700px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 72px));
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid var(--jr-border);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 34%),
+    var(--jr-panel-bg);
+  backdrop-filter: blur(16px) saturate(1.18);
+  -webkit-backdrop-filter: blur(16px) saturate(1.18);
+  box-shadow:
+    0 28px 80px rgba(15, 23, 42, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  overflow: hidden;
 }
 
-.join-request-reminder-header h3 {
+.jr-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) minmax(260px, auto);
+  align-items: center;
+  gap: 28px;
+  min-height: 94px;
+  padding: 22px 24px 22px 28px;
+  background:
+    linear-gradient(115deg, rgba(224, 0, 255, 0.17), rgba(91, 33, 182, 0.13) 48%, rgba(34, 211, 238, 0.1)),
+    rgba(255, 255, 255, 0.34);
+  border-bottom: 1px solid rgba(224, 0, 255, 0.22);
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 18px rgba(224, 0, 255, 0.18);
+  backdrop-filter: blur(16px) saturate(1.12);
+  -webkit-backdrop-filter: blur(16px) saturate(1.12);
+}
+
+.jr-header-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.jr-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(224, 0, 255, 0.09);
+  color: var(--jr-neon-pink);
+  border: 1px solid rgba(224, 0, 255, 0.34);
+  box-shadow:
+    0 0 22px rgba(224, 0, 255, 0.2),
+    inset 0 0 18px rgba(224, 0, 255, 0.08);
+  font-size: 21px;
+  flex-shrink: 0;
+}
+
+.jr-title-block {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.jr-title-block h3 {
   margin: 0;
-  font-size: 17px;
-  line-height: 1.35;
-  font-weight: 700;
-  color: var(--text-primary);
+  color: var(--jr-text);
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
-.join-request-reminder-header p {
-  margin: 4px 0 0;
+.jr-title-block p {
+  margin: 10px 0 0;
+  color: var(--jr-muted);
   font-size: 13px;
-  color: var(--text-secondary);
+  line-height: 1.65;
 }
 
-.join-request-reminder-header button {
-  width: 32px;
+.jr-header-aside {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  min-width: 0;
+}
+
+.jr-group-meta {
+  min-width: 0;
+  text-align: right;
+  padding-right: 2px;
+}
+
+.jr-group-meta span {
+  display: block;
+  margin-top: 7px;
+  color: var(--jr-muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.jr-group-meta strong {
+  display: block;
+  color: var(--jr-text);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jr-summary {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--jr-neon-pink), #ff4fd8);
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  color: #fff;
+  box-shadow:
+    0 0 20px rgba(224, 0, 255, 0.48),
+    0 0 4px rgba(224, 0, 255, 0.7);
+}
+
+.jr-summary strong {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.jr-summary span {
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jr-close-btn {
+  position: static;
+  width: 36px;
+  height: 36px;
+  margin-left: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.34);
+  color: var(--jr-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  font-size: 14px;
+}
+
+.jr-close-btn:hover {
+  background: rgba(255, 255, 255, 0.64);
+  color: var(--jr-text);
+  box-shadow: 0 0 18px rgba(224, 0, 255, 0.16);
+}
+
+.jr-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(15, 23, 42, 0.03)),
+    transparent;
+}
+
+.jr-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: -14px -20px 4px;
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, 0.38);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+}
+
+.jr-section-title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--jr-text);
+}
+
+.jr-section-title span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.jr-section-title small {
+  color: var(--jr-muted-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jr-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.jr-bulk-btn {
   height: 32px;
-  border: 0;
-  border-radius: 50%;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  background: rgba(255, 255, 255, 0.32);
+  color: var(--jr-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
-  background: transparent;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
-.join-request-reminder-header button:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
+.jr-bulk-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.58);
+  border-color: rgba(34, 211, 238, 0.46);
+  color: var(--jr-text);
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.18);
+  transform: translateY(-1px);
 }
 
-.reminder-requests {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 16px 20px;
+.jr-bulk-approve {
+  border-color: rgba(34, 197, 94, 0.48);
+  background: rgba(34, 197, 94, 0.08);
+  color: #15803d;
 }
 
-.reminder-request-item {
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
-  border-radius: 8px;
-  background: var(--bg-primary);
+.jr-bulk-approve:hover:not(:disabled) {
+  border-color: rgba(34, 197, 94, 0.72);
+  background: rgba(34, 197, 94, 0.16);
+  color: #166534;
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.26);
 }
 
-.reminder-header {
+.jr-bulk-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.jr-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 12px;
+  min-height: 68px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0.2)),
+    rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  box-shadow:
+    0 10px 28px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
 }
 
-.reminder-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--bg-secondary);
+.jr-card:hover {
+  border-color: rgba(224, 0, 255, 0.3);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.24)),
+    rgba(255, 255, 255, 0.34);
+  box-shadow:
+    0 16px 38px rgba(15, 23, 42, 0.12),
+    0 0 22px rgba(224, 0, 255, 0.12);
+  transform: translateY(-1px);
 }
 
-.reminder-info {
+.jr-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   flex: 1;
   min-width: 0;
 }
 
-.reminder-user-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-  margin-bottom: 2px;
+.jr-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid rgba(34, 211, 238, 0.68);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.42),
+    0 0 18px rgba(34, 211, 238, 0.32);
 }
 
-.reminder-time {
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.reminder-message {
-  padding: 8px;
-  margin-bottom: 10px;
-  background: var(--bg-secondary);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--text-primary);
-  line-height: 1.4;
-}
-
-.reminder-actions {
+.jr-user-info {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
 }
 
-.reminder-actions button {
-  flex: 1;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 5px;
+.jr-user-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.jr-username {
+  color: var(--jr-text);
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jr-status-pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.76);
+  color: var(--jr-amber);
+  border: 1px solid rgba(251, 191, 36, 0.32);
+  box-shadow:
+    0 0 14px rgba(251, 191, 36, 0.2),
+    inset 0 0 10px rgba(251, 191, 36, 0.08);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.jr-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--jr-muted);
   font-size: 12px;
-  font-weight: 500;
+  line-height: 1.3;
+}
+
+.jr-time i {
+  color: var(--jr-muted-soft);
+  font-size: 12px;
+}
+
+.jr-msg-preview {
+  max-width: 100%;
+  color: var(--jr-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  position: relative;
+  padding-left: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jr-msg-empty {
+  padding-left: 0;
+  color: var(--jr-muted-soft);
+  font-style: italic;
+}
+
+.jr-quote-icon {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  font-size: 9px;
+  color: rgba(34, 211, 238, 0.72);
+  opacity: 0.6;
+}
+
+.jr-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.jr-btn {
+  width: 78px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
   cursor: pointer;
-  transition: all 0.16s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 7px;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, color 0.15s ease;
 }
 
-.btn-approve-small {
-  background: #22c55e;
-  color: white;
+.jr-btn i {
+  font-size: 11px;
 }
 
-.btn-approve-small:hover {
-  background: #16a34a;
+.jr-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-.btn-reject-small {
-  background: #ef4444;
-  color: white;
+.jr-btn-approve {
+  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.72);
+  box-shadow: inset 0 0 12px rgba(34, 197, 94, 0.08);
 }
 
-.btn-reject-small:hover {
-  background: #dc2626;
-}
-
-.reminder-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 20px 18px;
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
-  flex-wrap: wrap;
-}
-
-.reminder-secondary-btn,
-.reminder-primary-btn {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.reminder-secondary-btn {
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-}
-
-.reminder-secondary-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-}
-
-.reminder-primary-btn {
-  border: 1px solid var(--primary-color, #3b82f6);
-  background: var(--primary-color, #3b82f6);
+.jr-btn-approve:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.92);
+  border-color: rgba(134, 239, 172, 0.95);
   color: #fff;
+  box-shadow:
+    0 0 18px rgba(34, 197, 94, 0.48),
+    0 8px 22px rgba(22, 163, 74, 0.24);
+  transform: translateY(-1px);
 }
 
-.reminder-primary-btn:hover {
-  filter: brightness(0.96);
+.jr-btn-reject {
+  color: var(--jr-neon-red);
+  border-color: rgba(255, 59, 92, 0.68);
+  box-shadow: inset 0 0 12px rgba(255, 59, 92, 0.07);
+}
+
+.jr-btn-reject:hover:not(:disabled) {
+  background: rgba(255, 59, 92, 0.92);
+  border-color: rgba(254, 202, 202, 0.95);
+  color: #fff;
+  box-shadow:
+    0 0 18px rgba(255, 59, 92, 0.46),
+    0 8px 22px rgba(220, 38, 38, 0.2);
+  transform: translateY(-1px);
+}
+
+.jr-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+}
+
+.jr-footer-label {
+  font-size: 13px;
+  color: var(--jr-muted);
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jr-footer-label i {
+  font-size: 12px;
+}
+
+.jr-footer-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.jr-snooze-btn,
+.jr-dismiss-btn {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.jr-snooze-btn {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  background: rgba(255, 255, 255, 0.36);
+  color: var(--jr-muted);
+}
+
+.jr-snooze-btn:hover {
+  background: rgba(34, 211, 238, 0.1);
+  border-color: rgba(34, 211, 238, 0.56);
+  color: #0e7490;
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.2);
+  transform: translateY(-1px);
+}
+
+.jr-dismiss-btn {
+  border: 1px solid rgba(224, 0, 255, 0.72);
+  background: linear-gradient(135deg, #e000ff, #c000dd);
+  color: #fff;
+  box-shadow: 0 0 18px rgba(224, 0, 255, 0.28);
+}
+
+.jr-dismiss-btn:hover {
+  background: linear-gradient(135deg, #f000ff, #b800bf);
+  border-color: rgba(255, 255, 255, 0.56);
+  box-shadow: 0 0 22px rgba(224, 0, 255, 0.45);
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .jr-modal {
+  --jr-panel-bg: rgba(15, 23, 42, 0.6);
+  --jr-panel-strong: rgba(15, 23, 42, 0.72);
+  --jr-panel-muted: rgba(30, 41, 59, 0.44);
+  --jr-border: rgba(255, 255, 255, 0.18);
+  --jr-divider: rgba(224, 0, 255, 0.24);
+  --jr-text: #f8fafc;
+  --jr-muted: #cbd5e1;
+  --jr-muted-soft: #94a3b8;
+}
+
+[data-theme="dark"] .jr-header,
+[data-theme="dark"] .jr-toolbar,
+[data-theme="dark"] .jr-footer {
+  background:
+    linear-gradient(115deg, rgba(224, 0, 255, 0.16), rgba(30, 41, 59, 0.5) 52%, rgba(34, 211, 238, 0.12)),
+    rgba(15, 23, 42, 0.48);
+}
+
+[data-theme="dark"] .jr-card {
+  background:
+    linear-gradient(135deg, rgba(30, 41, 59, 0.62), rgba(15, 23, 42, 0.34)),
+    rgba(15, 23, 42, 0.38);
+}
+
+[data-theme="dark"] .jr-card:hover {
+  background:
+    linear-gradient(135deg, rgba(30, 41, 59, 0.72), rgba(15, 23, 42, 0.4)),
+    rgba(15, 23, 42, 0.46);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] .jr-modal {
+    --jr-panel-bg: rgba(15, 23, 42, 0.6);
+    --jr-panel-strong: rgba(15, 23, 42, 0.72);
+    --jr-panel-muted: rgba(30, 41, 59, 0.44);
+    --jr-border: rgba(255, 255, 255, 0.18);
+    --jr-divider: rgba(224, 0, 255, 0.24);
+    --jr-text: #f8fafc;
+    --jr-muted: #cbd5e1;
+    --jr-muted-soft: #94a3b8;
+  }
+
+  [data-theme="auto"] .jr-header,
+  [data-theme="auto"] .jr-toolbar,
+  [data-theme="auto"] .jr-footer {
+    background:
+      linear-gradient(115deg, rgba(224, 0, 255, 0.16), rgba(30, 41, 59, 0.5) 52%, rgba(34, 211, 238, 0.12)),
+      rgba(15, 23, 42, 0.48);
+  }
+
+  [data-theme="auto"] .jr-card {
+    background:
+      linear-gradient(135deg, rgba(30, 41, 59, 0.62), rgba(15, 23, 42, 0.34)),
+      rgba(15, 23, 42, 0.38);
+  }
+
+  [data-theme="auto"] .jr-card:hover {
+    background:
+      linear-gradient(135deg, rgba(30, 41, 59, 0.72), rgba(15, 23, 42, 0.4)),
+      rgba(15, 23, 42, 0.46);
+  }
+}
+
+@media (max-width: 560px) {
+  .jr-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .jr-modal {
+    width: 100%;
+    max-height: 85vh;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .jr-header {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding: 24px 18px 20px;
+  }
+
+  .jr-header-main {
+    align-items: center;
+  }
+
+  .jr-icon-wrap {
+    width: 44px;
+    height: 44px;
+  }
+
+  .jr-header-aside {
+    width: 100%;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .jr-group-meta {
+    text-align: left;
+  }
+
+  .jr-summary {
+    width: 36px;
+    height: 36px;
+  }
+
+  .jr-title-block h3 {
+    font-size: 19px;
+  }
+
+  .jr-body {
+    padding: 12px;
+  }
+
+  .jr-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    margin: -12px -12px 4px;
+    padding: 12px;
+  }
+
+  .jr-bulk-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .jr-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .jr-card-actions {
+    width: auto;
+    display: flex;
+    gap: 6px;
+  }
+
+  .jr-btn {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+  }
+
+  .jr-btn span {
+    display: none;
+  }
+
+  .jr-footer {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px;
+  }
+
+  .jr-footer-label {
+    align-self: flex-start;
+  }
+
+  .jr-footer-btns {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .jr-snooze-btn,
+  .jr-dismiss-btn {
+    padding: 0 10px;
+  }
+}
+
+/* 简约回归版：保留紧凑列表与固定头尾，收敛霓虹和毛玻璃质感 */
+.jr-overlay {
+  background: rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.jr-modal {
+  --jr-panel-bg: #ffffff;
+  --jr-panel-strong: #ffffff;
+  --jr-panel-muted: #f8fafc;
+  --jr-border: #e2e8f0;
+  --jr-divider: #e5e7eb;
+  --jr-text: #0f172a;
+  --jr-muted: #64748b;
+  --jr-muted-soft: #94a3b8;
+  width: min(680px, calc(100vw - 48px));
+  max-height: min(660px, calc(100vh - 72px));
+  border-radius: 10px;
+  border: 1px solid var(--jr-border);
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.jr-header {
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, auto);
+  min-height: 92px;
+  padding: 22px 24px 20px;
+  gap: 24px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--jr-divider);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.jr-icon-wrap {
+  width: 48px;
+  height: 48px;
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+  box-shadow: none;
+}
+
+.jr-title-block h3 {
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.jr-group-meta strong {
+  font-size: 15px;
+  color: #111827;
+}
+
+.jr-group-meta span {
+  margin-top: 6px;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.jr-summary {
+  width: 36px;
+  height: 36px;
+  background: #7c3aed;
+  border: 0;
+  box-shadow: none;
+}
+
+.jr-close-btn {
+  width: 36px;
+  height: 36px;
+  margin-left: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  box-shadow: none;
+}
+
+.jr-close-btn:hover {
+  background: #eef2f7;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+.jr-body {
+  padding: 14px 20px 18px;
+  gap: 10px;
+  background: #f8fafc;
+}
+
+.jr-toolbar {
+  margin: -14px -20px 4px;
+  padding: 13px 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.jr-bulk-btn {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  box-shadow: none;
+  transform: none;
+}
+
+.jr-bulk-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+  box-shadow: none;
+  transform: none;
+}
+
+.jr-bulk-approve {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.jr-bulk-approve:hover:not(:disabled) {
+  background: #dcfce7;
+  border-color: #4ade80;
+  color: #166534;
+  box-shadow: none;
+}
+
+.jr-card {
+  min-height: 70px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: none;
+  transform: none;
+}
+
+.jr-card:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+  transform: none;
+}
+
+.jr-avatar {
+  width: 42px;
+  height: 42px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px #e2e8f0;
+}
+
+.jr-status-pill {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  box-shadow: none;
+  font-weight: 700;
+}
+
+.jr-quote-icon {
+  color: #94a3b8;
+}
+
+.jr-btn {
+  height: 34px;
+  border-radius: 8px;
+  box-shadow: none;
+  transform: none;
+  font-weight: 700;
+}
+
+.jr-btn-approve {
+  color: #15803d;
+  border-color: #86efac;
+  background: #f0fdf4;
+  box-shadow: none;
+}
+
+.jr-btn-approve:hover:not(:disabled) {
+  background: #dcfce7;
+  border-color: #4ade80;
+  color: #166534;
+  box-shadow: none;
+  transform: none;
+}
+
+.jr-btn-reject {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fff1f2;
+  box-shadow: none;
+}
+
+.jr-btn-reject:hover:not(:disabled) {
+  background: #ffe4e6;
+  border-color: #fda4af;
+  color: #b91c1c;
+  box-shadow: none;
+  transform: none;
+}
+
+.jr-footer {
+  padding: 16px 24px;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.jr-snooze-btn {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+}
+
+.jr-snooze-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+  box-shadow: none;
+  transform: none;
+}
+
+.jr-dismiss-btn {
+  border-color: #7c3aed;
+  background: #7c3aed;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.jr-dismiss-btn:hover {
+  background: #6d28d9;
+  border-color: #6d28d9;
+  box-shadow: none;
+  transform: none;
+}
+
+[data-theme="dark"] .jr-modal {
+  --jr-panel-bg: #0f172a;
+  --jr-panel-strong: #111827;
+  --jr-panel-muted: #1e293b;
+  --jr-border: rgba(148, 163, 184, 0.28);
+  --jr-divider: rgba(148, 163, 184, 0.22);
+  --jr-text: #f8fafc;
+  --jr-muted: #cbd5e1;
+  --jr-muted-soft: #94a3b8;
+  background: #0f172a;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+}
+
+[data-theme="dark"] .jr-header,
+[data-theme="dark"] .jr-toolbar,
+[data-theme="dark"] .jr-footer {
+  background: #111827;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+[data-theme="dark"] .jr-body {
+  background: #0f172a;
+}
+
+[data-theme="dark"] .jr-card {
+  background: #111827;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] .jr-modal {
+    --jr-panel-bg: #0f172a;
+    --jr-panel-strong: #111827;
+    --jr-panel-muted: #1e293b;
+    --jr-border: rgba(148, 163, 184, 0.28);
+    --jr-divider: rgba(148, 163, 184, 0.22);
+    --jr-text: #f8fafc;
+    --jr-muted: #cbd5e1;
+    --jr-muted-soft: #94a3b8;
+    background: #0f172a;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+  }
+
+  [data-theme="auto"] .jr-header,
+  [data-theme="auto"] .jr-toolbar,
+  [data-theme="auto"] .jr-footer {
+    background: #111827;
+    border-color: rgba(148, 163, 184, 0.22);
+  }
+
+  [data-theme="auto"] .jr-body {
+    background: #0f172a;
+  }
+
+  [data-theme="auto"] .jr-card {
+    background: #111827;
+    border-color: rgba(148, 163, 184, 0.22);
+  }
+}
+
+@media (max-width: 560px) {
+  .jr-modal {
+    width: 100%;
+    max-height: 85vh;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .jr-header {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 22px 18px 18px;
+  }
+
+  .jr-toolbar {
+    margin: -12px -12px 4px;
+    padding: 12px;
+  }
+
+  .jr-body {
+    padding: 12px;
+  }
 }
 </style>

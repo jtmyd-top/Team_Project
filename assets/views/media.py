@@ -18,14 +18,19 @@ def protected_media_view(request, file_path):
     is_authenticated = request.user.is_authenticated
     is_uploader = is_authenticated and asset.uploader == request.user
 
-    # 仅当资源真实被公开笔记引用时，才允许匿名访问
-    is_referenced_by_public_note = bool(
-        NoteAsset.objects.filter(
-            asset=asset,
-            note__is_public=True,
-            note__is_trashed=False,
-        ).exists()
-    )
+    active_asset_links = NoteAsset.objects.filter(asset=asset, note__is_trashed=False)
+    is_referenced_by_secret_note = active_asset_links.filter(note__is_secret=True).exists()
+    if is_uploader and is_referenced_by_secret_note:
+        from vault.services import check_vault_access
+
+        if not check_vault_access(request):
+            return HttpResponseForbidden("Vault unlock required for this file.")
+
+    # 仅当资源真实被非保密公开笔记引用时，才允许匿名访问
+    is_referenced_by_public_note = active_asset_links.filter(
+        note__is_public=True,
+        note__is_secret=False,
+    ).exists()
 
     # 权限判断：上传者本人 或 资源被公开笔记显式引用
     if not is_uploader and not is_referenced_by_public_note:
@@ -47,17 +52,18 @@ def protected_media_view(request, file_path):
 
 def public_profile_media_view(request, file_path):
     """
-    Serve public profile media under MEDIA_URL without exposing arbitrary uploads.
+    Serve public profile and group avatar media under MEDIA_URL without exposing arbitrary uploads.
 
     In production DEBUG=False, Django does not add the automatic MEDIA_URL route.
     Avatars and profile banners are intentionally public, but regular uploaded
     note/message files must keep using their permission-checked endpoints.
     """
     normalized_file_path = str(file_path or '').replace('\\', '/').lstrip('/')
-    if not Profile.objects.filter(
+    is_profile_media = Profile.objects.filter(
         Q(avatar=normalized_file_path) | Q(banner_image=normalized_file_path)
-    ).exists():
+    ).exists()
+    is_group_avatar = MessageGroup.objects.filter(avatar=normalized_file_path).exists()
+    if not is_profile_media and not is_group_avatar:
         raise Http404
 
     return media_file_response(normalized_file_path)
-

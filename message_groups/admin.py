@@ -42,8 +42,17 @@ class MessageGroupMemberInline(admin.TabularInline):
 
 @admin.register(MessageGroup)
 class MessageGroupAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'owner', 'mute_mode', 'is_active', 'created_at', 'updated_at')
-    list_filter = ('is_active', 'mute_mode', 'created_at')
+    list_display = (
+        'id',
+        'name',
+        'owner',
+        'mute_mode',
+        'allow_new_members_view_history',
+        'is_active',
+        'created_at',
+        'updated_at',
+    )
+    list_filter = ('is_active', 'mute_mode', 'allow_new_members_view_history', 'created_at')
     search_fields = ('name', 'description', 'announcement', 'owner__username')
     autocomplete_fields = ['owner', 'created_by']
     inlines = [MessageGroupMemberInline]

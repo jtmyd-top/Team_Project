@@ -85,7 +85,7 @@
               </span>
             </div>
             <div class="requirement-note">
-              需满足公开文章/关注者其中一项，且拥有群聊数不能超过上限。
+              需同时满足公开文章、关注者门槛，且拥有群聊数不能超过上限。
             </div>
           </div>
         </el-alert>

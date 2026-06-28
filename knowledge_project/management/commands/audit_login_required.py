@@ -14,16 +14,22 @@ PUBLIC_NAME_PREFIXES = (
 )
 
 PUBLIC_NAMES = {
+    'blocked_message_attachment_media_api',
     'captcha_generate',
     'captcha_init',
     'check_email',
     'check_username',
+    'follow_status_api',
     'forgot_password',
+    'get_user_public_profile_api',
     'healthz',
+    'home_stats_api',
     'home',
     'login',
     'login_api',
+    'note_comments_api',
     'password_reset_api',
+    'public_profile_media_view',
     'public_note_view',
     'public_notes_api',
     'readyz',
@@ -31,6 +37,7 @@ PUBLIC_NAMES = {
     'reset_password',
     'resolve_qqmusic_share_api',
     'send_email_code',
+    'search_users_api',
     'signup',
     'turnstile_config',
     'user_public_profile',
@@ -51,6 +58,20 @@ PUBLIC_PATH_PREFIXES = (
     'reset-password/',
     'signup/',
 )
+
+PROJECT_SOURCE_DIRS = {
+    'accounts',
+    'assets',
+    'message_groups',
+    'messaging',
+    'moderation',
+    'notes',
+    'notifications',
+    'ops',
+    'Team_Project',
+    'vault',
+    'knowledge_project',
+}
 
 
 @dataclass(frozen=True)
@@ -195,7 +216,10 @@ def source_has_login_required(callback) -> bool:
     except (OSError, TypeError):
         return False
 
-    if not source_file or 'knowledge_project' not in source_file.replace('\\', '/'):
+    if not source_file:
+        return False
+    normalized_source = source_file.replace('\\', '/')
+    if not any(f'/{dirname}/' in normalized_source for dirname in PROJECT_SOURCE_DIRS):
         return False
 
     decorator_lines = []

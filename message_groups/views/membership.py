@@ -90,10 +90,12 @@ def add_group_members_api(request, group_id):
                     defaults={'role': 'member'},
                 )
                 if not created and member.left_at is not None:
+                    now = timezone.now()
                     member.left_at = None
                     member.role = 'member'
-                    member.joined_at = timezone.now()
-                    member.save(update_fields=['left_at', 'role', 'joined_at'])
+                    member.joined_at = now
+                    member.cleared_before = None if locked_group.allow_new_members_view_history else now
+                    member.save(update_fields=['left_at', 'role', 'joined_at', 'cleared_before'])
                 _create_group_audit_log(locked_group, request.user, 'member_add', target_user=user)
             locked_group.updated_at = timezone.now()
             locked_group.save(update_fields=['updated_at'])

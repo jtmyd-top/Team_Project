@@ -109,20 +109,39 @@ def send_message_api(request):
 def forward_message_api(request):
     """转发单条消息；若原消息包含附件，则为新消息创建新的附件记录并复用同一物理文件路径。"""
     try:
-        from messaging.models import Message, NewConversationQuotaLog
+        from messaging.models import GroupMessage, Message, NewConversationQuotaLog
+        from message_groups.views.common import _get_active_membership, _visible_group_messages_qs
 
         data = json.loads(request.body)
         source_message_id = data.get('message_id')
+        source_group_message_id = data.get('group_message_id')
         recipient_id = data.get('recipient_id')
-        if not source_message_id or not recipient_id:
-            return JsonResponse({'error': '缺少 message_id 或 recipient_id'}, status=400)
+        if not recipient_id or not (source_message_id or source_group_message_id):
+            return JsonResponse({'error': '缺少 message_id/group_message_id 或 recipient_id'}, status=400)
 
-        source_message = get_object_or_404(
-            Message.objects.select_related('sender', 'recipient').prefetch_related('attachments'),
-            id=source_message_id,
-        )
-        if request.user.id not in (source_message.sender_id, source_message.recipient_id):
-            return JsonResponse({'error': '无权转发该消息'}, status=403)
+        source_message = None
+        source_group_message = None
+        if source_group_message_id:
+            source_group_message = get_object_or_404(
+                GroupMessage.objects.select_related('sender', 'group').prefetch_related('attachments'),
+                id=source_group_message_id,
+                is_recalled=False,
+            )
+            source_membership = _get_active_membership(source_group_message.group, request.user)
+            if (
+                source_membership is None
+                or not _visible_group_messages_qs(source_group_message.group, source_membership)
+                .filter(id=source_group_message.id)
+                .exists()
+            ):
+                return JsonResponse({'error': '无权转发该消息'}, status=403)
+        else:
+            source_message = get_object_or_404(
+                Message.objects.select_related('sender', 'recipient').prefetch_related('attachments'),
+                id=source_message_id,
+            )
+            if request.user.id not in (source_message.sender_id, source_message.recipient_id):
+                return JsonResponse({'error': '无权转发该消息'}, status=403)
 
         recipient = get_object_or_404(User, id=recipient_id)
         permission_response, _ = _check_send_permissions(request.user, recipient)
@@ -144,9 +163,13 @@ def forward_message_api(request):
             }, status=429)
 
         content = _body_string(data, 'content', '').strip()
-        if not content:
+        if not content and source_message is not None:
             content = source_message.content or _attachment_preview(source_message.attachments.first())
-        if not content and not source_message.attachments.exists():
+        if not content and source_group_message is not None:
+            content = source_group_message.content or _attachment_preview(source_group_message.attachments.first())
+        if source_message is not None and not content and not source_message.attachments.exists():
+            return JsonResponse({'error': '原消息为空，无法转发'}, status=400)
+        if source_group_message is not None and not content and not source_group_message.attachments.exists():
             return JsonResponse({'error': '原消息为空，无法转发'}, status=400)
         _validate_message_content(content)
 
@@ -156,7 +179,7 @@ def forward_message_api(request):
                 recipient=recipient,
                 content=content,
             )
-            forwarded_attachments = _clone_forwarded_attachments(source_message, request.user, forwarded_message)
+            forwarded_attachments = _clone_forwarded_attachments(source_message, request.user, forwarded_message) if source_message is not None else []
             forwarded_message.searchable_text = _message_searchable_text(content, forwarded_attachments)
             forwarded_message.save(update_fields=['searchable_text'])
 
@@ -190,4 +213,3 @@ def forward_message_api(request):
         raise
     except Exception as e:
         return _server_error_response('转发私信错误', e)
-

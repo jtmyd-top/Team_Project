@@ -9,6 +9,7 @@ def home_view(request):
     # 获取所有公开的文章，按更新时间倒序排列
     articles = Note.objects.filter(
         is_public=True,
+        is_secret=False,
         is_trashed=False,
     ).select_related('author').prefetch_related('tags').order_by('-updated_at')[:20]
 
@@ -42,4 +43,3 @@ def knowledge_list(request):
     }
     context = {'initial_data': initial_data}
     return render(request, 'knowledge/knowledge_list.html', context)
-

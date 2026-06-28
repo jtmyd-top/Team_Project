@@ -2,6 +2,10 @@
 from .common import *  # noqa: F401, F403
 
 
+def _note_history_cache_key(user_id):
+    return f"note_history_api:user_{user_id}"
+
+
 @login_required
 @require_http_methods(["GET"])
 def note_history_api(request):
@@ -17,7 +21,7 @@ def note_history_api(request):
     user = request.user
 
     # 缓存键
-    cache_key = f"note_history_api:user_{user.id}"
+    cache_key = _note_history_cache_key(user.id)
     cached_data = cache.get(cache_key)
     if cached_data:
         return JsonResponse(cached_data, safe=False)
@@ -25,7 +29,12 @@ def note_history_api(request):
     # 优化查询：预计算评论数
     history = (
         NoteHistory.objects
-        .filter(user=user)
+        .filter(
+            user=user,
+            note__is_public=True,
+            note__is_secret=False,
+            note__is_trashed=False,
+        )
         .select_related('note', 'note__author', 'note__author__profile')
         .prefetch_related('note__tags')
         .annotate(comments_count_cached=Count('note__comments'))
@@ -85,7 +94,7 @@ def record_note_history_api(request):
         return JsonResponse({'error': '缺少 note_id 参数'}, status=400)
 
     try:
-        note = Note.objects.get(id=note_id, is_public=True, is_trashed=False)
+        note = Note.objects.get(id=note_id, is_public=True, is_secret=False, is_trashed=False)
     except Note.DoesNotExist:
         return JsonResponse({'error': '笔记不存在或不是公开笔记'}, status=404)
 
@@ -96,9 +105,9 @@ def record_note_history_api(request):
         note=note,
         defaults={'viewed_at': timezone.now()}
     )
+    cache.delete(_note_history_cache_key(user.id))
 
     return JsonResponse({
         'status': 'success',
         'message': '浏览历史已记录'
     })
-
