@@ -12,7 +12,7 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, team-project-deploy]
     env:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -35,7 +35,10 @@ jobs:
           if [ -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}" ]; then
             printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           else
-            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+            ssh-keyscan -T 10 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts || {
+              echo "::error::Unable to scan SSH host key for DEPLOY_HOST. Make sure the self-hosted runner can reach the deployment host on port 22, or set DEPLOY_KNOWN_HOSTS."
+              exit 1
+            }
           fi
 
       - name: Deploy over SSH
