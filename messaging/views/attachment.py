@@ -109,16 +109,17 @@ def message_attachment_file_api(request, attachment_id):
             message=group_message,
             user=request.user,
         ).exists()
-        history_hidden = (
-            membership is not None
-            and not group_message.group.allow_new_members_view_history
-            and membership.joined_at
-            and group_message.created_at < membership.joined_at
-        )
         cleared = (
             membership is not None
             and membership.cleared_before
             and group_message.created_at <= membership.cleared_before
+        )
+        history_hidden = (
+            membership is not None
+            and membership.cleared_before is None
+            and not group_message.group.allow_new_members_view_history
+            and membership.joined_at
+            and group_message.created_at < membership.joined_at
         )
         if not membership or group_message.is_recalled or is_deleted_for_user or history_hidden or cleared:
             return HttpResponse('无权访问此附件', status=403)

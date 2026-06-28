@@ -200,10 +200,10 @@ def _visible_group_messages_qs(group, membership):
         .select_related('sender', 'group')
         .prefetch_related('attachments', 'mentions__mentioned_user', 'reactions__user')
     )
-    if not getattr(group, 'allow_new_members_view_history', False) and membership.joined_at:
-        qs = qs.filter(created_at__gte=membership.joined_at)
     if membership.cleared_before:
         qs = qs.filter(created_at__gt=membership.cleared_before)
+    elif not getattr(group, 'allow_new_members_view_history', False) and membership.joined_at:
+        qs = qs.filter(created_at__gte=membership.joined_at)
     qs = qs.exclude(deletions__user=membership.user)
     return qs.order_by('created_at', 'id')
 
