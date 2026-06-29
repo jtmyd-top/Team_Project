@@ -19,6 +19,7 @@ jobs:
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_SERVICE: ${{ secrets.DEPLOY_SERVICE }}
       DEPLOY_PYTHON: ${{ secrets.DEPLOY_PYTHON }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
 
     steps:
       - name: Validate deployment secrets
@@ -29,21 +30,30 @@ jobs:
 
       - name: Configure SSH
         run: |
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          case "$DEPLOY_PORT" in
+            ''|*[!0-9]*)
+              echo "::error::DEPLOY_PORT must be numeric."
+              exit 1
+              ;;
+          esac
+
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           if [ -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}" ]; then
             printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           else
-            ssh-keyscan -T 10 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts || {
-              echo "::error::Unable to scan SSH host key for DEPLOY_HOST. Make sure the self-hosted runner can reach the deployment host on port 22, or set DEPLOY_KNOWN_HOSTS."
+            ssh-keyscan -T 10 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts || {
+              echo "::error::Unable to scan SSH host key for DEPLOY_HOST on port $DEPLOY_PORT. Make sure the self-hosted runner can reach the deployment host, or set DEPLOY_KNOWN_HOSTS."
               exit 1
             }
           fi
 
       - name: Deploy over SSH
         run: |
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
             set -euo pipefail
 
             APP_PATH="${{ secrets.DEPLOY_PATH }}"
