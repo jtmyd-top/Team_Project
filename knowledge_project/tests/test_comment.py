@@ -17,7 +17,10 @@ from notes.models import Note, NoteComment
 from ._helpers import login, make_user, parse, post_json
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    SECURE_SSL_REDIRECT=False,
+)
 class _CommentTestBase(TestCase):
     def setUp(self):
         cache.clear()

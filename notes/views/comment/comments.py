@@ -9,7 +9,8 @@ def note_comments_api(request, note_id):
     try:
         note = get_object_or_404(Note, id=note_id, is_secret=False, is_trashed=False)
         if not note.is_public and not note.has_read_permission(request.user):
-            return JsonResponse({'error': '无权访问此笔记的评论'}, status=403)
+            # Hide private-note existence from users without read access.
+            raise Http404
         try:
             page = max(1, int(request.GET.get('page', 1) or 1))
         except (TypeError, ValueError):
@@ -101,7 +102,8 @@ def note_comment_create_api(request, note_id):
 
         note = get_object_or_404(Note, id=note_id, is_secret=False, is_trashed=False)
         if not note.is_public and not note.has_comment_permission(request.user):
-            return JsonResponse({'error': '无权在此笔记中评论'}, status=403)
+            # Hide private-note existence from users without comment access.
+            raise Http404
         data = json.loads(request.body)
         content = data.get('content', '').strip()
         parent_id = data.get('parent_id')
