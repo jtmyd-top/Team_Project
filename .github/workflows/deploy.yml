@@ -63,6 +63,21 @@ jobs:
             : "${SERVICE_NAME:=team-project.service}"
             : "${PYTHON_BIN:=python3}"
 
+            # Validate the remote runtime before changing the deployed checkout.
+            # `pywebpush==2.3.0` and the project dependency set require Python 3.10+.
+            if [ -r /etc/os-release ]; then
+              . /etc/os-release
+              echo "::notice::Deployment host OS: ${ID:-unknown} ${VERSION_ID:-unknown}"
+            fi
+            if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+              echo "::error::Configured deployment Python executable is unavailable. Update DEPLOY_PYTHON to a Python 3.10+ executable before deploying."
+              exit 1
+            fi
+            if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+              echo "::error::Deployment Python is older than 3.10. Install Python 3.11, update DEPLOY_PYTHON, then rerun deployment."
+              exit 1
+            fi
+
             cd "$APP_PATH"
             git fetch origin main
             git reset --hard origin/main
