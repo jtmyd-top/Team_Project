@@ -42,6 +42,10 @@ def get_messages_api(request):
         _apply_disappearing(request.user, other_user, viewer_settings)
 
         data = [_message_payload(m, viewer=request.user) for m in messages_list]
+        settings = _conversation_settings_payload(viewer_settings)
+        settings['direct_mute'] = _direct_message_mute_payload(
+            _get_active_direct_message_mute(request.user, other_user)
+        )
         return JsonResponse({
             'status': 'success',
             'messages': data,
@@ -50,7 +54,7 @@ def get_messages_api(request):
                 'username': other_user.username,
                 'avatar': _get_avatar_url(other_user),
             },
-            'settings': _conversation_settings_payload(viewer_settings),
+            'settings': settings,
             'pagination': pagination,
         })
     except Http404:

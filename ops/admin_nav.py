@@ -63,6 +63,7 @@ FEATURE_ADMIN_GROUPS = (
         'name': '通知中心',
         'models': (
             ('notifications', 'UserNotification'),
+            ('notifications', 'BrowserPushSubscription'),
         ),
     },
     {

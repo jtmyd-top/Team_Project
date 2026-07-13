@@ -41,6 +41,12 @@ def dissolve_message_group_api(request, group_id):
 
         # 2FA 验证逻辑
         profile = getattr(request.user, 'profile', None)
+        if not (profile and profile.two_fa_enabled):
+            return JsonResponse({
+                'status': 'error',
+                'code': 'require_2fa_setup',
+                'message': '解散群组前请先开启两因素认证（2FA）',
+            }, status=403)
         if profile and profile.two_fa_enabled:
             from accounts.services import get_param, verify_2fa_for_request
             code = get_param(request, 'two_fa_code', '')

@@ -30,6 +30,7 @@ from messaging.models import MessageGroup, MessagePreference
 from notes.models import Note
 from core.utils.request_utils import get_client_ip
 from assets.views import _delayed_delete_file
+from accounts.storage_quota import get_storage_summary
 
 logger = logging.getLogger(__name__)
 USERNAME_REGEX = re.compile(r'^[a-z][a-z0-9_]{5,}$')
@@ -104,6 +105,15 @@ def _device_payload(device, current_session_key=''):
         'revoked_at': device.revoked_at.isoformat() if device.revoked_at else None,
         'is_current': bool(current_session_key and device.session_key == current_session_key),
     }
+
+
+@login_required
+@require_http_methods(["GET"])
+def storage_quota_api(request):
+    return JsonResponse({
+        'status': 'success',
+        'quota': get_storage_summary(request.user),
+    })
 
 
 @login_required

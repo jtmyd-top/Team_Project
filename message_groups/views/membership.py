@@ -187,7 +187,7 @@ def set_group_member_role_api(request, group_id, user_id):
 @login_required
 def mute_group_member_api(request, group_id, user_id):
     try:
-        from messaging.models import MessageGroup, MessageGroupMember
+        from messaging.models import GroupMessage, MessageGroup, MessageGroupMember
         group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
         membership, error = _require_group_member(group, request.user)
         if error is not None:
@@ -204,10 +204,19 @@ def mute_group_member_api(request, group_id, user_id):
         if data.get('action') == 'unmute':
             target.muted_until = None
             audit_action = 'member_unmute'
+            notice = None
         else:
             target.muted_until = _parse_mute_until(data)
             audit_action = 'member_mute'
         target.save(update_fields=['muted_until'])
+        if audit_action == 'member_mute':
+            notice = GroupMessage.objects.create(
+                group=group,
+                sender=request.user,
+                content=f'管理通知：{target.user.username} 已被禁言。',
+                visibility_scope=GroupMessage.VISIBILITY_STAFF_AND_TARGET,
+                visibility_target=target.user,
+            )
         _create_group_audit_log(
             group,
             request.user,
@@ -217,7 +226,11 @@ def mute_group_member_api(request, group_id, user_id):
         )
         group.updated_at = timezone.now()
         group.save(update_fields=['updated_at'])
-        return JsonResponse({'status': 'success', 'group': _group_detail_payload(group, membership)})
+        return JsonResponse({
+            'status': 'success',
+            'group': _group_detail_payload(group, membership),
+            'notice': _group_message_payload(notice, viewer=request.user) if notice else None,
+        })
     except json.JSONDecodeError:
         return JsonResponse({'error': '请求格式错误'}, status=400)
     except Http404:

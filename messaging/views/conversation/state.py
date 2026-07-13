@@ -64,6 +64,82 @@ def toggle_mute_api(request):
 
 @require_http_methods(["POST"])
 @login_required
+def set_direct_message_mute_api(request):
+    """Temporarily prevent one peer from sending the current user direct messages."""
+    try:
+        from messaging.models import DirectMessageMute
+
+        data = json.loads(request.body)
+        peer_id = data.get('user_id')
+        duration_minutes = data.get('duration_minutes')
+        reason = data.get('reason', '')
+
+        if not peer_id:
+            return JsonResponse({'error': '缺少 user_id'}, status=400)
+        if not isinstance(reason, str):
+            return JsonResponse({'error': '禁言原因格式错误'}, status=400)
+        reason = reason.strip()[:500]
+
+        peer = get_object_or_404(User, id=peer_id)
+        if peer == request.user:
+            return JsonResponse({'error': '不能禁言自己'}, status=400)
+
+        if duration_minutes == 'permanent':
+            expires_at = None
+        else:
+            try:
+                duration_minutes = int(duration_minutes)
+            except (TypeError, ValueError):
+                return JsonResponse({'error': '禁言时长无效'}, status=400)
+            if duration_minutes < 1 or duration_minutes > 43200:
+                return JsonResponse({'error': '禁言时长需在 1 分钟到 30 天之间'}, status=400)
+            expires_at = timezone.now() + timedelta(minutes=duration_minutes)
+
+        direct_mute, _ = DirectMessageMute.objects.update_or_create(
+            user=request.user,
+            muted_user=peer,
+            defaults={
+                'reason': reason,
+                'expires_at': expires_at,
+            },
+        )
+        return JsonResponse({
+            'status': 'success',
+            'mute': _direct_message_mute_payload(direct_mute),
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as exc:
+        return _server_error_response('设置私信禁言失败', exc)
+
+
+@require_http_methods(["POST"])
+@login_required
+def clear_direct_message_mute_api(request):
+    """Allow one peer to send the current user direct messages again."""
+    try:
+        from messaging.models import DirectMessageMute
+
+        data = json.loads(request.body)
+        peer_id = data.get('user_id')
+        if not peer_id:
+            return JsonResponse({'error': '缺少 user_id'}, status=400)
+
+        DirectMessageMute.objects.filter(user=request.user, muted_user_id=peer_id).delete()
+        return JsonResponse({
+            'status': 'success',
+            'mute': _direct_message_mute_payload(None),
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Exception as exc:
+        return _server_error_response('解除私信禁言失败', exc)
+
+
+@require_http_methods(["POST"])
+@login_required
 def toggle_archive_api(request):
     """归档/取消归档"""
     return _toggle_field(request, 'is_archived', 'archived_at')
@@ -105,5 +181,8 @@ def get_conversation_settings_api(request):
         return JsonResponse({'error': '缺少user_id'}, status=400)
     peer = get_object_or_404(User, id=peer_id)
     cs = _get_settings(request.user, peer)
-    return JsonResponse({'status': 'success', 'settings': _conversation_settings_payload(cs)})
-
+    settings = _conversation_settings_payload(cs)
+    settings['direct_mute'] = _direct_message_mute_payload(
+        _get_active_direct_message_mute(request.user, peer)
+    )
+    return JsonResponse({'status': 'success', 'settings': settings})

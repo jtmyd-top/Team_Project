@@ -2,13 +2,15 @@
 from .base import *  # noqa: F401,F403
 from .users import _user_payload
 
-def _announcement_read_payload(group, announcement=None):
+def _announcement_read_payload(group, announcement=None, *, include_unread=False, viewer=None):
     from messaging.models import MessageGroupAnnouncementRead
 
     if announcement is None:
         announcement = _latest_active_announcement(group)
 
-    total_members = group.memberships.filter(left_at__isnull=True).count()
+    active_memberships = group.memberships.filter(left_at__isnull=True).select_related('user')
+    active_member_ids = active_memberships.values('user_id')
+    total_members = active_memberships.count()
     if not announcement:
         return {
             'announcement_id': None,
@@ -16,11 +18,13 @@ def _announcement_read_payload(group, announcement=None):
             'unread_count': total_members,
             'total_members': total_members,
             'read_users': [],
+            'unread_users': [],
+            'viewer_has_read': False,
         }
 
     read_qs = (
         MessageGroupAnnouncementRead.objects
-        .filter(group=group, announcement=announcement)
+        .filter(group=group, announcement=announcement, user_id__in=active_member_ids)
         .select_related('user')
         .order_by('-read_at')
     )
@@ -34,13 +38,27 @@ def _announcement_read_payload(group, announcement=None):
         for item in read_qs[:50]
     ]
     read_count = read_qs.count()
-    return {
+    read_user_ids = set(read_qs.values_list('user_id', flat=True))
+    payload = {
         'announcement_id': announcement.id,
         'read_count': read_count,
         'unread_count': max(total_members - read_count, 0),
         'total_members': total_members,
         'read_users': read_users,
+        'unread_users': [],
+        'viewer_has_read': bool(viewer and viewer.id in read_user_ids),
     }
+    if include_unread:
+        payload['unread_users'] = [
+            {
+                'id': membership.user_id,
+                'username': membership.user.username,
+                'avatar': _get_avatar_url(membership.user),
+            }
+            for membership in active_memberships
+            if membership.user_id not in read_user_ids
+        ][:50]
+    return payload
 
 def _latest_active_announcement(group):
     return (

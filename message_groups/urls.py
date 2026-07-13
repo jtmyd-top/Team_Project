@@ -109,6 +109,21 @@ urlpatterns = [
     path('api/messages/groups/<int:group_id>/messages/', views.get_group_messages_api, name='get_group_messages_api'),
     path('api/messages/groups/<int:group_id>/send/', views.send_group_message_api, name='send_group_message_api'),
     path(
+        'api/messages/groups/<int:group_id>/notes/share/',
+        views.share_note_to_group_api,
+        name='share_note_to_group_api',
+    ),
+    path(
+        'api/messages/groups/<int:group_id>/note-shares/<int:share_id>/',
+        views.get_group_note_share_api,
+        name='get_group_note_share_api',
+    ),
+    path(
+        'messages/groups/<int:group_id>/note-shares/<int:share_id>/view/',
+        views.group_note_share_view,
+        name='group_note_share_view',
+    ),
+    path(
         'api/messages/groups/<int:group_id>/messages/<int:message_id>/pin/',
         views.pin_group_message_api,
         name='pin_group_message_api',
@@ -127,5 +142,22 @@ urlpatterns = [
         'api/messages/groups/<int:group_id>/messages/<int:message_id>/report/',
         views.report_group_message_api,
         name='report_group_message_api',
+    ),
+    path('api/messages/groups/<int:group_id>/polls/', views.group_polls_api, name='group_polls_api'),
+    path(
+        'api/messages/groups/<int:group_id>/polls/<int:poll_id>/vote/',
+        views.vote_group_poll_api,
+        name='vote_group_poll_api',
+    ),
+    path(
+        'api/messages/groups/<int:group_id>/polls/<int:poll_id>/close/',
+        views.close_group_poll_api,
+        name='close_group_poll_api',
+    ),
+    path('api/messages/groups/<int:group_id>/tasks/', views.group_tasks_api, name='group_tasks_api'),
+    path(
+        'api/messages/groups/<int:group_id>/tasks/<int:task_id>/complete/',
+        views.complete_group_task_api,
+        name='complete_group_task_api',
     ),
 ]

@@ -37,6 +37,9 @@
             <span :class="{ ok: ownedGroupRequirementMet, blocked: !ownedGroupRequirementMet }">
               已创建群聊 {{ groupPolicy.owned_group_count ?? 0 }}/{{ groupPolicy.max_owned_groups ?? 3 }}
             </span>
+            <span :class="{ ok: twoFaRequirementMet, blocked: !twoFaRequirementMet }">
+              2FA 安全验证 {{ twoFaRequirementMet ? '已开启' : '未开启' }}
+            </span>
           </div>
         </template>
         <div v-else class="policy-line">
@@ -61,11 +64,11 @@
             ref="inputRef"
             v-model="searchInput"
             type="text"
-            placeholder="输入完整用户名 / 邮箱 / 8 位搜索码"
+            :placeholder="searchPlaceholder"
             class="search-input"
             autocomplete="off"
             @keydown.enter.prevent="doSearch"
-            @input="searchError = ''"
+            @input="handleSearchInput"
           >
           <button class="search-btn" :disabled="isSearching || !canSearch" @click="doSearch">
             <i :class="isSearching ? 'fas fa-spinner fa-spin' : 'fas fa-search'"></i>
@@ -84,6 +87,28 @@
             <i class="fas fa-spinner fa-spin"></i>
             搜索中...
           </div>
+
+          <template v-else-if="isForwardMode && mode === 'group'">
+            <div
+              v-for="group in groupSearchResults"
+              :key="group.id"
+              class="user-item"
+              @click="selectGroup(group)"
+            >
+              <img :src="group.avatar" :alt="group.name" class="user-avatar">
+              <div class="user-details">
+                <h4>{{ group.name }}</h4>
+                <p>群组 ID：{{ group.id }}</p>
+              </div>
+              <i class="fas fa-share"></i>
+            </div>
+
+            <div v-if="!groupSearchResults.length" class="empty-search">
+              <i class="fas fa-users-slash"></i>
+              <p>未找到群组</p>
+              <p class="neutral-hint">请输入群组名称或群组 ID</p>
+            </div>
+          </template>
 
           <div v-else-if="searchResult" class="user-item" @click="handleUserClick(searchResult)">
             <img :src="searchResult.avatar" :alt="searchResult.username" class="user-avatar">
@@ -180,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({
@@ -194,11 +219,12 @@ const emit = defineEmits(['close', 'select', 'group-created'])
 const mode = ref('direct')
 const searchInput = ref('')
 const isSearching = ref(false)
+const searchRequestId = ref(0)
 const hasSearched = ref(false)
 const searchResult = ref(null)
 const searchError = ref('')
 const recentUsers = ref([])
-const recentGroups = ref([])
+const availableGroups = ref([])
 const inputRef = ref(null)
 const groupPolicy = ref(null)
 const groupName = ref('')
@@ -211,13 +237,32 @@ const dialogTitle = computed(() => {
   return mode.value === 'group' ? '创建群组' : '开始新的对话'
 })
 const searchHintText = computed(() => {
-  if (isForwardMode.value && mode.value === 'group') return '可选择已有群组，或搜索用户后转发给私信对象。'
+  if (isForwardMode.value && mode.value === 'group') return '可选择已有群组，或按群组名称 / 群组 ID 搜索。'
   return '为防止用户枚举，仅支持精准匹配。对方须开启相应的可发现性，或你拥有对方分享的搜索码。'
+})
+const searchPlaceholder = computed(() => {
+  if (isForwardMode.value && mode.value === 'group') return '输入群组名称 / 群组 ID'
+  return '输入完整用户名 / 邮箱 / 8 位搜索码'
 })
 const emptySearchHint = computed(() => (
   isForwardMode.value ? '请确认输入的用户信息完全正确，或从最近列表中选择目标' : '请确认输入的内容完全正确，或对方已允许被搜索'
 ))
-const canSearch = computed(() => searchInput.value.trim().length >= 3)
+const canSearch = computed(() => {
+  const q = searchInput.value.trim()
+  if (isForwardMode.value && mode.value === 'group') return q.length >= 1
+  return q.length >= 3
+})
+const groupSearchResults = computed(() => {
+  if (!(isForwardMode.value && mode.value === 'group' && hasSearched.value)) return []
+  const q = searchInput.value.trim().toLowerCase()
+  if (!q) return []
+  return availableGroups.value.filter((group) => {
+    const name = String(group.name || '').toLowerCase()
+    const id = String(group.id || '')
+    return name.includes(q) || id === q || id.includes(q)
+  })
+})
+const recentGroups = computed(() => availableGroups.value.slice(0, 8))
 const canCreateGroup = computed(() =>
   !!groupPolicy.value?.enabled &&
   !!groupPolicy.value?.eligible &&
@@ -241,6 +286,10 @@ const ownedGroupRequirementMet = computed(() => {
   }
   return policy?.reasons?.owned_groups ?? true
 })
+const twoFaRequirementMet = computed(() => {
+  const policy = groupPolicy.value
+  return policy?.reasons?.two_fa ?? !!policy?.two_fa_enabled
+})
 
 const matchedByLabel = (via) => {
   if (via === 'username') return '用户名'
@@ -253,9 +302,25 @@ const closeDialog = () => {
   emit('close')
 }
 
+const handleSearchInput = () => {
+  searchRequestId.value += 1
+  searchError.value = ''
+  searchResult.value = null
+  if (isForwardMode.value && mode.value === 'group') {
+    hasSearched.value = searchInput.value.trim().length > 0
+  }
+}
+
 const doSearch = async () => {
   const q = searchInput.value.trim()
+  if (isForwardMode.value && mode.value === 'group') {
+    hasSearched.value = q.length > 0
+    searchResult.value = null
+    searchError.value = ''
+    return
+  }
   if (q.length < 3) return
+  const requestId = ++searchRequestId.value
   isSearching.value = true
   hasSearched.value = true
   searchResult.value = null
@@ -263,6 +328,7 @@ const doSearch = async () => {
 
   try {
     const response = await fetch(`/api/users/search/?q=${encodeURIComponent(q)}`)
+    if (requestId !== searchRequestId.value) return
     if (!response.ok) {
       const data = await response.json().catch(() => ({}))
       searchError.value = data.error || data.message || '搜索失败，请稍后重试'
@@ -273,10 +339,11 @@ const doSearch = async () => {
     const users = data.users || []
     searchResult.value = users.length ? users[0] : null
   } catch (error) {
+    if (requestId !== searchRequestId.value) return
     console.error('搜索用户失败:', error)
     searchError.value = '网络错误，请稍后重试'
   } finally {
-    isSearching.value = false
+    if (requestId === searchRequestId.value) isSearching.value = false
   }
 }
 
@@ -367,9 +434,8 @@ const loadRecentUsers = async () => {
           avatar: conv.avatar,
           bio: '',
         }))
-      recentGroups.value = conversations
+      availableGroups.value = conversations
         .filter(conv => conv.conversation_type === 'group' && (conv.group_id || conv.id))
-        .slice(0, 8)
         .map(conv => ({
           id: conv.group_id || conv.id,
           name: conv.group_name || conv.name || conv.username || '群组',
@@ -381,6 +447,13 @@ const loadRecentUsers = async () => {
     console.error('加载最近联系人失败:', error)
   }
 }
+
+watch(mode, () => {
+  searchInput.value = ''
+  hasSearched.value = false
+  searchResult.value = null
+  searchError.value = ''
+})
 
 onMounted(() => {
   if (!isForwardMode.value) loadGroupPolicy()

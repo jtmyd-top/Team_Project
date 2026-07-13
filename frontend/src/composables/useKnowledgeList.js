@@ -42,7 +42,8 @@ export function useKnowledgeList() {
     is_public: false,
     is_secret: false,
     is_trashed: false,
-    public_url: ''
+    public_url: '',
+    permissions: {}
   })
 
   // 原始标题，用于检测标题是否被修改
@@ -61,7 +62,8 @@ export function useKnowledgeList() {
       is_public: false,
       is_secret: false,
       is_trashed: false,
-      public_url: ''
+      public_url: '',
+      permissions: {}
     }
     decryptedTitle.value = ''
     hasUnsavedChanges.value = false
@@ -153,7 +155,8 @@ export function useKnowledgeList() {
         is_public: data.is_public || false,
         is_secret: data.is_secret || false,
         is_trashed: data.is_trashed || false,
-        public_url: data.public_url || ''
+        public_url: data.public_url || '',
+        permissions: data.permissions || {}
       }
 
       hasUnsavedChanges.value = false
@@ -636,7 +639,7 @@ export function useKnowledgeList() {
   }
 
   function handleGoToSettings() {
-    window.location.href = '/settings/?tab=security'
+    window.location.href = '/settings/#security'
   }
 
   function handleVaultSetupCancel() {

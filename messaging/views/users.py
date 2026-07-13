@@ -1,5 +1,6 @@
 # knowledge_project/views/message/users.py
 """公开资料 / 精准用户搜索 / 私信页 / 未读数 / 在线心跳"""
+import hashlib
 import os
 import time
 
@@ -19,6 +20,43 @@ from notes.models import Note
 from core.utils.session_activity import mark_messages_page_activity
 from ._constants import MESSAGES_PAGE_ACTIVE_AT_KEY
 from ._helpers import _get_avatar_url, _server_error_response
+
+
+MESSAGES_STATIC_ASSETS = (
+    'dist/messages.js',
+    'dist/assets/messages.css',
+    'dist/assets/el-message.css',
+    'dist/assets/el4.css',
+    'dist/assets/el-input.css',
+    'dist/assets/el-overlay.css',
+    # NewMessageDialog is shared with the note page, so Vite emits its styles
+    # into this shared bundle rather than messages.css.
+    'dist/assets/index2.css',
+)
+
+
+def _messages_asset_version():
+    """Return a content-based version for every asset required by messages.html."""
+    digest = hashlib.blake2s(digest_size=10)
+    found_any = False
+    roots = (
+        os.path.join(settings.BASE_DIR, 'static'),
+        os.path.join(settings.BASE_DIR, 'staticfiles'),
+    )
+
+    for asset_path in MESSAGES_STATIC_ASSETS:
+        for root in roots:
+            candidate = os.path.join(root, *asset_path.split('/'))
+            try:
+                with open(candidate, 'rb') as asset_file:
+                    digest.update(asset_path.encode('utf-8'))
+                    digest.update(asset_file.read())
+                found_any = True
+                break
+            except OSError:
+                continue
+
+    return digest.hexdigest() if found_any else str(int(time.time()))
 
 
 @require_http_methods(["GET"])
@@ -136,15 +174,10 @@ def messages_view(request):
     request.session[MESSAGES_PAGE_ACTIVE_AT_KEY] = active_at
     request.session.modified = True
     mark_messages_page_activity(request.user.id, active_at)
-    messages_bundle_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'dist', 'messages.js')
-    try:
-        messages_asset_version = int(os.path.getmtime(messages_bundle_path))
-    except OSError:
-        messages_asset_version = int(time.time())
     return render(request, 'messages/messages.html', {
         'realtime_enabled': getattr(settings, 'REALTIME_MESSAGES_ENABLED', False),
         'realtime_ws_path': getattr(settings, 'REALTIME_MESSAGES_PATH', '/ws/messages/'),
-        'messages_asset_version': messages_asset_version,
+        'messages_asset_version': _messages_asset_version(),
     })
 
 

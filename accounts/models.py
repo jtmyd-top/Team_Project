@@ -272,9 +272,6 @@ class ProfileLike(models.Model):
         verbose_name = '点赞记录'
         verbose_name_plural = '点赞记录'
         unique_together = ('liker', 'profile')
-        indexes = [
-            models.Index(fields=['liker', 'profile'], name='profilelike_liker_profile_idx'),
-        ]
 
     def __str__(self):
         return f'{self.liker.username} 点赞了 {self.profile.user.username}'
@@ -294,7 +291,6 @@ class PasswordResetToken(models.Model):
         verbose_name = '密码重置令牌'
         verbose_name_plural = '密码重置令牌'
         indexes = [
-            models.Index(fields=['token'], name='knowledge_p_token_b56c5f_idx'),
             models.Index(fields=['expires_at'], name='knowledge_p_expires_e8717b_idx'),
         ]
 
@@ -405,7 +401,6 @@ class AccessLog(models.Model):
         verbose_name_plural = '安全访问日志'
         indexes = [
             models.Index(fields=['user_identifier', 'ip_address', 'action'], name='knowledge_p_user_id_1113d0_idx'),
-            models.Index(fields=['created_at'], name='knowledge_p_created_78d3e5_idx'),
         ]
 
     def __str__(self):
@@ -479,7 +474,6 @@ class LoginDevice(models.Model):
         verbose_name_plural = '登录设备'
         unique_together = ('user', 'device_fingerprint')
         indexes = [
-            models.Index(fields=['user', 'device_fingerprint'], name='knowledge_p_user_id_7475e1_idx'),
             models.Index(fields=['user', 'last_login_at'], name='knowledge_p_user_id_967b54_idx'),
             models.Index(fields=['user', 'is_active'], name='knowledge_p_user_id_4c985c_idx'),
         ]
@@ -539,7 +533,6 @@ class TrustedDevice(models.Model):
         verbose_name_plural = '信任设备'
         indexes = [
             models.Index(fields=['user', 'is_revoked'], name='knowledge_p_user_id_91fd9a_idx'),
-            models.Index(fields=['expires_at'], name='knowledge_p_expires_503a0e_idx'),
         ]
 
     def __str__(self):

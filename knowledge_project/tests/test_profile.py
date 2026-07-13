@@ -11,11 +11,17 @@
 
 from __future__ import annotations
 
+import json
+import sys
+import types
 from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -28,19 +34,27 @@ from accounts.models import (
     SecurityAuditLog,
 )
 from messaging.models import (
+    GroupMessage,
+    Message,
+    MessageAttachment,
     MessageGroup,
     MessageGroupMember,
     MessagePreference,
     UserBlocklist,
     UserFollow,
 )
-from notes.models import Note
-from notifications.models import UserNotification
+from notes.models import Asset, Note, NoteCollaborator
+from notifications.models import BrowserPushSubscription, UserNotification
+from notifications.services import _send_browser_pushes, notify_user
 
 from ._helpers import login, make_user, parse, post_json
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    # Tests call Django directly rather than through the HTTPS reverse proxy.
+    SECURE_SSL_REDIRECT=False,
+)
 class _ProfileTestBase(TestCase):
     def setUp(self):
         cache.clear()
@@ -420,7 +434,9 @@ class NotificationPreferencesTests(_ProfileTestBase):
         owner = make_user('np06_owner')
         group = MessageGroup.objects.create(name='joined notify group', owner=owner, created_by=owner)
         MessageGroupMember.objects.create(group=group, user=owner, role='owner')
-        MessageGroupMember.objects.create(group=group, user=user, role='member')
+        membership = MessageGroupMember.objects.create(group=group, user=user, role='member')
+        membership.joined_at = timezone.now() + timedelta(days=1)
+        membership.save(update_fields=['joined_at'])
         login(self.client, user)
 
         body = parse(self.client.get(reverse('notification_preferences')))
@@ -643,6 +659,21 @@ class NotificationCenterApiTests(_ProfileTestBase):
         count_body = parse(self.client.get(reverse('notifications_unread_count_api')))
         self.assertEqual(count_body['unread_count'], 1)
 
+    def test_list_notifications_filters_by_kind(self):
+        user = make_user('nc_kind')
+        other_user = make_user('nc_kind_other')
+        UserNotification.objects.create(user=user, kind='new_comment', title='comment')
+        UserNotification.objects.create(user=user, kind='new_message', title='message')
+        UserNotification.objects.create(user=other_user, kind='new_message', title='other')
+        login(self.client, user)
+
+        response = self.client.get(f"{reverse('notifications_list_api')}?kind=new_message")
+        body = parse(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['title'] for item in body['notifications']], ['message'])
+        self.assertEqual(body['unread_count'], 2)
+
     def test_mark_selected_notification_read(self):
         user = make_user('nc02')
         first = UserNotification.objects.create(user=user, kind='new_comment', title='A')
@@ -670,3 +701,407 @@ class NotificationCenterApiTests(_ProfileTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(UserNotification.objects.filter(user=user, is_read=False).count(), 0)
+
+
+class BrowserPushSubscriptionApiTests(_ProfileTestBase):
+    endpoint = 'https://push.example.test/subscription-123'
+
+    def payload(self, **overrides):
+        payload = {
+            'endpoint': self.endpoint,
+            'keys': {
+                'p256dh': 'test-p256dh-key',
+                'auth': 'test-auth-key',
+            },
+            'expiration_time': 1_800_000_000_000,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_post_returns_unavailable_until_vapid_is_configured(self):
+        user = make_user('push_unavailable')
+        login(self.client, user)
+
+        with override_settings(WEB_PUSH_CONFIGURED=False):
+            response = post_json(
+                self.client,
+                reverse('push_subscriptions_api'),
+                self.payload(),
+                secure=True,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(BrowserPushSubscription.objects.count(), 0)
+
+    @override_settings(
+        WEB_PUSH_CONFIGURED=True,
+        VAPID_PUBLIC_KEY='public-key',
+        VAPID_PRIVATE_KEY='private-key',
+        VAPID_SUBJECT='mailto:admin@example.test',
+    )
+    def test_subscription_lifecycle_is_scoped_to_the_signed_in_user(self):
+        user = make_user('push_owner')
+        other_user = make_user('push_other')
+        login(self.client, user)
+
+        created = post_json(
+            self.client,
+            reverse('push_subscriptions_api'),
+            self.payload(),
+            secure=True,
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertTrue(parse(created)['enabled'])
+        self.assertEqual(BrowserPushSubscription.objects.get().user, user)
+
+        login(self.client, other_user)
+        takeover = post_json(
+            self.client,
+            reverse('push_subscriptions_api'),
+            self.payload(),
+            secure=True,
+        )
+        self.assertEqual(takeover.status_code, 409)
+
+        delete_other = self.client.delete(
+            reverse('push_subscriptions_api'),
+            data=json.dumps({'endpoint': self.endpoint}),
+            content_type='application/json',
+            secure=True,
+        )
+        self.assertEqual(delete_other.status_code, 200)
+        self.assertFalse(parse(delete_other)['deleted'])
+        self.assertEqual(BrowserPushSubscription.objects.get().user, user)
+
+        login(self.client, user)
+        deleted = self.client.delete(
+            reverse('push_subscriptions_api'),
+            data=json.dumps({'endpoint': self.endpoint}),
+            content_type='application/json',
+            secure=True,
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(parse(deleted)['deleted'])
+        self.assertEqual(BrowserPushSubscription.objects.count(), 0)
+
+    def test_delete_allows_cleanup_even_after_server_push_is_disabled(self):
+        user = make_user('push_cleanup')
+        BrowserPushSubscription.objects.create(
+            user=user,
+            endpoint=self.endpoint,
+            p256dh='test-p256dh-key',
+            auth='test-auth-key',
+        )
+        login(self.client, user)
+
+        with override_settings(WEB_PUSH_CONFIGURED=False):
+            response = self.client.delete(
+                reverse('push_subscriptions_api'),
+                data=json.dumps({'endpoint': self.endpoint}),
+                content_type='application/json',
+                secure=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(parse(response)['deleted'])
+        self.assertFalse(BrowserPushSubscription.objects.exists())
+
+
+class BrowserPushDeliveryTests(_ProfileTestBase):
+    @override_settings(WEB_PUSH_CONFIGURED=False)
+    def test_notify_user_keeps_in_app_notification_when_push_is_not_configured(self):
+        user = make_user('push_in_app_only')
+        MessagePreference.objects.create(user=user, browser_new_message=True)
+
+        with patch(
+            'notifications.services._send_browser_pushes'
+        ) as send_push, self.captureOnCommitCallbacks(execute=True):
+            notification = notify_user(user, 'new_message', 'New message', 'hello')
+
+        self.assertIsNotNone(notification)
+        self.assertTrue(UserNotification.objects.filter(id=notification.id).exists())
+        send_push.assert_not_called()
+
+    @override_settings(
+        WEB_PUSH_CONFIGURED=True,
+        VAPID_PUBLIC_KEY='public-key',
+        VAPID_PRIVATE_KEY='private-key',
+        VAPID_SUBJECT='mailto:admin@example.test',
+    )
+    def test_notify_user_schedules_push_after_transaction_commit(self):
+        user = make_user('push_after_commit')
+        MessagePreference.objects.create(user=user, browser_new_message=True)
+
+        with patch(
+            'notifications.services._send_browser_pushes'
+        ) as send_push, self.captureOnCommitCallbacks(execute=True):
+            notification = notify_user(
+                user,
+                'new_message',
+                'New message',
+                'hello',
+                message_id=123,
+            )
+
+        send_push.assert_called_once_with(notification.id)
+
+    @override_settings(
+        WEB_PUSH_CONFIGURED=True,
+        VAPID_PUBLIC_KEY='public-key',
+        VAPID_PRIVATE_KEY='private-key',
+        VAPID_SUBJECT='mailto:admin@example.test',
+    )
+    def test_expired_push_subscription_is_removed_after_provider_response(self):
+        user = make_user('push_expired')
+        MessagePreference.objects.create(user=user, browser_new_message=True)
+        subscription = BrowserPushSubscription.objects.create(
+            user=user,
+            endpoint='https://push.example.test/expired-subscription',
+            p256dh='test-p256dh-key',
+            auth='test-auth-key',
+        )
+        notification = UserNotification.objects.create(
+            user=user,
+            kind='new_message',
+            title='New message',
+            body='hello',
+            data={'message_id': 123},
+        )
+        sent_payloads = []
+
+        class FakeWebPushException(Exception):
+            def __init__(self):
+                super().__init__('subscription expired')
+                self.response = SimpleNamespace(status_code=410)
+
+        fake_pywebpush = types.ModuleType('pywebpush')
+        fake_pywebpush.WebPushException = FakeWebPushException
+
+        def fake_webpush(**kwargs):
+            sent_payloads.append(json.loads(kwargs['data']))
+            raise FakeWebPushException()
+
+        fake_pywebpush.webpush = fake_webpush
+        with patch.dict(sys.modules, {'pywebpush': fake_pywebpush}):
+            _send_browser_pushes(notification.id)
+
+        self.assertEqual(sent_payloads[0]['url'], '/messages/')
+        self.assertFalse(BrowserPushSubscription.objects.filter(id=subscription.id).exists())
+
+
+class StorageQuotaApiTests(_ProfileTestBase):
+    @override_settings(USER_STORAGE_QUOTA_BYTES=1024)
+    def test_storage_quota_summary_counts_user_assets(self):
+        user = make_user('quota01')
+        other = make_user('quota01_other')
+        Note.objects.create(author=user, title='normal', content='body')
+        Note.objects.create(author=user, title='secret', content='body', is_secret=True)
+        Asset.objects.create(
+            uploader=user,
+            name='note.png',
+            asset_type='image',
+            file=SimpleUploadedFile('note.png', b'12345', content_type='image/png'),
+        )
+        Asset.objects.create(
+            uploader=other,
+            name='other.png',
+            asset_type='image',
+            file=SimpleUploadedFile('other.png', b'1234567890', content_type='image/png'),
+        )
+        login(self.client, user)
+
+        response = self.client.get(reverse('storage_quota_api'))
+        body = parse(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body['status'], 'success')
+        self.assertEqual(body['quota']['limit_bytes'], 1024)
+        self.assertEqual(body['quota']['used_bytes'], 5)
+        self.assertEqual(body['quota']['remaining_bytes'], 1019)
+        self.assertEqual(body['quota']['breakdown']['note_assets_bytes'], 5)
+        self.assertEqual(body['quota']['counts']['notes'], 2)
+        self.assertEqual(body['quota']['counts']['secret_notes'], 1)
+
+
+class DataDiscoveryApiTests(_ProfileTestBase):
+    def test_global_search_requires_login(self):
+        response = self.client.get(reverse('global_search_api'), {'q': 'plan'}, secure=True)
+        self.assertIn(response.status_code, (302, 401, 403))
+
+    def test_global_search_excludes_secret_notes_and_hidden_group_history(self):
+        owner = make_user('search_owner')
+        user = make_user('search_member')
+        group = MessageGroup.objects.create(
+            name='Project plan',
+            owner=owner,
+            created_by=owner,
+            allow_new_members_view_history=False,
+        )
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        GroupMessage.objects.create(group=group, sender=owner, content='hidden launch plan')
+        membership = MessageGroupMember.objects.create(group=group, user=user, role='member')
+        membership.joined_at = timezone.now() + timedelta(days=1)
+        membership.save(update_fields=['joined_at'])
+        Note.objects.create(author=user, title='Visible plan', content='Searchable content')
+        Note.objects.create(author=user, title='Secret plan', content='Hidden content', is_secret=True)
+        Message.objects.create(sender=owner, recipient=user, content='Direct launch plan')
+        login(self.client, user)
+
+        body = parse(self.client.get(reverse('global_search_api'), {'q': 'plan'}, secure=True))
+
+        self.assertEqual(body['status'], 'success')
+        self.assertEqual([item['title'] for item in body['results']['notes']], ['Visible plan'])
+        self.assertEqual(len(body['results']['messages']), 1)
+        self.assertEqual(body['results']['messages'][0]['type'], 'direct_message')
+        self.assertEqual(body['results']['groups'][0]['title'], 'Project plan')
+
+    def test_global_search_excludes_recalled_and_self_deleted_direct_messages(self):
+        user = make_user('search_visibility_user')
+        peer = make_user('search_visibility_peer')
+        Message.objects.create(sender=user, recipient=peer, content='visible discovery')
+        Message.objects.create(
+            sender=user,
+            recipient=peer,
+            content='sender deleted discovery',
+            deleted_for_sender=True,
+        )
+        Message.objects.create(
+            sender=peer,
+            recipient=user,
+            content='recipient deleted discovery',
+            deleted_for_recipient=True,
+        )
+        Message.objects.create(
+            sender=peer,
+            recipient=user,
+            content='recalled discovery',
+            is_recalled=True,
+        )
+        login(self.client, user)
+
+        body = parse(self.client.get(reverse('global_search_api'), {'q': 'discovery'}, secure=True))
+
+        self.assertEqual(body['status'], 'success')
+        self.assertEqual(
+            [item['summary'] for item in body['results']['messages']],
+            ['visible discovery'],
+        )
+
+    def test_global_search_finds_only_currently_accessible_attachments(self):
+        owner = make_user('search_files_owner')
+        user = make_user('search_files_user')
+        visible = Message.objects.create(sender=owner, recipient=user, content='file')
+        hidden = Message.objects.create(
+            sender=owner,
+            recipient=user,
+            content='hidden file',
+            deleted_for_recipient=True,
+        )
+        visible_attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            message=visible,
+            file=SimpleUploadedFile('project-plan.pdf', b'visible', content_type='application/pdf'),
+            original_name='project-plan.pdf',
+            attachment_type='file',
+            mime_type='application/pdf',
+            size=7,
+        )
+        hidden_attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            message=hidden,
+            file=SimpleUploadedFile('project-hidden.pdf', b'hidden', content_type='application/pdf'),
+            original_name='project-hidden.pdf',
+            attachment_type='file',
+            mime_type='application/pdf',
+            size=6,
+        )
+        login(self.client, user)
+
+        body = parse(self.client.get(reverse('global_search_api'), {'q': 'project'}, secure=True))
+        found_ids = {item['id'] for item in body['results']['files']}
+        self.assertIn(visible_attachment.id, found_ids)
+        self.assertNotIn(hidden_attachment.id, found_ids)
+
+    def test_export_excludes_secret_notes_and_respects_group_history(self):
+        owner = make_user('export_owner')
+        user = make_user('export_member')
+        group = MessageGroup.objects.create(
+            name='Export group',
+            owner=owner,
+            created_by=owner,
+            allow_new_members_view_history=False,
+        )
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        GroupMessage.objects.create(group=group, sender=owner, content='before membership')
+        membership = MessageGroupMember.objects.create(group=group, user=user, role='member')
+        membership.joined_at = timezone.now() + timedelta(days=1)
+        membership.save(update_fields=['joined_at'])
+        Note.objects.create(author=user, title='Exported', content='included')
+        Note.objects.create(author=user, title='Private vault', content='excluded', is_secret=True)
+        Message.objects.create(sender=user, recipient=owner, content='direct export')
+        login(self.client, user)
+
+        response = self.client.get(reverse('export_my_data_api'), secure=True)
+        body = parse(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment;', response['Content-Disposition'])
+        self.assertEqual([item['title'] for item in body['notes']], ['Exported'])
+        self.assertEqual(len(body['direct_messages']), 1)
+        self.assertEqual(len(body['groups']), 1)
+        self.assertEqual(body['groups'][0]['messages'], [])
+        self.assertIn('Secret notes', body['notice'])
+
+
+class NoteCollaborationApiTests(_ProfileTestBase):
+    def test_owner_can_add_editor_and_editor_can_update_but_not_manage(self):
+        owner = make_user('collab_owner')
+        editor = make_user('collab_editor')
+        note = Note.objects.create(author=owner, title='Shared plan', content='first draft')
+        login(self.client, owner)
+
+        add_response = post_json(
+            self.client,
+            reverse('note_collaborators_api', args=[note.id]),
+            {'username': editor.username, 'role': 'editor'},
+            secure=True,
+        )
+        self.assertEqual(add_response.status_code, 201)
+        collaborator_id = parse(add_response)['collaborator']['id']
+        self.assertEqual(NoteCollaborator.objects.get(id=collaborator_id).role, 'editor')
+
+        login(self.client, editor)
+        detail = self.client.get(reverse('api_note_detail', args=[note.id]), {'full_content': 'true'}, secure=True)
+        self.assertEqual(detail.status_code, 200)
+        self.assertTrue(parse(detail)['permissions']['can_edit'])
+
+        update = post_json(
+            self.client,
+            reverse('update_note_api', args=[note.id]),
+            {'title': 'Edited plan', 'content': 'edited draft'},
+            secure=True,
+        )
+        self.assertEqual(update.status_code, 200)
+        note.refresh_from_db()
+        self.assertEqual(note.title, 'Edited plan')
+        self.assertEqual(note.last_modified_by, editor)
+
+        manage = self.client.get(reverse('note_collaborators_api', args=[note.id]), secure=True)
+        self.assertEqual(manage.status_code, 200)
+        self.assertFalse(parse(manage)['can_manage'])
+
+    def test_secret_notes_cannot_be_shared_with_collaborators(self):
+        owner = make_user('collab_secret_owner')
+        reader = make_user('collab_secret_reader')
+        note = Note.objects.create(author=owner, title='Vault', content='ciphertext', is_secret=True)
+        login(self.client, owner)
+
+        response = post_json(
+            self.client,
+            reverse('note_collaborators_api', args=[note.id]),
+            {'username': reader.username, 'role': 'reader'},
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(NoteCollaborator.objects.count(), 0)

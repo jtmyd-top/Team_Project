@@ -5,6 +5,7 @@ from .common import (
     _invalidate_public_notes_cache,
     _set_vault_pending_encryption_guard,
 )
+from notes.revisions import create_note_revision
 
 
 @login_required
@@ -13,6 +14,8 @@ def note_detail_api(request, note_id):
     note = get_object_or_404(Note, pk=note_id)
     if request.method == 'GET':
         has_permission = note.has_read_permission(request.user)
+    elif request.method == 'DELETE':
+        has_permission = note.has_manage_permission(request.user)
     else:
         has_permission = note.has_write_permission(request.user)
     if not has_permission:
@@ -42,6 +45,11 @@ def note_detail_api(request, note_id):
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
                 'folder_id': note.folder.id if note.folder else None,
                 'is_favorited': note.is_favorited,
+                'permissions': {
+                    'can_edit': note.has_write_permission(request.user),
+                    'can_manage': note.has_manage_permission(request.user),
+                    'can_comment': note.has_comment_permission(request.user),
+                },
             }
             return JsonResponse(data)
 
@@ -63,7 +71,12 @@ def note_detail_api(request, note_id):
             'pagination': {
                 'current_page': int(page_number),
                 'total_pages': total_pages,
-            }
+            },
+            'permissions': {
+                'can_edit': note.has_write_permission(request.user),
+                'can_manage': note.has_manage_permission(request.user),
+                'can_comment': note.has_comment_permission(request.user),
+            },
         }
         return JsonResponse(data)
 
@@ -78,10 +91,14 @@ def note_detail_api(request, note_id):
             return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
 
         was_public = note.is_public
+        previous_title = note.title
+        previous_content = note.content
         note.title = data.get('title', note.title)
         note.content = data.get('content', note.content)
         note.last_modified_by = request.user
         note.save()
+        if note.title != previous_title or note.content != previous_content:
+            create_note_revision(note, request.user)
         if was_public:
             _invalidate_public_notes_cache()
         if clear_vault_guard:
@@ -134,6 +151,8 @@ def note_detail_api(request, note_id):
             # 只更新提供的字段
             was_public = note.is_public
             was_secret = note.is_secret
+            previous_title = note.title
+            previous_content = note.content
             will_be_secret = data.get('is_secret', note.is_secret)
             allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(
                 request,
@@ -170,6 +189,11 @@ def note_detail_api(request, note_id):
                 note.public_id = uuid.uuid4()
 
             note.save()
+            if note.title != previous_title or note.content != previous_content:
+                create_note_revision(note, request.user)
+            if not was_secret and note.is_secret:
+                # A vault note is strictly owner-only, so revoke any prior collaboration.
+                note.collaborators.all().delete()
             if was_public or note.is_public:
                 _invalidate_public_notes_cache()
             if clear_vault_guard:
@@ -293,6 +317,7 @@ def create_note_api(request):
         if new_note.is_public and not new_note.public_id:
             new_note.public_id = uuid.uuid4()
             new_note.save(update_fields=['public_id'])
+        create_note_revision(new_note, user, action='created')
 
         # 清除侧边栏缓存
         try:
@@ -333,8 +358,10 @@ def update_note_api(request, note_id):
     try:
         # 获取笔记并验证权限
         try:
-            note = Note.objects.get(id=note_id, author=user)
+            note = Note.objects.get(id=note_id)
         except Note.DoesNotExist:
+            return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
+        if not note.has_write_permission(user):
             return JsonResponse({'error': '笔记不存在或无权访问'}, status=404)
 
         # 解析请求体
@@ -347,6 +374,8 @@ def update_note_api(request, note_id):
             return JsonResponse({'error': error_msg, 'message': error_msg}, status=409)
 
         was_public = note.is_public
+        previous_title = note.title
+        previous_content = note.content
 
         # 更新笔记（前端已处理加密，后端直接存储）
         if title is not None:
@@ -356,6 +385,8 @@ def update_note_api(request, note_id):
 
         note.last_modified_by = user
         note.save()
+        if note.title != previous_title or note.content != previous_content:
+            create_note_revision(note, user)
         if was_public:
             _invalidate_public_notes_cache()
         if clear_vault_guard:
@@ -462,6 +493,9 @@ def toggle_secret_api(request, note_id):
         else:
             _clear_vault_pending_encryption_guard(request, note.id)
         note.save()
+        if not was_secret and note.is_secret:
+            # A vault note is strictly owner-only, so revoke any prior collaboration.
+            note.collaborators.all().delete()
         if was_public or note.is_public:
             _invalidate_public_notes_cache()
 

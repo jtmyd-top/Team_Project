@@ -24,6 +24,7 @@ export function useSettingsSecurity() {
   const show2faSetupDialog = ref(false);
   const show2faDisableDialog = ref(false);
   const showBackupCodesDialog = ref(false);
+  const showTotpUpdateDialog = ref(false);
 
   // 修改密码表单
   const passwordForm = reactive({
@@ -55,6 +56,19 @@ export function useSettingsSecurity() {
     useBackup: false,
     method: '',
     codeSending: false,
+  });
+
+  // TOTP 换绑
+  const totpUpdate = reactive({
+    step: 'verify-current',
+    password: '',
+    currentCode: '',
+    useBackup: false,
+    qrCode: '',
+    secret: '',
+    newCode: '',
+    backupCodes: [],
+    loading: false,
   });
 
   // 备用码管理
@@ -309,6 +323,81 @@ export function useSettingsSecurity() {
     twoFaDisable.code = '';
   };
 
+  const openTotpUpdateDialog = () => {
+    resetTotpUpdateForm();
+    showTotpUpdateDialog.value = true;
+  };
+
+  const startTotpUpdate = async () => {
+    if (!totpUpdate.password) return ElMessage.warning("请输入密码");
+    if (!totpUpdate.currentCode) return ElMessage.warning("请输入当前 2FA 验证码或备用码");
+    if (totpUpdate.loading) return;
+
+    totpUpdate.loading = true;
+    try {
+      const data = await apiService.startUpdateTOTP(
+        totpUpdate.password,
+        (totpUpdate.currentCode || '').trim(),
+        totpUpdate.useBackup
+      );
+      if (data.status === "success") {
+        totpUpdate.step = 'scan-new';
+        totpUpdate.qrCode = data.qr_code || '';
+        totpUpdate.secret = data.secret || '';
+        totpUpdate.newCode = '';
+        ElMessage.success("身份验证通过，请绑定新的验证器应用");
+      } else {
+        ElMessage.error(data.message || data.error || "验证失败");
+      }
+    } catch (error) {
+      ElMessage.error(error.message || "网络错误");
+    } finally {
+      totpUpdate.loading = false;
+    }
+  };
+
+  const verifyTotpUpdate = async () => {
+    if (!totpUpdate.newCode) return ElMessage.warning("请输入新验证器中的验证码");
+    if (totpUpdate.loading) return;
+
+    totpUpdate.loading = true;
+    try {
+      const data = await apiService.verifyUpdateTOTP((totpUpdate.newCode || '').trim());
+      if (data.status === "success") {
+        totpUpdate.step = 'backup-codes';
+        totpUpdate.backupCodes = data.backup_codes || [];
+        userStore.update2FAStatus(true, 'totp');
+        ElMessage.success("验证器应用已更新，请保存新的备用验证码");
+      } else {
+        ElMessage.error(data.message || data.error || "验证失败");
+      }
+    } catch (error) {
+      ElMessage.error(error.message || "网络错误");
+    } finally {
+      totpUpdate.loading = false;
+    }
+  };
+
+  const finishTotpUpdate = () => {
+    showTotpUpdateDialog.value = false;
+    resetTotpUpdateForm();
+    ElMessage.success("验证器应用已更新");
+  };
+
+  const cancelTotpUpdate = () => {
+    showTotpUpdateDialog.value = false;
+    resetTotpUpdateForm();
+  };
+
+  const toggleTotpUpdateBackupCode = () => {
+    totpUpdate.useBackup = !totpUpdate.useBackup;
+    totpUpdate.currentCode = '';
+  };
+
+  const copyTotpUpdateBackupCodes = () => {
+    copyToClipboard(totpUpdate.backupCodes.join('\n'));
+  };
+
   /**
    * 重新生成备用码
    */
@@ -352,6 +441,18 @@ export function useSettingsSecurity() {
     twoFaDisable.method = userStore.two_fa_method || '';
     twoFaDisable.codeSending = false;
     passwordCountdown.stop();
+  };
+
+  const resetTotpUpdateForm = () => {
+    totpUpdate.step = 'verify-current';
+    totpUpdate.password = '';
+    totpUpdate.currentCode = '';
+    totpUpdate.useBackup = false;
+    totpUpdate.qrCode = '';
+    totpUpdate.secret = '';
+    totpUpdate.newCode = '';
+    totpUpdate.backupCodes = [];
+    totpUpdate.loading = false;
   };
 
   /**
@@ -406,11 +507,13 @@ export function useSettingsSecurity() {
     show2faSetupDialog,
     show2faDisableDialog,
     showBackupCodesDialog,
+    showTotpUpdateDialog,
 
     // Form states
     passwordForm,
     twoFaSetup,
     twoFaDisable,
+    totpUpdate,
     backupCodes,
 
     // Methods
@@ -426,6 +529,13 @@ export function useSettingsSecurity() {
     disable2fa,
     sendDisable2faCode,
     toggleDisableBackupCode,
+    openTotpUpdateDialog,
+    startTotpUpdate,
+    verifyTotpUpdate,
+    finishTotpUpdate,
+    cancelTotpUpdate,
+    toggleTotpUpdateBackupCode,
+    copyTotpUpdateBackupCodes,
     regenerateBackupCodes,
     copyNewBackupCodes,
     closeBackupCodesDialog,

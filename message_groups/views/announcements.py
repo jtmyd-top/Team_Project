@@ -97,7 +97,12 @@ def _legacy_group_announcement_reads_api(request, group_id):
 
         return JsonResponse({
             'status': 'success',
-            'read_stats': _announcement_read_payload(group, announcement),
+            'read_stats': _announcement_read_payload(
+                group,
+                announcement,
+                include_unread=membership.role in ('owner', 'admin'),
+                viewer=request.user,
+            ),
         })
     except Http404:
         raise
@@ -304,7 +309,12 @@ def group_announcement_reads_api(request, group_id):
 
         return JsonResponse({
             'status': 'success',
-            'read_stats': _announcement_read_payload(group, announcement),
+            'read_stats': _announcement_read_payload(
+                group,
+                announcement,
+                include_unread=membership.role in ('owner', 'admin'),
+                viewer=request.user,
+            ),
         })
     except Http404:
         raise

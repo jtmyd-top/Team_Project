@@ -6,6 +6,10 @@ def get_group_messages_api(request, group_id):
     try:
         from messaging.models import MessageGroup
         query = request.GET.get('q', '').strip()
+        sender_id_raw = request.GET.get('sender_id', '').strip()
+        date_from_raw = request.GET.get('date_from', '').strip()
+        date_to_raw = request.GET.get('date_to', '').strip()
+        has_attachment = request.GET.get('has_attachment') == '1'
         group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
         membership, error = _require_group_member(group, request.user)
         if error is not None:
@@ -14,6 +18,35 @@ def get_group_messages_api(request, group_id):
         qs = _visible_group_messages_qs(group, membership)
         if query:
             qs = qs.filter(Q(content__icontains=query) | Q(searchable_text__icontains=query))
+        if sender_id_raw:
+            try:
+                sender_id = int(sender_id_raw)
+            except (TypeError, ValueError):
+                return JsonResponse({'error': 'sender_id 必须是正整数'}, status=400)
+            if sender_id <= 0:
+                return JsonResponse({'error': 'sender_id 必须是正整数'}, status=400)
+            qs = qs.filter(sender_id=sender_id)
+
+        date_from = None
+        date_to = None
+        try:
+            if date_from_raw:
+                date_from = datetime.strptime(date_from_raw, '%Y-%m-%d').date()
+            if date_to_raw:
+                date_to = datetime.strptime(date_to_raw, '%Y-%m-%d').date()
+        except ValueError:
+            return JsonResponse({'error': '日期格式必须为 YYYY-MM-DD'}, status=400)
+        if date_from and date_to and date_from > date_to:
+            return JsonResponse({'error': '开始日期不能晚于结束日期'}, status=400)
+        if date_from:
+            start_at = timezone.make_aware(datetime.combine(date_from, datetime.min.time()))
+            qs = qs.filter(created_at__gte=start_at)
+        if date_to:
+            end_at = timezone.make_aware(datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+            qs = qs.filter(created_at__lt=end_at)
+        if has_attachment:
+            qs = qs.filter(attachments__isnull=False).distinct()
+
         limit, offset = _parse_message_page(request)
         messages, pagination = _slice_latest_page(qs, limit, offset)
         current_announcement = _latest_active_announcement(group)
@@ -52,6 +85,12 @@ def get_group_messages_api(request, group_id):
 def send_group_message_api(request, group_id):
     try:
         from messaging.models import GroupMessage, GroupMessageMention, MessageAttachment, MessageGroup, MessageGroupMember
+        from messaging.note_share_forwarding import (
+            NoteShareForwardingError,
+            create_group_note_share_from_forward,
+            ensure_note_share_is_forwardable,
+            get_note_share,
+        )
         from moderation.models import UserSanction
         from message_groups.security import check_group_message_security
 
@@ -77,6 +116,8 @@ def send_group_message_api(request, group_id):
         reply_to_id = data.get('reply_to')
         forwarded_from_id = data.get('forwarded_from')
         forwarded_private_from_id = data.get('forwarded_private_from')
+        if forwarded_from_id and forwarded_private_from_id:
+            return JsonResponse({'error': '一次只能转发一条来源消息'}, status=400)
         raw_mentions = data.get('mentions', [])  # @提及的用户名列表
         mentioned_usernames = [
             str(username).strip()
@@ -130,13 +171,17 @@ def send_group_message_api(request, group_id):
 
         # Phase 2: 验证转发消息
         forwarded_message = None
+        source_note_share = None
         try:
             attachments = _load_message_attachments(request.user, attachment_ids)
         except ValueError as exc:
             return JsonResponse({'error': str(exc)}, status=400)
         if forwarded_from_id:
             try:
-                forwarded_message = GroupMessage.objects.select_related('group').get(id=forwarded_from_id, is_recalled=False)
+                forwarded_message = GroupMessage.objects.select_related(
+                    'group',
+                    'note_share__note',
+                ).get(id=forwarded_from_id, is_recalled=False)
             except GroupMessage.DoesNotExist:
                 return JsonResponse({'error': '转发的消息不存在或已撤回'}, status=400)
             source_membership = _get_active_membership(forwarded_message.group, request.user)
@@ -147,14 +192,28 @@ def send_group_message_api(request, group_id):
                 .exists()
             ):
                 return JsonResponse({'error': '无权转发该消息'}, status=403)
+            source_note_share = get_note_share(forwarded_message)
+            try:
+                ensure_note_share_is_forwardable(source_note_share)
+            except NoteShareForwardingError as exc:
+                return JsonResponse({'error': str(exc)}, status=403)
         if forwarded_private_from_id:
             from messaging.models import Message
             try:
-                private_message = Message.objects.select_related('sender', 'recipient').get(id=forwarded_private_from_id)
+                private_message = Message.objects.select_related(
+                    'sender',
+                    'recipient',
+                    'note_share__note',
+                ).get(id=forwarded_private_from_id)
             except Message.DoesNotExist:
                 return JsonResponse({'error': '转发的消息不存在或已撤回'}, status=400)
             if request.user.id not in (private_message.sender_id, private_message.recipient_id):
                 return JsonResponse({'error': '无权转发该消息'}, status=403)
+            source_note_share = get_note_share(private_message)
+            try:
+                ensure_note_share_is_forwardable(source_note_share)
+            except NoteShareForwardingError as exc:
+                return JsonResponse({'error': str(exc)}, status=403)
             if not content:
                 content = private_message.content or _attachment_preview(private_message.attachments.first())
             if not content:
@@ -168,6 +227,12 @@ def send_group_message_api(request, group_id):
                 searchable_text=_message_searchable_text(content, attachments),
                 reply_to=reply_to_message,
                 forwarded_from=forwarded_message,
+            )
+            create_group_note_share_from_forward(
+                source_note_share,
+                message,
+                request.user,
+                group,
             )
             if attachments:
                 updated_count = MessageAttachment.objects.filter(
@@ -257,7 +322,12 @@ def send_group_message_api(request, group_id):
 
         message = (
             GroupMessage.objects
-            .select_related('sender', 'group')
+            .select_related(
+                'sender',
+                'group',
+                'note_share__note__author',
+                'note_share__shared_by',
+            )
             .prefetch_related('attachments', 'mentions__mentioned_user', 'reactions__user')
             .get(id=message.id)
         )
@@ -271,6 +341,203 @@ def send_group_message_api(request, group_id):
         raise
     except Exception as e:
         return _server_error_response('发送群组消息错误', e)
+
+
+@require_http_methods(["POST"])
+@login_required
+def share_note_to_group_api(request, group_id):
+    try:
+        from messaging.models import GroupMessage, GroupNoteShare, MessageGroup
+        from moderation.models import UserSanction
+        from notes.models import Note
+        from message_groups.security import check_group_message_security
+
+        allowed, error_response = check_group_message_security(request.user.id, group_id)
+        if not allowed:
+            return error_response
+
+        data = json.loads(request.body or '{}')
+        note_id = data.get('note_id')
+        if not note_id:
+            return JsonResponse({'error': '缺少 note_id'}, status=400)
+
+        note = get_object_or_404(Note, id=note_id, author=request.user, is_trashed=False)
+        if note.is_secret:
+            return JsonResponse({
+                'error': '保密笔记不能通过普通群聊分享',
+                'code': 'secret_note_share_forbidden',
+            }, status=400)
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+        send_error = _can_send_group_message(group, membership)
+        if send_error is not None:
+            return send_error
+        if UserSanction.is_muted(request.user) is not None:
+            return JsonResponse({'error': '你已被禁止发送私信'}, status=403)
+
+        title = (note.title or '未命名笔记').strip()[:255]
+        raw_content = _body_string(data, 'content')
+        content = raw_content or f'[笔记] {title}'
+        if len(content) > MESSAGE_CONTENT_MAX_LENGTH:
+            return JsonResponse({'error': f'消息内容不能超过{MESSAGE_CONTENT_MAX_LENGTH}字'}, status=400)
+
+        with transaction.atomic():
+            message = GroupMessage.objects.create(
+                group=group,
+                sender=request.user,
+                content=content,
+                searchable_text=f'{content}\n{title}'.strip(),
+            )
+            GroupNoteShare.objects.create(
+                group=group,
+                message=message,
+                note=note,
+                shared_by=request.user,
+                title_snapshot=title,
+                was_public_at_share=note.is_public,
+            )
+            group.updated_at = timezone.now()
+            group.save(update_fields=['updated_at'])
+            membership.force_unread = False
+            membership.last_read_at = timezone.now()
+            membership.save(update_fields=['force_unread', 'last_read_at'])
+
+        message = (
+            GroupMessage.objects
+            .select_related('sender', 'group', 'note_share__note__author', 'note_share__shared_by')
+            .prefetch_related('attachments', 'mentions__mentioned_user', 'reactions__user')
+            .get(id=message.id)
+        )
+        return JsonResponse({
+            'status': 'success',
+            'message': _group_message_payload(message, viewer=request.user),
+        }, status=201)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('分享群笔记错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def get_group_note_share_api(request, group_id, share_id):
+    try:
+        from django.db.models import F
+        from messaging.models import GroupNoteShare, GroupNoteShareRead, MessageGroup
+        from notes.views.note.common import build_note_response_data
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return error
+
+        share = get_object_or_404(
+            GroupNoteShare.objects.select_related('note__author', 'shared_by', 'message', 'group'),
+            id=share_id,
+            group=group,
+        )
+        if share.revoked_at is not None:
+            return JsonResponse({'error': '该笔记分享已撤销'}, status=404)
+        if not _visible_group_messages_qs(group, membership).filter(id=share.message_id).exists():
+            return JsonResponse({'error': '无权访问该笔记分享'}, status=403)
+
+        note = share.note
+        if note.is_trashed:
+            return JsonResponse({'error': '该笔记已不可用'}, status=404)
+        if note.is_secret:
+            return JsonResponse({
+                'error': '保密笔记需要通过保密柜访问',
+                'code': 'secret_note_requires_vault',
+            }, status=403)
+
+        if request.user.id != share.shared_by_id:
+            record, _ = GroupNoteShareRead.objects.update_or_create(
+                share=share,
+                reader=request.user,
+                defaults={'last_read_at': timezone.now()},
+            )
+            GroupNoteShareRead.objects.filter(id=record.id).update(
+                view_count=F('view_count') + 1,
+                last_read_at=timezone.now(),
+            )
+
+        return JsonResponse({
+            'status': 'success',
+            'share': {
+                'id': share.id,
+                'group_id': group.id,
+                'message_id': share.message_id,
+                'shared_by': _user_payload(share.shared_by),
+                'created_at': share.created_at.isoformat() if share.created_at else None,
+                'allow_forwarding': share.allow_forwarding,
+                'requires_group_membership': not note.is_public,
+                'view_url': f'/messages/groups/{group.id}/note-shares/{share.id}/view/',
+            },
+            'note': build_note_response_data(note, include_content=True, include_all_fields=True),
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('读取群笔记分享错误', e)
+
+
+@require_http_methods(["GET"])
+@login_required
+def group_note_share_view(request, group_id, share_id):
+    try:
+        from django.db.models import F
+        from messaging.models import GroupNoteShare, GroupNoteShareRead, MessageGroup
+        from messaging.views.note_share_reader import render_note_share_error, render_note_share_reader
+
+        group = get_object_or_404(MessageGroup, id=group_id, is_active=True)
+        membership, error = _require_group_member(group, request.user)
+        if error is not None:
+            return render_note_share_error(request, '你需要先加入该群，才能阅览这篇笔记分享。', status=403)
+
+        share = get_object_or_404(
+            GroupNoteShare.objects.select_related('note__author', 'shared_by', 'message', 'group'),
+            id=share_id,
+            group=group,
+        )
+        if share.revoked_at is not None:
+            return render_note_share_error(request, '这篇笔记分享已被撤销。', status=404)
+        if not _visible_group_messages_qs(group, membership).filter(id=share.message_id).exists():
+            return render_note_share_error(request, '你无权阅览这篇笔记分享。', status=403)
+
+        note = share.note
+        if note.is_trashed:
+            return render_note_share_error(request, '这篇笔记已不可用。', status=404)
+        if note.is_secret:
+            return render_note_share_error(request, '保密笔记需要通过保密柜访问，暂不支持消息窗口阅览。', status=403)
+
+        if request.user.id != share.shared_by_id:
+            record, _ = GroupNoteShareRead.objects.update_or_create(
+                share=share,
+                reader=request.user,
+                defaults={'last_read_at': timezone.now()},
+            )
+            GroupNoteShareRead.objects.filter(id=record.id).update(
+                view_count=F('view_count') + 1,
+                last_read_at=timezone.now(),
+            )
+
+        return render_note_share_reader(request, note, {
+            'scope': 'group',
+            'label': '群聊笔记分享',
+            'group_name': group.name,
+            'shared_by': share.shared_by.username,
+            'created_at': share.created_at,
+            'requires_group_membership': not note.is_public,
+        })
+    except Http404:
+        raise
+    except Exception as e:
+        return _server_error_response('打开群聊笔记分享页面错误', e)
 
 
 @require_http_methods(["POST"])
@@ -289,6 +556,11 @@ def pin_group_message_api(request, group_id, message_id):
             return manager_error
 
         message = get_object_or_404(_visible_group_messages_qs(group, membership), id=message_id)
+        if (
+            action != 'unpin'
+            and message.visibility_scope != GroupMessage.VISIBILITY_ALL
+        ):
+            return JsonResponse({'error': 'Private moderation notices cannot be pinned'}, status=400)
         if action == 'unpin' or group.pinned_message_id == message.id:
             group.pinned_message = None
             audit_action = 'group_message_unpin'

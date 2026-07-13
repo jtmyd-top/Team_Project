@@ -1,4 +1,8 @@
 """两因素认证 (2FA) 相关端点：启用/禁用/验证/备用码。"""
+from datetime import datetime, timedelta
+
+from django.utils import timezone
+
 from ._shared import *
 from accounts.models import TrustedDevice
 from .login import (
@@ -265,6 +269,31 @@ def disable_2fa(request):
         return JsonResponse({"status": "error", "message": message}, status=400)
 
     # 禁用2FA并清除相关数据
+    from messaging.models import MessageGroup
+    from notes.models import Note
+
+    secret_notes_count = Note.objects.filter(
+        author=request.user,
+        is_secret=True,
+    ).count()
+    owned_groups_count = MessageGroup.objects.filter(
+        owner=request.user,
+        is_active=True,
+    ).count()
+    if secret_notes_count or owned_groups_count:
+        reasons = []
+        if secret_notes_count:
+            reasons.append(f'保密柜中仍有 {secret_notes_count} 条保密笔记')
+        if owned_groups_count:
+            reasons.append(f'你仍是 {owned_groups_count} 个活跃群组的群主')
+        return JsonResponse({
+            "status": "error",
+            "code": "cannot_disable_2fa_dependencies",
+            "message": "当前账号仍有关联的高安全资源，暂不能关闭 2FA：" + "；".join(reasons),
+            "secret_notes_count": secret_notes_count,
+            "owned_groups_count": owned_groups_count,
+        }, status=400)
+
     profile.two_fa_enabled = False
     profile.totp_secret = ""
     profile.backup_codes = []
@@ -320,6 +349,141 @@ def generate_backup_codes_list():
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         codes.append(code)
     return codes
+
+
+def _build_totp_setup_payload(request, secret):
+    """Build the QR code and manual secret payload for a TOTP setup flow."""
+    totp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=request.user.email,
+        issuer_name="知识管理系统"
+    )
+
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(totp_uri)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = BytesIO()
+    img.save(buffer, format='PNG')
+    qr_code_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+    return {
+        "qr_code": f"data:image/png;base64,{qr_code_base64}",
+        "secret": secret,
+    }
+
+
+@login_required
+@require_http_methods(["POST"])
+@transaction.atomic
+def start_update_totp(request):
+    """
+    Start a TOTP rebind flow.
+    The current TOTP secret remains active until the new code is verified.
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    password = data.get("password", "")
+    code = data.get("code", "").strip()
+    use_backup = data.get("use_backup", False)
+    profile = request.user.profile
+
+    if not profile.two_fa_enabled or profile.two_fa_method != "totp":
+        return JsonResponse({"status": "error", "message": "当前账号未启用验证器应用"}, status=400)
+
+    if not request.user.check_password(password):
+        return JsonResponse({"status": "error", "message": "密码错误"}, status=400)
+
+    if not code:
+        return JsonResponse({"status": "error", "message": "请输入当前 2FA 验证码或备用码"}, status=400)
+
+    success, message = verify_2fa_for_request(request, code, use_backup)
+    if not success:
+        return JsonResponse({"status": "error", "message": message}, status=400)
+
+    secret = pyotp.random_base32()
+    request.session["temp_update_totp_secret"] = {
+        "secret": secret,
+        "created_at": timezone.now().isoformat(),
+        "attempts": 0,
+    }
+    request.session.modified = True
+
+    payload = _build_totp_setup_payload(request, secret)
+    return JsonResponse({
+        "status": "success",
+        "message": "请扫描新的二维码，并输入新验证器中的验证码",
+        "requires_verification": True,
+        **payload,
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+@transaction.atomic
+def verify_update_totp(request):
+    """
+    Verify and finish a TOTP rebind flow.
+    Old authenticator and old backup codes are invalidated only after success.
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "JSON 格式错误"}, status=400)
+
+    code = data.get("code", "").strip()
+    profile = request.user.profile
+
+    if not profile.two_fa_enabled or profile.two_fa_method != "totp":
+        return JsonResponse({"status": "error", "message": "当前账号未启用验证器应用"}, status=400)
+
+    temp_state = request.session.get("temp_update_totp_secret")
+    if not isinstance(temp_state, dict) or not temp_state.get("secret"):
+        request.session.pop("temp_update_totp_secret", None)
+        return JsonResponse({"status": "error", "message": "换绑会话已过期，请重新开始"}, status=400)
+    try:
+        created_at = datetime.fromisoformat(temp_state["created_at"])
+        if timezone.is_naive(created_at):
+            created_at = timezone.make_aware(created_at, timezone.get_current_timezone())
+    except (KeyError, TypeError, ValueError):
+        request.session.pop("temp_update_totp_secret", None)
+        return JsonResponse({"status": "error", "message": "换绑会话已过期，请重新开始"}, status=400)
+    if timezone.now() - created_at > timedelta(minutes=5):
+        request.session.pop("temp_update_totp_secret", None)
+        return JsonResponse({"status": "error", "message": "换绑会话已过期，请重新开始"}, status=400)
+    temp_secret = temp_state["secret"]
+
+    if not code:
+        return JsonResponse({"status": "error", "message": "请输入新验证器中的验证码"}, status=400)
+
+    totp = pyotp.TOTP(temp_secret)
+    if not totp.verify(code, valid_window=1):
+        attempts = int(temp_state.get("attempts", 0)) + 1
+        if attempts >= 5:
+            request.session.pop("temp_update_totp_secret", None)
+            return JsonResponse({"status": "error", "message": "验证失败次数过多，请重新开始换绑"}, status=400)
+        temp_state["attempts"] = attempts
+        request.session["temp_update_totp_secret"] = temp_state
+        request.session.modified = True
+        return JsonResponse({"status": "error", "message": "验证码错误"}, status=400)
+
+    backup_codes = generate_backup_codes_list()
+    profile.totp_secret = temp_secret
+    profile.two_fa_enabled = True
+    profile.two_fa_method = "totp"
+    profile.backup_codes = [hashlib.sha256(code.encode()).hexdigest() for code in backup_codes]
+    profile.save(update_fields=["totp_secret", "two_fa_enabled", "two_fa_method", "backup_codes"])
+
+    request.session.pop("temp_update_totp_secret", None)
+
+    return JsonResponse({
+        "status": "success",
+        "message": "验证器应用已更新，旧验证器和旧备用码已失效",
+        "backup_codes": backup_codes,
+    })
 
 
 # ==================== 两因素认证登录验证 API ====================

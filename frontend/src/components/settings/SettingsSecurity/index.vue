@@ -43,6 +43,9 @@
         </el-alert>
 
         <div class="security-actions">
+          <el-button v-if="userStore.two_fa_method === 'totp'" @click="openTotpUpdateDialog">
+            更换验证器应用
+          </el-button>
           <el-button @click="showBackupCodesDialog = true">
             管理备用验证码
           </el-button>
@@ -52,6 +55,8 @@
         </div>
       </div>
     </div>
+
+    <SecurityDevices />
 
     <!-- 修改密码对话框 -->
     <el-dialog
@@ -316,6 +321,120 @@
       </template>
     </el-dialog>
 
+    <!-- 更换验证器应用对话框 -->
+    <el-dialog
+      v-model="showTotpUpdateDialog"
+      title="更换验证器应用"
+      width="520px"
+      :close-on-click-modal="false"
+      @close="cancelTotpUpdate">
+
+      <div v-if="totpUpdate.step === 'verify-current'" class="totp-update-step">
+        <el-alert type="info" :closable="false" style="margin-bottom: 16px;">
+          更换前需要验证当前密码和当前 2FA 凭证。验证通过后，旧验证器仍会保持可用，直到新验证器绑定成功。
+        </el-alert>
+
+        <el-form label-position="top">
+          <el-form-item label="当前密码">
+            <el-input
+              v-model="totpUpdate.password"
+              type="password"
+              placeholder="请输入您的密码"
+              show-password
+              clearable>
+            </el-input>
+          </el-form-item>
+          <el-form-item :label="totpUpdate.useBackup ? '备用验证码' : '当前验证器验证码'">
+            <el-input
+              v-model="totpUpdate.currentCode"
+              :placeholder="totpUpdate.useBackup ? '请输入 8 位备用码' : '请输入当前验证器中的 6 位验证码'"
+              :maxlength="totpUpdate.useBackup ? 8 : 6"
+              clearable>
+            </el-input>
+          </el-form-item>
+          <div class="two-fa-actions">
+            <el-button
+              type="text"
+              size="small"
+              @click="toggleTotpUpdateBackupCode"
+              class="backup-code-toggle">
+              <i :class="totpUpdate.useBackup ? 'fas fa-mobile-alt' : 'fas fa-key'"></i>
+              {{ totpUpdate.useBackup ? '使用验证器验证码' : '使用备用验证码' }}
+            </el-button>
+          </div>
+        </el-form>
+      </div>
+
+      <div v-else-if="totpUpdate.step === 'scan-new'" class="totp-update-step">
+        <el-steps :active="1" finish-status="success" style="margin-bottom: 24px;">
+          <el-step title="验证身份"></el-step>
+          <el-step title="绑定新验证器"></el-step>
+          <el-step title="保存备用码"></el-step>
+        </el-steps>
+
+        <div class="qr-code-section">
+          <p style="margin-bottom: 16px;">
+            使用新的验证器应用扫描二维码：
+          </p>
+          <div class="qr-code-container">
+            <img :src="totpUpdate.qrCode" alt="New TOTP QR Code">
+          </div>
+          <p class="manual-secret">
+            密钥：<code>{{ totpUpdate.secret }}</code>
+          </p>
+        </div>
+
+        <el-form style="margin-top: 24px;">
+          <el-form-item label="新验证码">
+            <el-input
+              v-model="totpUpdate.newCode"
+              placeholder="请输入新验证器中的 6 位验证码"
+              maxlength="6"
+              clearable>
+            </el-input>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div v-else-if="totpUpdate.step === 'backup-codes'" class="totp-update-step">
+        <el-alert type="warning" :closable="false" style="margin-bottom: 16px;">
+          验证器应用已更新。旧验证器和旧备用码已经失效，请妥善保存下方新的备用验证码。
+        </el-alert>
+
+        <div class="backup-codes-container">
+          <div v-for="code in totpUpdate.backupCodes" :key="code" class="backup-code">
+            {{ code }}
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; text-align: center;">
+          <el-button type="primary" @click="copyTotpUpdateBackupCodes">
+            <i class="fas fa-copy"></i> 复制备用码
+          </el-button>
+        </div>
+      </div>
+
+      <template #footer>
+        <div v-if="totpUpdate.step === 'verify-current'">
+          <el-button @click="cancelTotpUpdate">取消</el-button>
+          <el-button type="primary" :loading="totpUpdate.loading" @click="startTotpUpdate">
+            验证并生成新二维码
+          </el-button>
+        </div>
+        <div v-else-if="totpUpdate.step === 'scan-new'">
+          <el-button @click="cancelTotpUpdate">取消</el-button>
+          <el-button type="primary" :loading="totpUpdate.loading" @click="verifyTotpUpdate">
+            完成换绑
+          </el-button>
+        </div>
+        <div v-else-if="totpUpdate.step === 'backup-codes'">
+          <el-button type="primary" @click="finishTotpUpdate">
+            我已保存，完成
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 禁用2FA对话框 -->
     <el-dialog
       v-model="show2faDisableDialog"
@@ -428,6 +547,7 @@
 
 <script setup>
 import { useSettingsSecurity } from '@composables/useSettingsSecurity.js';
+import SecurityDevices from '@components/settings/SecurityDevices/index.vue';
 import '@/assets/styles/components/settings-security.css';
 
 const {
@@ -442,11 +562,13 @@ const {
   show2faSetupDialog,
   show2faDisableDialog,
   showBackupCodesDialog,
+  showTotpUpdateDialog,
 
   // Form states
   passwordForm,
   twoFaSetup,
   twoFaDisable,
+  totpUpdate,
   backupCodes,
 
   // Methods
@@ -462,6 +584,13 @@ const {
   disable2fa,
   sendDisable2faCode,
   toggleDisableBackupCode,
+  openTotpUpdateDialog,
+  startTotpUpdate,
+  verifyTotpUpdate,
+  finishTotpUpdate,
+  cancelTotpUpdate,
+  toggleTotpUpdateBackupCode,
+  copyTotpUpdateBackupCodes,
   regenerateBackupCodes,
   copyNewBackupCodes,
   closeBackupCodesDialog,

@@ -26,7 +26,11 @@ from knowledge_project.views import upload as upload_views
 from ._helpers import login, make_user, parse
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    # Tests call Django directly rather than through the HTTPS reverse proxy.
+    SECURE_SSL_REDIRECT=False,
+)
 class _UploadTestBase(TestCase):
     def setUp(self):
         cache.clear()
@@ -128,6 +132,19 @@ class ImageUploadViewTests(_UploadTestBase):
             response = self.client.post(reverse('image_upload_view'), {'file': upload})
 
         self.assertEqual(response.status_code, 429)
+        self.assertFalse(Asset.objects.filter(uploader=user).exists())
+
+    @override_settings(USER_STORAGE_QUOTA_BYTES=8)
+    def test_rejects_upload_when_storage_quota_exceeded(self):
+        user = make_user('iu09_quota')
+        login(self.client, user)
+        upload = SimpleUploadedFile('quota.png', PNG_BYTES, content_type='image/png')
+
+        response = self.client.post(reverse('image_upload_view'), {'file': upload})
+        body = parse(response)
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(body['code'], 'storage_quota_exceeded')
         self.assertFalse(Asset.objects.filter(uploader=user).exists())
 
 
@@ -315,7 +332,11 @@ class ProtectedMediaViewTests(_UploadTestBase):
         self.assertEqual(response.status_code, 404)
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    # Tests call Django directly rather than through the HTTPS reverse proxy.
+    SECURE_SSL_REDIRECT=False,
+)
 class _UploadTransactionTestBase(TransactionTestCase):
     reset_sequences = True
 

@@ -2,7 +2,7 @@ from django.urls import path
 
 from . import auth as auth_views
 from . import captcha as captcha_views
-from . import follow_views, profile_views
+from . import data_views, follow_views, profile_views
 
 
 urlpatterns = [
@@ -21,6 +21,8 @@ urlpatterns = [
     path('api/security/change-password/', auth_views.change_password, name='change_password'),
     path('api/security/enable-2fa/', auth_views.enable_2fa, name='enable_2fa'),
     path('api/security/verify-2fa-setup/', auth_views.verify_2fa_setup, name='verify_2fa_setup'),
+    path('api/security/update-totp/start/', auth_views.start_update_totp, name='start_update_totp'),
+    path('api/security/update-totp/verify/', auth_views.verify_update_totp, name='verify_update_totp'),
     path('api/security/disable-2fa/', auth_views.disable_2fa, name='disable_2fa'),
     path(
         'api/security/regenerate-backup-codes/',
@@ -36,6 +38,9 @@ urlpatterns = [
     path('update-email/', profile_views.update_email, name='update_email'),
     path('api/toggle-like/', profile_views.toggle_profile_like, name='toggle_profile_like'),
     path('api/security/devices/', profile_views.security_devices_api, name='security_devices_api'),
+    path('api/storage/quota/', profile_views.storage_quota_api, name='storage_quota_api'),
+    path('api/search/', data_views.global_search_api, name='global_search_api'),
+    path('api/account/export/', data_views.export_my_data_api, name='export_my_data_api'),
     path(
         'api/security/devices/<int:device_id>/revoke/',
         profile_views.revoke_security_device_api,

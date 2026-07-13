@@ -27,7 +27,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from notes.models import Asset, Folder, Note, NoteAsset, NoteHistory
+from notes.models import Asset, Folder, Note, NoteAsset, NoteCollaborator, NoteHistory
 
 from ._helpers import login, make_user, parse, post_json
 
@@ -355,6 +355,46 @@ class ToggleSecretApiTests(_NoteTestBase):
         login(self.client, intruder)
         response = post_json(self.client, reverse('toggle_secret_api', args=[note.id]))
         self.assertEqual(response.status_code, 404)
+
+    def test_toggle_secret_revokes_existing_collaborators(self):
+        owner = make_user('toggler04')
+        collaborator = make_user('toggler05')
+        note = Note.objects.create(author=owner, title='t', content='')
+        NoteCollaborator.objects.create(note=note, user=collaborator, added_by=owner)
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('toggle_secret_api', args=[note.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(NoteCollaborator.objects.filter(note=note).exists())
+
+
+class NoteCollaborationApiTests(_NoteTestBase):
+    def test_secret_note_rejects_collaborator_listing(self):
+        owner = make_user('collab_secret_owner')
+        collaborator = make_user('collab_secret_user')
+        note = Note.objects.create(author=owner, title='secret', content='', is_secret=True)
+        login(self.client, owner)
+
+        response = self.client.get(reverse('note_collaborators_api', args=[note.id]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('保密笔记', parse(response)['error'])
+
+    def test_secret_note_rejects_adding_collaborator(self):
+        owner = make_user('collab_post_owner')
+        collaborator = make_user('collab_post_user')
+        note = Note.objects.create(author=owner, title='secret', content='', is_secret=True)
+        login(self.client, owner)
+
+        response = post_json(
+            self.client,
+            reverse('note_collaborators_api', args=[note.id]),
+            {'user_id': collaborator.id, 'role': 'reader'},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(NoteCollaborator.objects.filter(note=note, user=collaborator).exists())
 
 
 # =========================================================================

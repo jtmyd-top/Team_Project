@@ -7,6 +7,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // State
   const heartbeat = ref(null)
   const assets = ref(null)
+  const operations = ref(null)
   const vaultAlerts = ref([])
   const trashBacklog = ref(null)
   const contentTrend = ref(null)
@@ -136,6 +137,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
+  async function fetchOperations() {
+    const data = await fetchSection('operations')
+    if (data && data.operations) {
+      operations.value = data.operations
+      lastUpdated.value = new Date()
+    }
+  }
+
   async function fetchSlowSections() {
     const data = await fetchSection('trash_backlog')
     if (data && data.trash_backlog) trashBacklog.value = data.trash_backlog
@@ -155,6 +164,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     const data6 = await fetchSection('error_logs')
     if (data6 && data6.error_logs) errorLogs.value = data6.error_logs
 
+    await fetchOperations()
     lastUpdated.value = new Date()
   }
 
@@ -167,6 +177,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         pushHistory(data.heartbeat)
       }
       if (data.assets) assets.value = data.assets
+      if (data.operations) operations.value = data.operations
       if (data.vault_alerts) vaultAlerts.value = data.vault_alerts
       if (data.trash_backlog) trashBacklog.value = data.trash_backlog
       if (data.content_trend) contentTrend.value = data.content_trend
@@ -218,13 +229,13 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
 
   return {
-    heartbeat, assets, vaultAlerts,
+    heartbeat, assets, operations, vaultAlerts,
     trashBacklog, contentTrend, loginMonitor, auditLog,
     serviceHealth, errorLogs,
     cpuHistory, memHistory, netSentHistory, netRecvHistory,
     loading, error, connected, lastUpdated, reconnectCountdown,
     alertCount, criticalCount, suspiciousCount,
     startPolling, stopPolling, manualRefresh, banIp,
-    fetchAll, fetchHeartbeat, fetchAssets, fetchVaultAlerts, fetchSlowSections,
+    fetchAll, fetchHeartbeat, fetchAssets, fetchVaultAlerts, fetchOperations, fetchSlowSections,
   }
 })

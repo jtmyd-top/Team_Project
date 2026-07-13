@@ -7,7 +7,9 @@ from notes.views.note.common import _invalidate_public_notes_cache
 def note_comments_api(request, note_id):
     """获取指定公开笔记的评论列表（树形结构：顶级评论 + 回复）"""
     try:
-        note = get_object_or_404(Note, id=note_id, is_public=True, is_secret=False, is_trashed=False)
+        note = get_object_or_404(Note, id=note_id, is_secret=False, is_trashed=False)
+        if not note.is_public and not note.has_read_permission(request.user):
+            return JsonResponse({'error': '无权访问此笔记的评论'}, status=403)
         try:
             page = max(1, int(request.GET.get('page', 1) or 1))
         except (TypeError, ValueError):
@@ -43,6 +45,10 @@ def note_comments_api(request, note_id):
                 'author_id': c.author.id,
                 'author_avatar': get_avatar(c.author),
                 'content': c.content,
+                'anchor_text': c.anchor_text,
+                'anchor_start': c.anchor_start,
+                'anchor_end': c.anchor_end,
+                'anchor_context': c.anchor_context,
                 'created_at': c.created_at.strftime('%Y-%m-%d %H:%M'),
                 'is_owner': request.user.is_authenticated and request.user == c.author,
                 'replies': [
@@ -52,6 +58,10 @@ def note_comments_api(request, note_id):
                         'author_id': r.author.id,
                         'author_avatar': get_avatar(r.author),
                         'content': r.content,
+                        'anchor_text': r.anchor_text,
+                        'anchor_start': r.anchor_start,
+                        'anchor_end': r.anchor_end,
+                        'anchor_context': r.anchor_context,
                         'created_at': r.created_at.strftime('%Y-%m-%d %H:%M'),
                         'is_owner': request.user.is_authenticated and request.user == r.author,
                     }
@@ -89,10 +99,16 @@ def note_comment_create_api(request, note_id):
                 message = f'你已被禁止发表评论，限制将于 {comment_ban.expires_at:%Y-%m-%d %H:%M} 解除。'
             return JsonResponse({'error': message, 'message': message}, status=403)
 
-        note = get_object_or_404(Note, id=note_id, is_public=True, is_secret=False, is_trashed=False)
+        note = get_object_or_404(Note, id=note_id, is_secret=False, is_trashed=False)
+        if not note.is_public and not note.has_comment_permission(request.user):
+            return JsonResponse({'error': '无权在此笔记中评论'}, status=403)
         data = json.loads(request.body)
         content = data.get('content', '').strip()
         parent_id = data.get('parent_id')
+        anchor_text = str(data.get('anchor_text') or '').strip()
+        anchor_context = str(data.get('anchor_context') or '').strip()[:240]
+        anchor_start = data.get('anchor_start')
+        anchor_end = data.get('anchor_end')
 
         if not content:
             return JsonResponse({'error': '评论内容不能为空'}, status=400)
@@ -102,12 +118,34 @@ def note_comment_create_api(request, note_id):
         parent = None
         if parent_id:
             parent = get_object_or_404(NoteComment, id=parent_id, note=note)
+            # Replies belong to the parent thread, not a second independent selection.
+            anchor_text = ''
+            anchor_context = ''
+            anchor_start = None
+            anchor_end = None
+        elif anchor_text:
+            if len(anchor_text) > 1000:
+                return JsonResponse({'error': '选中文字不能超过1000个字符'}, status=400)
+            try:
+                anchor_start = int(anchor_start)
+                anchor_end = int(anchor_end)
+            except (TypeError, ValueError):
+                return JsonResponse({'error': '批注位置无效'}, status=400)
+            if anchor_start < 0 or anchor_end <= anchor_start:
+                return JsonResponse({'error': '批注位置无效'}, status=400)
+        else:
+            anchor_start = None
+            anchor_end = None
 
         comment = NoteComment.objects.create(
             note=note,
             author=request.user,
             content=content,
-            parent=parent
+            parent=parent,
+            anchor_text=anchor_text,
+            anchor_start=anchor_start,
+            anchor_end=anchor_end,
+            anchor_context=anchor_context,
         )
         _invalidate_public_notes_cache()
 
@@ -121,6 +159,7 @@ def note_comment_create_api(request, note_id):
                 public_id=str(note.public_id),
                 comment_id=comment.id,
                 parent_comment_id=parent.id,
+                anchor_text=anchor_text,
             )
         if note.author_id != request.user.id and (not parent or parent.author_id != note.author_id):
             notify_user(
@@ -131,6 +170,7 @@ def note_comment_create_api(request, note_id):
                 note_id=note.id,
                 public_id=str(note.public_id),
                 comment_id=comment.id,
+                anchor_text=anchor_text,
             )
 
         def get_avatar(user):
@@ -147,6 +187,10 @@ def note_comment_create_api(request, note_id):
             'author_id': comment.author.id,
             'author_avatar': get_avatar(comment.author),
             'content': comment.content,
+            'anchor_text': comment.anchor_text,
+            'anchor_start': comment.anchor_start,
+            'anchor_end': comment.anchor_end,
+            'anchor_context': comment.anchor_context,
             'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M'),
             'parent_id': parent_id,
             'is_owner': True,

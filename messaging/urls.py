@@ -11,8 +11,28 @@ urlpatterns = [
         name='blocked_message_attachment_media_api',
     ),
     path('api/messages/send/', views.send_message_api, name='send_message_api'),
+    path('api/messages/notes/share/', views.share_note_to_user_api, name='share_note_to_user_api'),
+    path('api/messages/notes/shares/', views.list_note_shares_api, name='list_note_shares_api'),
+    path(
+        'api/messages/notes/shares/<str:scope>/<int:share_id>/forwarding/',
+        views.update_note_share_forwarding_api,
+        name='update_note_share_forwarding_api',
+    ),
+    path(
+        'api/messages/notes/shares/<str:scope>/<int:share_id>/reads/',
+        views.list_note_share_reads_api,
+        name='list_note_share_reads_api',
+    ),
+    path(
+        'api/messages/notes/shares/<str:scope>/<int:share_id>/revoke/',
+        views.revoke_note_share_api,
+        name='revoke_note_share_api',
+    ),
+    path('api/messages/note-shares/<int:share_id>/', views.get_direct_note_share_api, name='get_direct_note_share_api'),
+    path('messages/note-shares/<int:share_id>/view/', views.direct_note_share_view, name='direct_note_share_view'),
     path('api/messages/forward/', views.forward_message_api, name='forward_message_api'),
     path('api/messages/attachments/upload/', views.upload_message_attachment_api, name='upload_message_attachment_api'),
+    path('api/messages/attachments/mine/', views.list_my_message_attachments_api, name='list_my_message_attachments_api'),
     path(
         'api/messages/attachments/<int:attachment_id>/file/',
         views.message_attachment_file_api,
@@ -34,6 +54,7 @@ urlpatterns = [
     path('api/messages/preference/', views.get_message_preference_api, name='get_message_preference_api'),
     path('api/messages/preference/update/', views.update_message_preference_api, name='update_message_preference_api'),
     path('api/messages/bulk-delete/', views.bulk_delete_messages_api, name='bulk_delete_messages_api'),
+    path('api/messages/<int:message_id>/edit/', views.edit_message_api, name='edit_message_api'),
     path('api/messages/<int:message_id>/delete/', views.delete_message_api, name='delete_message_api'),
     path('api/messages/conversation/clear/', views.clear_conversation_api, name='clear_conversation_api'),
     path(
@@ -48,6 +69,8 @@ urlpatterns = [
     ),
     path('api/messages/conversation/pin/', views.toggle_pin_api, name='toggle_pin_api'),
     path('api/messages/conversation/mute/', views.toggle_mute_api, name='toggle_mute_api'),
+    path('api/messages/conversation/direct-mute/', views.set_direct_message_mute_api, name='set_direct_message_mute_api'),
+    path('api/messages/conversation/direct-mute/clear/', views.clear_direct_message_mute_api, name='clear_direct_message_mute_api'),
     path('api/messages/conversation/archive/', views.toggle_archive_api, name='toggle_archive_api'),
     path('api/messages/conversation/disappearing/', views.set_disappearing_api, name='set_disappearing_api'),
     path(

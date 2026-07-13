@@ -9,6 +9,7 @@ import platform
 import re as _re
 import time
 from datetime import datetime, time as datetime_time, timedelta
+from pathlib import Path
 
 import psutil
 from django.conf import settings
@@ -17,7 +18,7 @@ from django.core.cache import cache
 from django.db import connections
 from django.db.models import Count, F
 from django.db.models.functions import TruncDate
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -35,7 +36,8 @@ def _aware_day_start(day):
 
 
 def _dashboard_days(now, days):
-    return [(now - timedelta(days=i)).date() for i in range(days - 1, -1, -1)]
+    local_today = timezone.localtime(now).date()
+    return [local_today - timedelta(days=i) for i in range(days - 1, -1, -1)]
 
 
 def _daily_count_map(queryset, date_field, start, end, alias='day'):
@@ -98,6 +100,26 @@ def healthz(request):
 
 
 @require_http_methods(["GET"])
+def service_worker(request):
+    """Serve the worker from the origin root so it can control the whole site."""
+    candidates = [
+        Path(settings.STATIC_ROOT) / 'dist' / 'sw.js',
+        Path(settings.BASE_DIR) / 'static' / 'dist' / 'sw.js',
+    ]
+    worker_path = next((path for path in candidates if path.is_file()), None)
+    if worker_path is None:
+        raise Http404('Service worker asset has not been built.')
+
+    response = FileResponse(
+        worker_path.open('rb'),
+        content_type='application/javascript; charset=utf-8',
+    )
+    response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response['Service-Worker-Allowed'] = '/'
+    return response
+
+
+@require_http_methods(["GET"])
 def readyz(request):
     cache_status = _cache_health_details()
     db_status = _database_health_details()
@@ -142,7 +164,7 @@ def dashboard_view(request):
 def dashboard_stats_api(request):
     """
     战情室数据 API，仅超级管理员可访问
-    支持 ?section=heartbeat|assets|vault_alerts|trash_backlog|content_trend|login_monitor|audit_log|network|service_health|error_logs|all
+    支持 ?section=heartbeat|assets|operations|vault_alerts|trash_backlog|content_trend|login_monitor|audit_log|network|service_health|error_logs|all
     """
     if not request.user.is_superuser:
         return JsonResponse({'status': 'error', 'message': '权限不足'}, status=403)
@@ -221,6 +243,58 @@ def dashboard_stats_api(request):
             }
             cache.set('dashboard_assets', assets_data, 300)
             data['assets'] = assets_data
+
+    # ---- operations: 核心协作业务和待处理事项 ----
+    if section in ('operations', 'all'):
+        try:
+            from django.contrib.auth.models import User as AuthUser
+            from messaging.models import GroupJoinRequest, GroupMessage, Message, MessageGroup
+            from moderation.models import (
+                AttachmentReport,
+                CommentReport,
+                MessageReport,
+                NoteReport,
+            )
+
+            now = timezone.now()
+            days = _dashboard_days(now, 7)
+            start = _aware_day_start(days[0])
+            end = _aware_day_start(days[-1] + timedelta(days=1))
+
+            direct_counts = _daily_count_map(Message.objects.all(), 'created_at', start, end)
+            group_counts = _daily_count_map(GroupMessage.objects.all(), 'created_at', start, end)
+            user_counts = _daily_count_map(AuthUser.objects.all(), 'date_joined', start, end)
+            direct_messages_7d = sum(direct_counts.values())
+            group_messages_7d = sum(group_counts.values())
+            pending_reports = sum((
+                AttachmentReport.objects.filter(status='pending').count(),
+                CommentReport.objects.filter(status='pending').count(),
+                MessageReport.objects.filter(status='pending').count(),
+                NoteReport.objects.filter(status='pending').count(),
+            ))
+            pending_join_requests = GroupJoinRequest.objects.filter(status='pending').count()
+
+            data['operations'] = {
+                'active_groups': MessageGroup.objects.filter(is_active=True).count(),
+                'messages_7d': direct_messages_7d + group_messages_7d,
+                'direct_messages_7d': direct_messages_7d,
+                'group_messages_7d': group_messages_7d,
+                'new_users_7d': sum(user_counts.values()),
+                'pending_reports': pending_reports,
+                'pending_join_requests': pending_join_requests,
+                'activity_trend': [
+                    {
+                        'date': day.strftime('%m-%d'),
+                        'direct': direct_counts.get(day, 0),
+                        'group': group_counts.get(day, 0),
+                        'users': user_counts.get(day, 0),
+                    }
+                    for day in days
+                ],
+            }
+        except Exception as exc:
+            logger.error("Dashboard operations error: %s", exc)
+            data['operations'] = None
 
     # ---- vault_alerts: 保密柜安全告警（从数据库持久化读取） ----
     if section in ('vault_alerts', 'all'):

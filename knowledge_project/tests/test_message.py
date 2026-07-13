@@ -23,7 +23,8 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+import re
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -34,8 +35,15 @@ from django.utils import timezone
 
 from messaging.models import (
     ConversationSettings,
+    DirectMessageMute,
+    DirectNoteShare,
+    DirectNoteShareRead,
     GroupMessage,
     GroupMessageMention,
+    GroupNoteShare,
+    GroupNoteShareRead,
+    GroupPoll,
+    GroupTask,
     Message,
     MessageAttachment,
     MessageGroup,
@@ -77,10 +85,28 @@ def _enable_messaging(user, mode: str = 'all') -> MessagePreference:
     return pref
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    # Tests call Django directly rather than through the HTTPS reverse proxy.
+    SECURE_SSL_REDIRECT=False,
+)
 class _MessageTestBase(TestCase):
     def setUp(self):
         cache.clear()
+
+
+class MessagePageTests(_MessageTestBase):
+    def test_messages_page_versions_shared_dialog_styles_with_the_message_bundle(self):
+        user = make_user('messages-page-user')
+        login(self.client, user)
+
+        response = self.client.get(reverse('messages'))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode('utf-8')
+        versions = re.findall(r'dist/(?:messages\.js|assets/(?:messages|index2)\.css)\?v=([0-9a-f]{20})', html)
+        self.assertEqual(len(versions), 3)
+        self.assertEqual(len(set(versions)), 1)
 
 
 # =========================================================================
@@ -242,6 +268,235 @@ class SendMessageApiTests(_MessageTestBase):
         self.assertIn(response.status_code, (302, 401, 403))
 
 
+    def test_sender_can_edit_private_message_inline(self):
+        sender = make_user('snd_edit_s')
+        recipient = make_user('snd_edit_r')
+        message = Message.objects.create(sender=sender, recipient=recipient, content='old private')
+        login(self.client, sender)
+
+        response = post_json(self.client, reverse('edit_message_api', args=[message.id]), {
+            'content': 'new private',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        message.refresh_from_db()
+        self.assertEqual(message.content, 'new private')
+        self.assertTrue(message.is_edited)
+        self.assertIsNotNone(message.edited_at)
+        body = parse(response)
+        self.assertEqual(body['message']['content'], 'new private')
+        self.assertTrue(body['message']['is_edited'])
+
+    def test_recipient_cannot_edit_private_message(self):
+        sender = make_user('snd_edit_forbidden_s')
+        recipient = make_user('snd_edit_forbidden_r')
+        message = Message.objects.create(sender=sender, recipient=recipient, content='locked')
+        login(self.client, recipient)
+
+        response = post_json(self.client, reverse('edit_message_api', args=[message.id]), {
+            'content': 'changed',
+        })
+
+        self.assertEqual(response.status_code, 403, response.content)
+        message.refresh_from_db()
+        self.assertEqual(message.content, 'locked')
+
+    def test_sender_can_share_private_note_to_direct_message(self):
+        sender = make_user('snd_note_share_s')
+        recipient = make_user('snd_note_share_r')
+        outsider = make_user('snd_note_share_o')
+        _enable_messaging(recipient)
+        note = Note.objects.create(
+            author=sender,
+            title='direct private note',
+            content='<p>direct body</p>',
+            is_public=False,
+        )
+
+        login(self.client, sender)
+        response = post_json(self.client, reverse('share_note_to_user_api'), {
+            'note_id': note.id,
+            'recipient_id': recipient.id,
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['message']['note_share']['title'], 'direct private note')
+        share = DirectNoteShare.objects.get(note=note, recipient=recipient)
+
+        self.client.logout()
+        login(self.client, recipient)
+        read_response = self.client.get(reverse('get_direct_note_share_api', args=[share.id]))
+        self.assertEqual(read_response.status_code, 200, read_response.content)
+        self.assertEqual(parse(read_response)['note']['content'], '<p>direct body</p>')
+
+        self.client.logout()
+        login(self.client, outsider)
+        forbidden = self.client.get(reverse('get_direct_note_share_api', args=[share.id]))
+        self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
+    def test_secret_note_cannot_be_shared_to_direct_message(self):
+        sender = make_user('snd_secret_note_s')
+        recipient = make_user('snd_secret_note_r')
+        _enable_messaging(recipient)
+        note = Note.objects.create(
+            author=sender,
+            title='secret direct note',
+            content='encrypted',
+            is_secret=True,
+        )
+
+        login(self.client, sender)
+        response = post_json(self.client, reverse('share_note_to_user_api'), {
+            'note_id': note.id,
+            'recipient_id': recipient.id,
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(DirectNoteShare.objects.filter(note=note).exists())
+
+    def test_sender_can_list_and_revoke_direct_note_shares(self):
+        sender = make_user('snd_share_center_s')
+        recipient = make_user('snd_share_center_r')
+        outsider = make_user('snd_share_center_o')
+        note = Note.objects.create(author=sender, title='direct center note', content='body')
+        message = Message.objects.create(sender=sender, recipient=recipient, content='shared note')
+        share = DirectNoteShare.objects.create(
+            message=message,
+            note=note,
+            shared_by=sender,
+            recipient=recipient,
+            title_snapshot=note.title,
+        )
+        login(self.client, sender)
+
+        list_body = parse(self.client.get(f"{reverse('list_note_shares_api')}?scope=direct"))
+        self.assertEqual(list_body['shares'][0]['scope'], 'direct')
+        self.assertEqual(list_body['shares'][0]['note']['title'], 'direct center note')
+        self.assertEqual(list_body['shares'][0]['target']['id'], recipient.id)
+
+        response = post_json(
+            self.client,
+            reverse('revoke_note_share_api', args=['direct', share.id]),
+            {},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        share.refresh_from_db()
+        self.assertIsNotNone(share.revoked_at)
+        self.assertTrue(parse(response)['share']['is_revoked'])
+
+        self.client.logout()
+        login(self.client, outsider)
+        forbidden = post_json(
+            self.client,
+            reverse('revoke_note_share_api', args=['direct', share.id]),
+            {},
+        )
+        self.assertEqual(forbidden.status_code, 404, forbidden.content)
+
+    def test_direct_note_share_tracks_recipient_read_and_owner_manages_forwarding(self):
+        sender = make_user('snd_share_read_sender')
+        recipient = make_user('snd_share_read_recipient')
+        _enable_messaging(recipient)
+        note = Note.objects.create(author=sender, title='read tracking note', content='body')
+
+        login(self.client, sender)
+        shared = post_json(self.client, reverse('share_note_to_user_api'), {
+            'note_id': note.id,
+            'recipient_id': recipient.id,
+        })
+        self.assertEqual(shared.status_code, 201, shared.content)
+        share = DirectNoteShare.objects.get(note=note, recipient=recipient)
+
+        own_read = self.client.get(reverse('get_direct_note_share_api', args=[share.id]))
+        self.assertEqual(own_read.status_code, 200, own_read.content)
+        self.assertFalse(DirectNoteShareRead.objects.filter(share=share).exists())
+
+        self.client.logout()
+        login(self.client, recipient)
+        read = self.client.get(reverse('get_direct_note_share_api', args=[share.id]))
+        self.assertEqual(read.status_code, 200, read.content)
+        second_read = self.client.get(reverse('get_direct_note_share_api', args=[share.id]))
+        self.assertEqual(second_read.status_code, 200, second_read.content)
+        self.assertTrue(DirectNoteShareRead.objects.filter(share=share, reader=recipient).exists())
+
+        self.client.logout()
+        login(self.client, sender)
+        reads = self.client.get(reverse('list_note_share_reads_api', args=['direct', share.id]))
+        self.assertEqual(reads.status_code, 200, reads.content)
+        self.assertEqual(parse(reads)['read_count'], 1)
+        self.assertEqual(parse(reads)['view_count'], 2)
+        self.assertEqual(parse(reads)['reads'][0]['view_count'], 2)
+        self.assertEqual(parse(reads)['reads'][0]['user']['id'], recipient.id)
+
+        update = post_json(
+            self.client,
+            reverse('update_note_share_forwarding_api', args=['direct', share.id]),
+            {'allow_forwarding': False},
+        )
+        self.assertEqual(update.status_code, 200, update.content)
+        share.refresh_from_db()
+        self.assertFalse(share.allow_forwarding)
+        self.assertFalse(parse(update)['share']['allow_forwarding'])
+
+    def test_direct_note_share_prohibits_forwarding(self):
+        sender = make_user('snd_share_fwd_sender')
+        recipient = make_user('snd_share_fwd_recipient')
+        target = make_user('snd_share_fwd_target')
+        _enable_messaging(recipient)
+        _enable_messaging(target)
+        note = Note.objects.create(author=sender, title='no forward direct', content='body')
+        message = Message.objects.create(sender=sender, recipient=recipient, content='[笔记] no forward direct')
+        DirectNoteShare.objects.create(
+            message=message,
+            note=note,
+            shared_by=sender,
+            recipient=recipient,
+            title_snapshot=note.title,
+            allow_forwarding=False,
+        )
+
+        login(self.client, recipient)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'message_id': message.id,
+            'recipient_id': target.id,
+        })
+        self.assertEqual(response.status_code, 403, response.content)
+
+    def test_forwarded_direct_note_share_remains_note_card(self):
+        sender = make_user('snd_share_card_sender')
+        recipient = make_user('snd_share_card_recipient')
+        target = make_user('snd_share_card_target')
+        _enable_messaging(recipient)
+        _enable_messaging(target)
+        note = Note.objects.create(author=sender, title='forwarded direct card', content='body')
+        source_message = Message.objects.create(
+            sender=sender,
+            recipient=recipient,
+            content='[笔记] forwarded direct card',
+        )
+        DirectNoteShare.objects.create(
+            message=source_message,
+            note=note,
+            shared_by=sender,
+            recipient=recipient,
+            title_snapshot=note.title,
+        )
+
+        login(self.client, recipient)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'message_id': source_message.id,
+            'recipient_id': target.id,
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['message']['note_share']['title'], note.title)
+        forwarded_share = DirectNoteShare.objects.get(message_id=body['message']['id'])
+        self.assertEqual(forwarded_share.note_id, note.id)
+        self.assertEqual(forwarded_share.shared_by_id, recipient.id)
+        self.assertEqual(forwarded_share.recipient_id, target.id)
+
+
 # =========================================================================
 # message groups
 # =========================================================================
@@ -254,6 +509,11 @@ class MessageGroupTests(_MessageTestBase):
                 content='<p>public content</p>',
                 is_public=True,
             )
+
+    def _enable_2fa(self, user):
+        user.profile.two_fa_enabled = True
+        user.profile.two_fa_method = 'totp'
+        user.profile.save(update_fields=['two_fa_enabled', 'two_fa_method'])
 
     def _create_group_directly(self, owner, members):
         group = MessageGroup.objects.create(name='direct group', owner=owner, created_by=owner)
@@ -270,6 +530,8 @@ class MessageGroupTests(_MessageTestBase):
         self.assertTrue(policy['enabled'])
         self.assertEqual(policy['min_public_notes'], 10)
         self.assertEqual(policy['min_followers'], 50)
+        self.assertTrue(policy['two_fa_required'])
+        self.assertFalse(policy['two_fa_enabled'])
         self.assertFalse(policy['eligible'])
 
     def test_non_admin_cannot_update_group_policy(self):
@@ -312,6 +574,7 @@ class MessageGroupTests(_MessageTestBase):
         owner = make_user('grp_notes_owner')
         member = make_user('grp_notes_member')
         self._make_public_notes(owner, 10)
+        self._enable_2fa(owner)
         login(self.client, owner)
         response = post_json(self.client, reverse('create_message_group_api'), {
             'name': 'notes group',
@@ -328,6 +591,7 @@ class MessageGroupTests(_MessageTestBase):
         member = make_user('grp_follow_member')
         MessageGroupPolicy.objects.create(min_public_notes=3, min_followers=2)
         self._make_public_notes(owner, 3)
+        self._enable_2fa(owner)
         for i in range(2):
             follower = make_user(f'grp_follow_follower_{i}')
             UserFollow.objects.create(follower=follower, following=owner)
@@ -346,6 +610,7 @@ class MessageGroupTests(_MessageTestBase):
         owner = make_user('grp_disabled_owner')
         member = make_user('grp_disabled_member')
         self._make_public_notes(owner, 10)
+        self._enable_2fa(owner)
         MessageGroupPolicy.objects.create(enabled=False)
         login(self.client, owner)
         response = post_json(self.client, reverse('create_message_group_api'), {
@@ -438,6 +703,74 @@ class MessageGroupTests(_MessageTestBase):
             content='forwarded from group',
         ).exists())
 
+    def test_group_note_card_forwarded_to_private_user_remains_note_card(self):
+        owner = make_user('grp_forward_note_owner')
+        member = make_user('grp_forward_note_member')
+        recipient = make_user('grp_forward_note_recipient')
+        _enable_messaging(recipient)
+        group = self._create_group_directly(owner, [member])
+        note = Note.objects.create(author=owner, title='group forwarded card', content='body')
+        source_message = GroupMessage.objects.create(
+            group=group,
+            sender=owner,
+            content='[笔记] group forwarded card',
+        )
+        GroupNoteShare.objects.create(
+            group=group,
+            message=source_message,
+            note=note,
+            shared_by=owner,
+            title_snapshot=note.title,
+        )
+
+        login(self.client, member)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'group_message_id': source_message.id,
+            'recipient_id': recipient.id,
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['message']['note_share']['title'], note.title)
+        forwarded_share = DirectNoteShare.objects.get(message_id=body['message']['id'])
+        self.assertEqual(forwarded_share.note_id, note.id)
+        self.assertEqual(forwarded_share.shared_by_id, member.id)
+        self.assertEqual(forwarded_share.recipient_id, recipient.id)
+
+    def test_group_note_card_forwarded_to_group_remains_note_card(self):
+        owner = make_user('grp_forward_note_group_owner')
+        member = make_user('grp_forward_note_group_member')
+        target_owner = make_user('grp_forward_note_target_owner')
+        source_group = self._create_group_directly(owner, [member])
+        target_group = self._create_group_directly(target_owner, [member])
+        note = Note.objects.create(author=owner, title='cross group note card', content='body')
+        source_message = GroupMessage.objects.create(
+            group=source_group,
+            sender=owner,
+            content='[笔记] cross group note card',
+        )
+        GroupNoteShare.objects.create(
+            group=source_group,
+            message=source_message,
+            note=note,
+            shared_by=owner,
+            title_snapshot=note.title,
+        )
+
+        login(self.client, member)
+        response = post_json(self.client, reverse('send_group_message_api', args=[target_group.id]), {
+            'content': source_message.content,
+            'forwarded_from': source_message.id,
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['message']['note_share']['title'], note.title)
+        forwarded_share = GroupNoteShare.objects.get(message_id=body['message']['id'])
+        self.assertEqual(forwarded_share.group_id, target_group.id)
+        self.assertEqual(forwarded_share.note_id, note.id)
+        self.assertEqual(forwarded_share.shared_by_id, member.id)
+
     def test_private_message_can_forward_to_group(self):
         sender = make_user('private_forward_sender')
         recipient = make_user('private_forward_recipient')
@@ -462,6 +795,210 @@ class MessageGroupTests(_MessageTestBase):
             content='forwarded from private',
         ).exists())
 
+    def test_direct_note_card_forwarded_to_group_remains_note_card(self):
+        sender = make_user('direct_forward_note_sender')
+        recipient = make_user('direct_forward_note_recipient')
+        group_owner = make_user('direct_forward_note_group_owner')
+        group = self._create_group_directly(group_owner, [recipient])
+        note = Note.objects.create(author=sender, title='direct to group card', content='body')
+        source_message = Message.objects.create(
+            sender=sender,
+            recipient=recipient,
+            content='[笔记] direct to group card',
+        )
+        DirectNoteShare.objects.create(
+            message=source_message,
+            note=note,
+            shared_by=sender,
+            recipient=recipient,
+            title_snapshot=note.title,
+        )
+
+        login(self.client, recipient)
+        response = post_json(self.client, reverse('send_group_message_api', args=[group.id]), {
+            'content': source_message.content,
+            'forwarded_private_from': source_message.id,
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['message']['note_share']['title'], note.title)
+        forwarded_share = GroupNoteShare.objects.get(message_id=body['message']['id'])
+        self.assertEqual(forwarded_share.group_id, group.id)
+        self.assertEqual(forwarded_share.note_id, note.id)
+        self.assertEqual(forwarded_share.shared_by_id, recipient.id)
+
+    def test_private_note_shared_to_group_requires_current_group_membership(self):
+        owner = make_user('grp_note_share_owner')
+        member = make_user('grp_note_share_member')
+        outsider = make_user('grp_note_share_outsider')
+        group = self._create_group_directly(owner, [member])
+        note = Note.objects.create(
+            author=owner,
+            title='private group note',
+            content='<p>group-only body</p>',
+            is_public=False,
+        )
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('share_note_to_group_api', args=[group.id]), {
+            'note_id': note.id,
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        message_body = parse(response)['message']
+        self.assertEqual(message_body['note_share']['title'], 'private group note')
+        self.assertTrue(message_body['note_share']['requires_group_membership'])
+        share = GroupNoteShare.objects.get(note=note, group=group)
+
+        self.client.logout()
+        login(self.client, member)
+        read_response = self.client.get(reverse('get_group_note_share_api', args=[group.id, share.id]))
+        self.assertEqual(read_response.status_code, 200, read_response.content)
+        read_body = parse(read_response)
+        self.assertEqual(read_body['note']['content'], '<p>group-only body</p>')
+        self.assertFalse(read_body['note']['is_public'])
+
+        self.client.logout()
+        login(self.client, outsider)
+        outsider_response = self.client.get(reverse('get_group_note_share_api', args=[group.id, share.id]))
+        self.assertEqual(outsider_response.status_code, 403, outsider_response.content)
+
+        MessageGroupMember.objects.filter(group=group, user=member).update(left_at=timezone.now())
+        self.client.logout()
+        login(self.client, member)
+        former_member_response = self.client.get(reverse('get_group_note_share_api', args=[group.id, share.id]))
+        self.assertEqual(former_member_response.status_code, 403, former_member_response.content)
+
+    def test_group_note_share_respects_history_visibility(self):
+        owner = make_user('grp_note_history_owner')
+        late_member = make_user('grp_note_history_member')
+        group = self._create_group_directly(owner, [])
+        note = Note.objects.create(
+            author=owner,
+            title='old private note',
+            content='old private body',
+            is_public=False,
+        )
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('share_note_to_group_api', args=[group.id]), {
+            'note_id': note.id,
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        share = GroupNoteShare.objects.get(note=note, group=group)
+        old_time = timezone.now() - timedelta(hours=2)
+        GroupMessage.objects.filter(pk=share.message_id).update(created_at=old_time)
+        MessageGroupMember.objects.create(group=group, user=late_member, role='member')
+
+        self.client.logout()
+        login(self.client, late_member)
+        response = self.client.get(reverse('get_group_note_share_api', args=[group.id, share.id]))
+        self.assertEqual(response.status_code, 403, response.content)
+
+    def test_secret_note_cannot_be_shared_to_group_chat(self):
+        owner = make_user('grp_secret_note_owner')
+        member = make_user('grp_secret_note_member')
+        group = self._create_group_directly(owner, [member])
+        note = Note.objects.create(
+            author=owner,
+            title='vault note',
+            content='encrypted body',
+            is_secret=True,
+        )
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('share_note_to_group_api', args=[group.id]), {
+            'note_id': note.id,
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(GroupNoteShare.objects.filter(note=note).exists())
+
+    def test_owner_can_list_and_revoke_group_note_shares(self):
+        owner = make_user('grp_share_center_owner')
+        member = make_user('grp_share_center_member')
+        outsider = make_user('grp_share_center_outsider')
+        group = self._create_group_directly(owner, [member])
+        note = Note.objects.create(author=owner, title='group center note', content='body')
+        message = GroupMessage.objects.create(group=group, sender=owner, content='shared group note')
+        share = GroupNoteShare.objects.create(
+            group=group,
+            message=message,
+            note=note,
+            shared_by=owner,
+            title_snapshot=note.title,
+        )
+        login(self.client, owner)
+
+        list_body = parse(self.client.get(f"{reverse('list_note_shares_api')}?scope=group"))
+        self.assertEqual(list_body['shares'][0]['scope'], 'group')
+        self.assertEqual(list_body['shares'][0]['note']['title'], 'group center note')
+        self.assertEqual(list_body['shares'][0]['target']['id'], group.id)
+
+        response = post_json(
+            self.client,
+            reverse('revoke_note_share_api', args=['group', share.id]),
+            {},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        share.refresh_from_db()
+        self.assertIsNotNone(share.revoked_at)
+        self.assertTrue(parse(response)['share']['is_revoked'])
+
+        self.client.logout()
+        login(self.client, outsider)
+        forbidden = post_json(
+            self.client,
+            reverse('revoke_note_share_api', args=['group', share.id]),
+            {},
+        )
+        self.assertEqual(forbidden.status_code, 404, forbidden.content)
+
+    def test_group_note_share_tracks_member_read_and_prohibits_forwarding(self):
+        owner = make_user('grp_share_read_owner')
+        member = make_user('grp_share_read_member')
+        recipient = make_user('grp_share_read_recipient')
+        _enable_messaging(recipient)
+        group = self._create_group_directly(owner, [member])
+        note = Note.objects.create(author=owner, title='group read tracking note', content='body')
+
+        login(self.client, owner)
+        shared = post_json(self.client, reverse('share_note_to_group_api', args=[group.id]), {
+            'note_id': note.id,
+        })
+        self.assertEqual(shared.status_code, 201, shared.content)
+        share = GroupNoteShare.objects.get(note=note, group=group)
+
+        own_read = self.client.get(reverse('get_group_note_share_api', args=[group.id, share.id]))
+        self.assertEqual(own_read.status_code, 200, own_read.content)
+        self.assertFalse(GroupNoteShareRead.objects.filter(share=share).exists())
+
+        disable_forwarding = post_json(
+            self.client,
+            reverse('update_note_share_forwarding_api', args=['group', share.id]),
+            {'allow_forwarding': False},
+        )
+        self.assertEqual(disable_forwarding.status_code, 200, disable_forwarding.content)
+        self.assertFalse(parse(disable_forwarding)['share']['allow_forwarding'])
+
+        self.client.logout()
+        login(self.client, member)
+        read = self.client.get(reverse('get_group_note_share_api', args=[group.id, share.id]))
+        self.assertEqual(read.status_code, 200, read.content)
+        self.assertTrue(GroupNoteShareRead.objects.filter(share=share, reader=member).exists())
+
+        blocked_forward = post_json(self.client, reverse('forward_message_api'), {
+            'group_message_id': share.message_id,
+            'recipient_id': recipient.id,
+        })
+        self.assertEqual(blocked_forward.status_code, 403, blocked_forward.content)
+
+        self.client.logout()
+        login(self.client, owner)
+        reads = self.client.get(reverse('list_note_share_reads_api', args=['group', share.id]))
+        self.assertEqual(reads.status_code, 200, reads.content)
+        self.assertEqual(parse(reads)['read_count'], 1)
+
     def test_group_messages_support_latest_page_pagination(self):
         owner = make_user('grp_page_owner')
         member = make_user('grp_page_member')
@@ -479,6 +1016,62 @@ class MessageGroupTests(_MessageTestBase):
         second_page = parse(self.client.get(f'{url}?limit=2&offset=2'))
         self.assertEqual([m['content'] for m in second_page['messages']], ['group page 1', 'group page 2'])
         self.assertTrue(second_page['pagination']['has_more'])
+
+    def test_group_message_search_filters_respect_visibility(self):
+        owner = make_user('grp_search_owner')
+        member = make_user('grp_search_member')
+        other = make_user('grp_search_other')
+        group = self._create_group_directly(owner, [member, other])
+        group.allow_new_members_view_history = True
+        group.save(update_fields=['allow_new_members_view_history'])
+        target_date = timezone.localdate() - timedelta(days=1)
+        target_created_at = timezone.make_aware(
+            datetime.combine(target_date, datetime.min.time()) + timedelta(hours=12)
+        )
+        target = GroupMessage.objects.create(group=group, sender=owner, content='release checklist')
+        GroupMessage.objects.filter(pk=target.pk).update(created_at=target_created_at)
+        other_message = GroupMessage.objects.create(group=group, sender=other, content='release checklist')
+        MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=target,
+            file=SimpleUploadedFile('checklist.txt', b'checklist', content_type='text/plain'),
+            original_name='checklist.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=9,
+        )
+
+        login(self.client, member)
+        url = reverse('get_group_messages_api', args=[group.id])
+        response = self.client.get(
+            f'{url}?q=release&sender_id={owner.id}&date_from={target_date}'
+            f'&date_to={target_date}&has_attachment=1'
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item['id'] for item in parse(response)['messages']], [target.id])
+
+        invalid_date = self.client.get(f'{url}?date_from=2026-99-99')
+        self.assertEqual(invalid_date.status_code, 400, invalid_date.content)
+        self.assertEqual(other_message.sender_id, other.id)
+
+    def test_group_message_search_filters_cannot_reveal_pre_join_history(self):
+        owner = make_user('grp_search_history_owner')
+        member = make_user('grp_search_history_member')
+        group = MessageGroup.objects.create(name='search history', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        now = timezone.now()
+        hidden = GroupMessage.objects.create(group=group, sender=owner, content='prejoin restricted keyword')
+        visible = GroupMessage.objects.create(group=group, sender=owner, content='afterjoin restricted keyword')
+        GroupMessage.objects.filter(pk=hidden.pk).update(created_at=now - timedelta(hours=2))
+        GroupMessage.objects.filter(pk=visible.pk).update(created_at=now - timedelta(minutes=10))
+        membership = MessageGroupMember.objects.create(group=group, user=member, role='member')
+        MessageGroupMember.objects.filter(pk=membership.pk).update(joined_at=now - timedelta(hours=1))
+
+        login(self.client, member)
+        url = reverse('get_group_messages_api', args=[group.id])
+        response = self.client.get(f'{url}?q=restricted&sender_id={owner.id}')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item['id'] for item in parse(response)['messages']], [visible.id])
 
     def test_new_members_cannot_view_pre_join_history_by_default(self):
         owner = make_user('grp_hist_owner')
@@ -583,11 +1176,113 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(list_body['messages'][0]['attachments'][0]['id'], attachment.id)
         file_response = self.client.get(reverse('message_attachment_file_api', args=[attachment.id]))
         self.assertEqual(file_response.status_code, 200)
+        self.assertTrue(file_response.streaming)
+        self.assertIn('attachment', file_response['Content-Disposition'])
 
         self.client.logout()
         login(self.client, outsider)
         forbidden = self.client.get(reverse('message_attachment_file_api', args=[attachment.id]))
         self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
+    def test_my_message_attachments_lists_own_direct_and_group_uploads(self):
+        uploader = make_user('att_mine_owner')
+        peer = make_user('att_mine_peer')
+        other = make_user('att_mine_other')
+        group = self._create_group_directly(uploader, [peer])
+        direct_message = Message.objects.create(sender=uploader, recipient=peer, content='direct file')
+        group_message = GroupMessage.objects.create(group=group, sender=uploader, content='group file')
+        direct_attachment = MessageAttachment.objects.create(
+            uploader=uploader,
+            message=direct_message,
+            file=SimpleUploadedFile('photo.png', b'image', content_type='image/png'),
+            original_name='photo.png',
+            attachment_type='image',
+            mime_type='image/png',
+            size=5,
+        )
+        group_attachment = MessageAttachment.objects.create(
+            uploader=uploader,
+            group_message=group_message,
+            file=SimpleUploadedFile('brief.pdf', b'file', content_type='application/pdf'),
+            original_name='brief.pdf',
+            attachment_type='file',
+            mime_type='application/pdf',
+            size=4,
+        )
+        MessageAttachment.objects.create(
+            uploader=other,
+            file=SimpleUploadedFile('other.txt', b'other', content_type='text/plain'),
+            original_name='other.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=5,
+        )
+        login(self.client, uploader)
+
+        body = parse(self.client.get(reverse('list_my_message_attachments_api')))
+        by_id = {item['id']: item for item in body['attachments']}
+        self.assertEqual(set(by_id), {direct_attachment.id, group_attachment.id})
+        self.assertEqual(by_id[direct_attachment.id]['context']['type'], 'direct')
+        self.assertEqual(by_id[direct_attachment.id]['context']['peer_id'], peer.id)
+        self.assertEqual(by_id[group_attachment.id]['context']['type'], 'group')
+        self.assertEqual(by_id[group_attachment.id]['context']['group_id'], group.id)
+
+        filtered = parse(self.client.get(f"{reverse('list_my_message_attachments_api')}?type=image"))
+        self.assertEqual([item['id'] for item in filtered['attachments']], [direct_attachment.id])
+
+    def test_accessible_message_attachments_respect_direct_and_group_visibility(self):
+        owner = make_user('att_access_owner')
+        member = make_user('att_access_member')
+        group = self._create_group_directly(owner, [member])
+        direct_message = Message.objects.create(sender=owner, recipient=member, content='direct')
+        visible_group_message = GroupMessage.objects.create(group=group, sender=owner, content='visible')
+        hidden_group_message = GroupMessage.objects.create(group=group, sender=owner, content='hidden')
+        MessageGroupMember.objects.filter(group=group, user=member).update(
+            joined_at=hidden_group_message.created_at + timedelta(seconds=1)
+        )
+        group.allow_new_members_view_history = False
+        group.save(update_fields=['allow_new_members_view_history'])
+        direct_attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            message=direct_message,
+            file=SimpleUploadedFile('shared-direct.txt', b'direct', content_type='text/plain'),
+            original_name='shared-direct.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=6,
+        )
+        visible_attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=visible_group_message,
+            file=SimpleUploadedFile('shared-group.txt', b'group', content_type='text/plain'),
+            original_name='shared-group.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=5,
+        )
+        hidden_attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=hidden_group_message,
+            file=SimpleUploadedFile('hidden-group.txt', b'hidden', content_type='text/plain'),
+            original_name='hidden-group.txt',
+            attachment_type='file',
+            mime_type='text/plain',
+            size=6,
+        )
+
+        login(self.client, member)
+        body = parse(self.client.get(f"{reverse('list_my_message_attachments_api')}?scope=accessible"))
+        attachment_ids = {item['id'] for item in body['attachments']}
+        self.assertEqual(body['scope'], 'accessible')
+        self.assertIn(direct_attachment.id, attachment_ids)
+        self.assertNotIn(hidden_attachment.id, attachment_ids)
+        self.assertNotIn(visible_attachment.id, attachment_ids)
+
+        membership = MessageGroupMember.objects.get(group=group, user=member)
+        membership.joined_at = visible_group_message.created_at - timedelta(seconds=1)
+        membership.save(update_fields=['joined_at'])
+        refreshed = parse(self.client.get(f"{reverse('list_my_message_attachments_api')}?scope=accessible"))
+        self.assertIn(visible_attachment.id, {item['id'] for item in refreshed['attachments']})
 
     def test_group_shared_items_lists_media_files_and_filters_hidden_messages(self):
         owner = make_user('grp_shared_owner')
@@ -794,6 +1489,38 @@ class MessageGroupTests(_MessageTestBase):
         })
         self.assertEqual(response.status_code, 201, response.content)
 
+    def test_group_mute_notice_is_only_visible_to_target_and_managers(self):
+        owner = make_user('grp_notice_owner')
+        muted_member = make_user('grp_notice_muted')
+        observer = make_user('grp_notice_observer')
+        group = self._create_group_directly(owner, [muted_member, observer])
+
+        login(self.client, owner)
+        response = post_json(self.client, reverse('mute_group_member_api', args=[group.id, muted_member.id]), {
+            'duration_minutes': 60,
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        notice_id = parse(response)['notice']['id']
+        notice = GroupMessage.objects.get(pk=notice_id)
+        self.assertEqual(notice.visibility_scope, GroupMessage.VISIBILITY_STAFF_AND_TARGET)
+        self.assertEqual(notice.visibility_target_id, muted_member.id)
+
+        owner_messages = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))['messages']
+        self.assertIn(notice_id, [message['id'] for message in owner_messages])
+
+        self.client.logout()
+        login(self.client, muted_member)
+        target_messages = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))['messages']
+        self.assertIn(notice_id, [message['id'] for message in target_messages])
+
+        self.client.logout()
+        login(self.client, observer)
+        observer_messages = parse(self.client.get(reverse('get_group_messages_api', args=[group.id])))['messages']
+        self.assertNotIn(notice_id, [message['id'] for message in observer_messages])
+        conversations = parse(self.client.get(reverse('get_message_conversations_api')))['conversations']
+        observer_group = next(item for item in conversations if item.get('group_id') == group.id)
+        self.assertNotEqual(observer_group['last_message'], notice.content)
+
     def test_group_invite_link_join_and_revoke(self):
         owner = make_user('grp_invite_owner')
         member = make_user('grp_invite_member')
@@ -965,6 +1692,20 @@ class MessageGroupTests(_MessageTestBase):
         self.client.logout()
         login(self.client, owner)
         response = post_json(self.client, reverse('dissolve_message_group_api', args=[group.id]), {})
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(parse(response)['code'], 'require_2fa_setup')
+        group.refresh_from_db()
+        self.assertTrue(group.is_active)
+
+        self._enable_2fa(owner)
+        response = post_json(self.client, reverse('dissolve_message_group_api', args=[group.id]), {})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(parse(response)['code'], 'require_2fa')
+
+        with patch('accounts.services.verify_2fa_for_request', return_value=(True, '')):
+            response = post_json(self.client, reverse('dissolve_message_group_api', args=[group.id]), {
+                'two_fa_code': '123456',
+            })
         self.assertEqual(response.status_code, 200, response.content)
         group.refresh_from_db()
         self.assertFalse(group.is_active)
@@ -1131,11 +1872,22 @@ class MessageGroupTests(_MessageTestBase):
         login(self.client, member)
         status_response = self.client.get(reverse('group_announcement_reads_api', args=[group.id]))
         self.assertEqual(status_response.status_code, 200, status_response.content)
-        self.assertEqual(parse(status_response)['read_stats']['read_count'], 1)
+        member_stats = parse(status_response)['read_stats']
+        self.assertEqual(member_stats['read_count'], 1)
+        self.assertFalse(member_stats['viewer_has_read'])
+        self.assertEqual(member_stats['unread_users'], [])
 
         mark_response = post_json(self.client, reverse('group_announcement_reads_api', args=[group.id]), {})
         self.assertEqual(mark_response.status_code, 200, mark_response.content)
         self.assertEqual(parse(mark_response)['read_stats']['read_count'], 2)
+
+        self.client.logout()
+        login(self.client, owner)
+        owner_response = self.client.get(reverse('group_announcement_reads_api', args=[group.id]))
+        self.assertEqual(owner_response.status_code, 200, owner_response.content)
+        owner_stats = parse(owner_response)['read_stats']
+        self.assertTrue(owner_stats['viewer_has_read'])
+        self.assertEqual(owner_stats['unread_users'], [])
 
     def test_edit_group_announcement_updates_linked_message_without_resending(self):
         owner = make_user('grp_ann_edit_owner')
@@ -1230,6 +1982,50 @@ class MessageGroupTests(_MessageTestBase):
 # forward_message_api
 # =========================================================================
 class ForwardMessageApiTests(_MessageTestBase):
+    def _create_group_directly(self, owner, members):
+        group = MessageGroup.objects.create(
+            name='forward attachment group',
+            owner=owner,
+            created_by=owner,
+        )
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        for member in members:
+            MessageGroupMember.objects.create(group=group, user=member, role='member')
+        return group
+
+    def test_forward_group_attachment_to_direct_message(self):
+        owner = make_user('fwd_grp_file_owner')
+        member = make_user('fwd_grp_file_member')
+        recipient = make_user('fwd_grp_file_recipient')
+        _enable_messaging(recipient)
+        group = self._create_group_directly(owner, [member])
+        source = GroupMessage.objects.create(group=group, sender=owner, content='')
+        source_attachment = MessageAttachment.objects.create(
+            uploader=owner,
+            group_message=source,
+            file=SimpleUploadedFile('meeting-notes.pdf', b'pdf bytes', content_type='application/pdf'),
+            original_name='meeting-notes.pdf',
+            attachment_type='file',
+            mime_type='application/pdf',
+            size=9,
+        )
+
+        login(self.client, member)
+        response = post_json(self.client, reverse('forward_message_api'), {
+            'group_message_id': source.id,
+            'recipient_id': recipient.id,
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        forwarded = Message.objects.get(sender=member, recipient=recipient)
+        forwarded_attachment = forwarded.attachments.get()
+        self.assertNotEqual(forwarded_attachment.id, source_attachment.id)
+        self.assertEqual(forwarded_attachment.original_name, source_attachment.original_name)
+        self.assertEqual(forwarded_attachment.attachment_type, source_attachment.attachment_type)
+        self.assertEqual(forwarded_attachment.mime_type, source_attachment.mime_type)
+        self.assertEqual(forwarded_attachment.size, source_attachment.size)
+        self.assertEqual(forwarded_attachment.file.name, source_attachment.file.name)
+
     def test_forward_message_to_new_user(self):
         sender = make_user('fwd01_s')
         original_recipient = make_user('fwd01_or')
@@ -1619,6 +2415,115 @@ class ConversationToggleTests(_MessageTestBase):
         login(self.client, user)
         response = post_json(self.client, reverse('toggle_pin_api'), {'value': True})
         self.assertEqual(response.status_code, 400)
+
+
+# =========================================================================
+# direct-message mute
+# =========================================================================
+class DirectMessageMuteTests(_MessageTestBase):
+    def test_set_mute_and_read_conversation_settings(self):
+        owner = make_user('dmm01_owner')
+        peer = make_user('dmm01_peer')
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('set_direct_message_mute_api'), {
+            'user_id': peer.id,
+            'duration_minutes': 60,
+            'reason': 'Repeated unsolicited messages',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        mute = DirectMessageMute.objects.get(user=owner, muted_user=peer)
+        self.assertTrue(mute.is_active)
+        self.assertGreater(mute.expires_at, timezone.now())
+        self.assertEqual(mute.reason, 'Repeated unsolicited messages')
+        self.assertTrue(parse(response)['mute']['is_active'])
+
+        settings_response = self.client.get(
+            f"{reverse('get_conversation_settings_api')}?user_id={peer.id}"
+        )
+        self.assertEqual(settings_response.status_code, 200, settings_response.content)
+        direct_mute = parse(settings_response)['settings']['direct_mute']
+        self.assertTrue(direct_mute['is_active'])
+        self.assertEqual(direct_mute['reason'], 'Repeated unsolicited messages')
+        self.assertIsNotNone(direct_mute['expires_at'])
+
+    def test_active_mute_prevents_peer_from_sending(self):
+        owner = make_user('dmm02_owner')
+        peer = make_user('dmm02_peer')
+        _enable_messaging(owner)
+        DirectMessageMute.objects.create(
+            user=owner,
+            muted_user=peer,
+            expires_at=timezone.now() + timedelta(minutes=30),
+        )
+        login(self.client, peer)
+
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': owner.id,
+            'content': 'Please let me send this',
+        })
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(Message.objects.filter(sender=peer, recipient=owner).exists())
+
+    def test_expired_mute_does_not_block_peer(self):
+        owner = make_user('dmm03_owner')
+        peer = make_user('dmm03_peer')
+        _enable_messaging(owner)
+        DirectMessageMute.objects.create(
+            user=owner,
+            muted_user=peer,
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        login(self.client, peer)
+
+        response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': owner.id,
+            'content': 'Allowed after expiry',
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_clear_mute_allows_peer_to_send_again(self):
+        owner = make_user('dmm04_owner')
+        peer = make_user('dmm04_peer')
+        _enable_messaging(owner)
+        DirectMessageMute.objects.create(user=owner, muted_user=peer)
+        login(self.client, owner)
+
+        clear_response = post_json(
+            self.client,
+            reverse('clear_direct_message_mute_api'),
+            {'user_id': peer.id},
+        )
+        self.assertEqual(clear_response.status_code, 200, clear_response.content)
+        self.assertFalse(DirectMessageMute.objects.filter(user=owner, muted_user=peer).exists())
+        self.assertFalse(parse(clear_response)['mute']['is_active'])
+
+        self.client.logout()
+        login(self.client, peer)
+        send_response = post_json(self.client, reverse('send_message_api'), {
+            'recipient_id': owner.id,
+            'content': 'Allowed after clearing',
+        })
+        self.assertEqual(send_response.status_code, 201, send_response.content)
+
+    def test_rejects_self_mute_and_invalid_duration(self):
+        user = make_user('dmm05')
+        login(self.client, user)
+        self_mute = post_json(self.client, reverse('set_direct_message_mute_api'), {
+            'user_id': user.id,
+            'duration_minutes': 60,
+        })
+        self.assertEqual(self_mute.status_code, 400)
+
+        peer = make_user('dmm05_peer')
+        invalid = post_json(self.client, reverse('set_direct_message_mute_api'), {
+            'user_id': peer.id,
+            'duration_minutes': 0,
+        })
+        self.assertEqual(invalid.status_code, 400)
 
 
 # =========================================================================
@@ -2248,6 +3153,88 @@ class UnreadCountApiTests(_MessageTestBase):
 # =========================================================================
 # get_message_preference_api / update_message_preference_api
 # =========================================================================
+class GroupWorkItemApiTests(_MessageTestBase):
+    def _create_group(self, owner, members):
+        group = MessageGroup.objects.create(name='work group', owner=owner, created_by=owner)
+        MessageGroupMember.objects.create(group=group, user=owner, role='owner')
+        for member in members:
+            MessageGroupMember.objects.create(group=group, user=member, role='member')
+        return group
+
+    def test_manager_creates_poll_member_votes_and_manager_closes(self):
+        owner = make_user('work_poll_owner')
+        member = make_user('work_poll_member')
+        group = self._create_group(owner, [member])
+        login(self.client, owner)
+
+        response = post_json(self.client, reverse('group_polls_api', args=[group.id]), {
+            'question': 'Which day?',
+            'options': ['Monday', 'Tuesday'],
+            'allow_multiple': False,
+        })
+        body = parse(response)
+
+        self.assertEqual(response.status_code, 201)
+        poll_id = body['poll']['id']
+        self.assertEqual(GroupPoll.objects.filter(id=poll_id).count(), 1)
+
+        login(self.client, member)
+        vote_response = post_json(
+            self.client,
+            reverse('vote_group_poll_api', args=[group.id, poll_id]),
+            {'option_ids': [body['poll']['options'][1]['id']]},
+        )
+        vote_body = parse(vote_response)
+        self.assertEqual(vote_response.status_code, 200)
+        self.assertEqual(vote_body['poll']['total_votes'], 1)
+        self.assertTrue(vote_body['poll']['options'][1]['selected'])
+
+        login(self.client, owner)
+        close_response = post_json(self.client, reverse('close_group_poll_api', args=[group.id, poll_id]), {})
+        self.assertEqual(close_response.status_code, 200)
+        self.assertFalse(parse(close_response)['poll']['is_open'])
+
+    def test_member_cannot_create_group_work_items(self):
+        owner = make_user('work_member_owner')
+        member = make_user('work_member_user')
+        group = self._create_group(owner, [member])
+        login(self.client, member)
+
+        poll_response = post_json(self.client, reverse('group_polls_api', args=[group.id]), {
+            'question': 'No permission',
+            'options': ['A', 'B'],
+        })
+        task_response = post_json(self.client, reverse('group_tasks_api', args=[group.id]), {
+            'title': 'No permission',
+        })
+
+        self.assertEqual(poll_response.status_code, 403)
+        self.assertEqual(task_response.status_code, 403)
+
+    def test_task_can_be_completed_by_assignee_but_not_other_member(self):
+        owner = make_user('work_task_owner')
+        assignee = make_user('work_task_assignee')
+        other = make_user('work_task_other')
+        group = self._create_group(owner, [assignee, other])
+        login(self.client, owner)
+        response = post_json(self.client, reverse('group_tasks_api', args=[group.id]), {
+            'title': 'Prepare release notes',
+            'description': 'Draft and share the release notes',
+            'assignee_id': assignee.id,
+        })
+        task_id = parse(response)['task']['id']
+        self.assertTrue(GroupTask.objects.filter(id=task_id, assignee=assignee).exists())
+
+        login(self.client, other)
+        blocked = post_json(self.client, reverse('complete_group_task_api', args=[group.id, task_id]), {})
+        self.assertEqual(blocked.status_code, 403)
+
+        login(self.client, assignee)
+        complete = post_json(self.client, reverse('complete_group_task_api', args=[group.id, task_id]), {})
+        self.assertEqual(complete.status_code, 200)
+        self.assertEqual(parse(complete)['task']['status'], 'completed')
+
+
 class MessagePreferenceTests(_MessageTestBase):
     def test_get_default_preference(self):
         user = make_user('mp01')
@@ -2640,6 +3627,17 @@ class UploadAttachmentApiTests(_MessageTestBase):
         response = self.client.post(reverse('upload_message_attachment_api'), {})
         self.assertEqual(response.status_code, 400)
 
+    @patch('messaging.views.attachment.check_rate_limit_atomic', return_value=(False, 20))
+    def test_upload_rate_limit_returns_429_before_creating_attachment(self, _mocked_rate_limit):
+        user = make_user('ua_rate_limited')
+        login(self.client, user)
+        upload = SimpleUploadedFile('limited.txt', b'content', content_type='text/plain')
+
+        response = self.client.post(reverse('upload_message_attachment_api'), {'file': upload})
+
+        self.assertEqual(response.status_code, 429)
+        self.assertFalse(MessageAttachment.objects.filter(uploader=user).exists())
+
     def test_upload_unsupported_type_returns_400(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         user = make_user('ua02')
@@ -2648,4 +3646,17 @@ class UploadAttachmentApiTests(_MessageTestBase):
         bad = SimpleUploadedFile('evil.html', b'<html></html>', content_type='text/html')
         response = self.client.post(reverse('upload_message_attachment_api'), {'file': bad})
         self.assertEqual(response.status_code, 400)
+        self.assertFalse(MessageAttachment.objects.filter(uploader=user).exists())
+
+    @override_settings(USER_STORAGE_QUOTA_BYTES=8)
+    def test_upload_storage_quota_exceeded_returns_413(self):
+        user = make_user('ua03_quota')
+        login(self.client, user)
+        upload = SimpleUploadedFile('quota.txt', b'0123456789', content_type='text/plain')
+
+        response = self.client.post(reverse('upload_message_attachment_api'), {'file': upload})
+        body = parse(response)
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(body['code'], 'storage_quota_exceeded')
         self.assertFalse(MessageAttachment.objects.filter(uploader=user).exists())

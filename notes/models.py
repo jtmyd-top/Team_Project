@@ -159,13 +159,41 @@ class Note(models.Model):
     is_secret = models.BooleanField(default=False, verbose_name="保密笔记", help_text="标记为保密的笔记需要2FA验证才能访问")
     trashed_at = models.DateTimeField(null=True, blank=True, verbose_name="删除时间")
 
+    def collaborator_role_for(self, user):
+        if not user or not getattr(user, 'is_authenticated', False):
+            return None
+        if self.author_id == user.id:
+            return NoteCollaborator.ROLE_MANAGER
+        return self.collaborators.filter(user=user).values_list('role', flat=True).first()
+
     def has_read_permission(self, user):
-        if self.is_public:
+        if self.is_secret:
+            return self.author == user
+        return self.is_public or self.author == user or bool(self.collaborator_role_for(user))
+
+    def has_comment_permission(self, user):
+        if self.is_secret or not user or not getattr(user, 'is_authenticated', False):
+            return False
+        if self.author_id == user.id:
             return True
-        return self.author == user
+        role = self.collaborator_role_for(user)
+        return role in {
+            NoteCollaborator.ROLE_COMMENTER,
+            NoteCollaborator.ROLE_EDITOR,
+            NoteCollaborator.ROLE_MANAGER,
+        }
 
     def has_write_permission(self, user):
-        return self.author == user
+        if self.is_secret:
+            return self.author == user
+        if self.author == user:
+            return True
+        return self.collaborator_role_for(user) == NoteCollaborator.ROLE_EDITOR
+
+    def has_manage_permission(self, user):
+        if self.is_secret:
+            return self.author == user
+        return self.author == user or self.collaborator_role_for(user) == NoteCollaborator.ROLE_MANAGER
 
     def has_permission(self, user):
         return self.has_read_permission(user)
@@ -234,7 +262,7 @@ class Note(models.Model):
             models.Index(fields=['is_favorited']),
             models.Index(fields=['is_secret']),
             models.Index(fields=['author', 'is_trashed', 'is_secret'], name='note_author_trash_secret_idx'),
-            models.Index(fields=['is_public', '-updated_at'], name='note_public_updated_idx', condition=models.Q(is_public=True)),
+            models.Index(fields=['is_public', '-updated_at'], name='note_public_updated_idx'),
         ]
 
     def move_to_trash(self):
@@ -254,6 +282,38 @@ class Note(models.Model):
         """移动到收件箱（移除文件夹关联）"""
         self.folder = None
         self.save(update_fields=['folder'])
+
+
+class NoteCollaborator(models.Model):
+    ROLE_READER = 'reader'
+    ROLE_COMMENTER = 'commenter'
+    ROLE_EDITOR = 'editor'
+    ROLE_MANAGER = 'manager'
+    ROLE_CHOICES = [
+        (ROLE_READER, 'Reader'),
+        (ROLE_COMMENTER, 'Commenter'),
+        (ROLE_EDITOR, 'Editor'),
+        (ROLE_MANAGER, 'Manager'),
+    ]
+
+    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='collaborators')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='note_collaborations')
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_READER)
+    added_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='added_note_collaborators',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'knowledge_project_notecollaborator'
+        unique_together = ('note', 'user')
+        indexes = [
+            models.Index(fields=['user', 'role'], name='notecollab_user_role_idx'),
+        ]
 
 
 # ---------------- 资源 ----------------
@@ -371,6 +431,11 @@ class NoteComment(models.Model):
         verbose_name="评论者"
     )
     content = models.TextField(max_length=2000, verbose_name="评论内容")
+    # Store a text-based anchor instead of a fragile browser DOM path.
+    anchor_text = models.CharField(max_length=1000, blank=True, default='')
+    anchor_start = models.PositiveIntegerField(null=True, blank=True)
+    anchor_end = models.PositiveIntegerField(null=True, blank=True)
+    anchor_context = models.CharField(max_length=240, blank=True, default='')
     parent = models.ForeignKey(
         'self',
         null=True,
@@ -388,6 +453,7 @@ class NoteComment(models.Model):
         ordering = ['created_at']
         indexes = [
             models.Index(fields=['note', 'created_at'], name='notecomment_note_created_idx'),
+            models.Index(fields=['note', 'anchor_start'], name='notecomment_note_anchor_idx'),
         ]
 
     def __str__(self):
@@ -423,6 +489,47 @@ class NoteHistory(models.Model):
 
     def __str__(self):
         return f"{self.user.username} 浏览了 《{self.note.title}》"
+
+
+class NoteRevision(models.Model):
+    """Immutable note snapshot used for history, comparison, and recovery."""
+
+    ACTION_CREATED = 'created'
+    ACTION_UPDATED = 'updated'
+    ACTION_RESTORED = 'restored'
+    ACTION_CHOICES = [
+        (ACTION_CREATED, 'Created'),
+        (ACTION_UPDATED, 'Updated'),
+        (ACTION_RESTORED, 'Restored'),
+    ]
+
+    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='revisions')
+    version_number = models.PositiveIntegerField()
+    title = models.CharField(max_length=255, blank=True, default='')
+    content = models.TextField(blank=True, default='')
+    toc = models.JSONField(default=list, blank=True)
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES, default=ACTION_UPDATED)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='note_revisions',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'knowledge_project_noterevision'
+        ordering = ['-version_number']
+        constraints = [
+            models.UniqueConstraint(fields=['note', 'version_number'], name='note_revision_unique_version'),
+        ]
+        indexes = [
+            models.Index(fields=['note', '-created_at'], name='noterevision_note_created_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.note_id} v{self.version_number}'
 
 
 @receiver(post_save, sender=Note)

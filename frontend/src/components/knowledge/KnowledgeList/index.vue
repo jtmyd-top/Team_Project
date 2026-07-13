@@ -22,8 +22,11 @@
 
       <!-- 编辑器/阅览器容器 -->
       <div class="editor-container" :class="{ 'with-breadcrumb': showBreadcrumb }">
+        <NotificationCenter v-if="sidebarStore.activeModule === 'notifications'" />
+        <ShareCenter v-else-if="sidebarStore.activeModule === 'shares'" />
+        <AssetCenter v-else-if="sidebarStore.activeModule === 'files'" />
         <!-- 保密柜未验证时显示空白 -->
-        <div v-if="sidebarStore.activeModule === 'vault' && !sidebarStore.vaultStatus.isVerified" class="vault-empty-state">
+        <div v-else-if="sidebarStore.activeModule === 'vault' && !sidebarStore.vaultStatus.isVerified" class="vault-empty-state">
           <!-- 空白状态，等待验证 -->
         </div>
 
@@ -117,6 +120,43 @@
                 <i class="fas fa-link"></i>
               </button>
 
+              <button
+                v-if="canSendCurrentNote"
+                class="toolbar-btn"
+                :disabled="isSendingNote"
+                @click="openNoteSendDialog"
+                title="发送笔记"
+              >
+                <i :class="isSendingNote ? 'fas fa-spinner fa-spin' : 'fas fa-share'"></i>
+              </button>
+
+              <button
+                v-if="canManageCurrentNote"
+                class="toolbar-btn"
+                @click="showCollaboratorsDialog = true"
+                title="管理协作成员"
+              >
+                <i class="fas fa-user-group"></i>
+              </button>
+
+              <button
+                v-if="canCommentCurrentNote"
+                class="toolbar-btn"
+                @click="showAnnotationsDialog = true"
+                title="批注与评论"
+              >
+                <i class="fas fa-comment-dots"></i>
+              </button>
+
+              <button
+                v-if="canViewVersionHistory"
+                class="toolbar-btn"
+                @click="showVersionHistory = true"
+                title="版本历史"
+              >
+                <i class="fas fa-clock-rotate-left"></i>
+              </button>
+
               <div class="divider"></div>
 
               <!-- 删除按钮 -->
@@ -153,6 +193,7 @@
                 :is-secret="currentNoteData.is_secret"
                 :is-trashed="currentNoteData.is_trashed"
                 :note-id="currentNoteId"
+                @selection="handleNoteSelection"
               />
               <!-- 普通笔记 -->
               <NoteShadowViewer
@@ -213,18 +254,53 @@
       @go-to-settings="handleGoToSettings"
       @cancel="handleVaultSetupCancel"
     />
+
+    <NewMessageDialog
+      v-if="showNoteSendDialog"
+      purpose="forward"
+      @close="closeNoteSendDialog"
+      @select="handleNoteSendTarget"
+    />
+    <NoteCollaborators
+      v-if="currentNoteId && !currentNoteData.is_secret"
+      v-model="showCollaboratorsDialog"
+      :note-id="currentNoteId"
+    />
+    <NoteAnnotations
+      v-if="currentNoteId && !currentNoteData.is_secret"
+      v-model="showAnnotationsDialog"
+      :note-id="currentNoteId"
+      :selection="noteSelection"
+    />
+    <NoteVersionHistory
+      v-if="currentNoteId"
+      v-model="showVersionHistory"
+      :note-id="currentNoteId"
+      @restored="handleRevisionRestored"
+    />
+    <GlobalSearchDialog />
   </div>
 </template>
 
 <script setup>
+import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import Breadcrumb from '@/components/common/Breadcrumb/index.vue'
+import GlobalSearchDialog from '@/components/common/GlobalSearchDialog/index.vue'
 import NoteEditor from '@/components/knowledge/NoteEditor/index.vue'
 import NoteShadowViewer from '@/components/knowledge/NoteShadowViewer/index.vue'
+import NotificationCenter from '@/components/notifications/NotificationCenter/index.vue'
+import ShareCenter from '@/components/knowledge/ShareCenter/index.vue'
+import AssetCenter from '@/components/knowledge/AssetCenter/index.vue'
+import NoteCollaborators from '@/components/knowledge/NoteCollaborators/index.vue'
+import NoteAnnotations from '@/components/knowledge/NoteAnnotations/index.vue'
+import NoteVersionHistory from '@/components/knowledge/NoteVersionHistory/index.vue'
 import DragDropOverlay from '@/components/common/DragDropOverlay/index.vue'
 import VaultVerifyDialog from '@/components/common/VaultVerifyDialog/index.vue'
 import VaultSetupDialog from '@/components/common/VaultSetupDialog/index.vue'
 import PrimarySidebar from '@/components/layout/PrimarySidebar/index.vue'
 import SecondaryPanel from '@/components/layout/SecondaryPanel/index.vue'
+import NewMessageDialog from '@/components/messages/NewMessageDialog/index.vue'
 import { useKnowledgeList } from '@/composables/useKnowledgeList'
 import { useGlobalVaultAutoLock } from '@/composables/useGlobalVaultAutoLock'
 import '@/assets/styles/components/knowledge-list.css'
@@ -277,4 +353,115 @@ const {
   // 工具函数
   formatDate
 } = useKnowledgeList()
+
+const showNoteSendDialog = ref(false)
+const isSendingNote = ref(false)
+const showCollaboratorsDialog = ref(false)
+const showAnnotationsDialog = ref(false)
+const showVersionHistory = ref(false)
+const noteSelection = ref(null)
+
+const canSendCurrentNote = computed(() => (
+  !!currentNoteId.value &&
+  !currentNoteData.value.is_trashed &&
+  !currentNoteData.value.is_secret &&
+  sidebarStore.activeModule !== 'vault'
+))
+
+const canManageCurrentNote = computed(() => (
+  !!currentNoteId.value &&
+  !currentNoteData.value.is_secret &&
+  !currentNoteData.value.is_trashed &&
+  currentNoteData.value.permissions?.can_manage
+))
+
+const canCommentCurrentNote = computed(() => (
+  !!currentNoteId.value &&
+  !currentNoteData.value.is_secret &&
+  !currentNoteData.value.is_trashed &&
+  currentNoteData.value.permissions?.can_comment
+))
+
+const canViewVersionHistory = computed(() => (
+  !!currentNoteId.value &&
+  !currentNoteData.value.is_trashed &&
+  currentNoteData.value.permissions?.can_edit
+))
+
+watch(
+  () => [currentNoteId.value, currentNoteData.value.is_secret],
+  ([, isSecret]) => {
+    if (isSecret) {
+      showCollaboratorsDialog.value = false
+    }
+  },
+)
+
+function handleNoteSelection(selection) {
+  noteSelection.value = selection
+}
+
+function handleRevisionRestored(note) {
+  currentNoteData.value = {
+    ...currentNoteData.value,
+    ...note,
+  }
+  viewMode.value = 'read'
+  hasUnsavedChanges.value = false
+}
+
+function getCSRFToken() {
+  const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+async function openNoteSendDialog() {
+  if (!canSendCurrentNote.value) {
+    ElMessage.warning('保密笔记或回收站笔记不能通过普通消息发送')
+    return
+  }
+  if (hasUnsavedChanges.value && viewMode.value === 'edit') {
+    await handleSave()
+    if (hasUnsavedChanges.value) {
+      ElMessage.warning('请先保存当前笔记后再发送')
+      return
+    }
+  }
+  showNoteSendDialog.value = true
+}
+
+function closeNoteSendDialog() {
+  if (isSendingNote.value) return
+  showNoteSendDialog.value = false
+}
+
+async function handleNoteSendTarget(target) {
+  if (!target || !currentNoteId.value || isSendingNote.value) return
+  isSendingNote.value = true
+  try {
+    const isGroupTarget = target.type === 'group'
+    const url = isGroupTarget
+      ? `/api/messages/groups/${target.id}/notes/share/`
+      : '/api/messages/notes/share/'
+    const body = isGroupTarget
+      ? { note_id: currentNoteId.value }
+      : { note_id: currentNoteId.value, recipient_id: target.id }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCSRFToken(),
+      },
+      body: JSON.stringify(body),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || data.message || '发送笔记失败')
+    ElMessage.success(isGroupTarget ? '已发送到群聊' : '已发送到私信')
+    showNoteSendDialog.value = false
+  } catch (error) {
+    ElMessage.error(error?.message || '发送笔记失败')
+  } finally {
+    isSendingNote.value = false
+  }
+}
 </script>

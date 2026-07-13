@@ -7,6 +7,10 @@
 <head>
     <meta charset="UTF-8">
     <title>{% block title %}知识协作平台{% endblock %}</title>
+    <link rel="manifest" href="{% static 'dist/manifest.webmanifest' %}">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="{% static 'dist/pwa-icon.svg' %}">
 
     <!-- CSP 由 Django 中间件 ContentSecurityPolicyMiddleware 统一设置 -->
     <!-- 不再使用 meta 标签，避免与 HTTP 头冲突 -->
@@ -154,6 +158,11 @@
                       </li>
                       {% endif %}
                       <li><a href="{%url 'settings'%}"><i class="fas fa-cog"></i> 设置</a></li>
+                      <li id="pwaInstallMenuItem" hidden>
+                        <button type="button" id="pwaInstallButton" class="logout-btn">
+                          <i class="fas fa-download"></i> 安装应用
+                        </button>
+                      </li>
                       {% if user.is_superuser %}
                       <li><a href="{% url 'moderation_reports' %}"><i class="fas fa-gavel"></i> 举报处置</a></li>
                       {% endif %}
@@ -372,6 +381,40 @@ document.addEventListener("DOMContentLoaded", function() {
     </main>
 
     <!-- 为子模板预留一个可以插入自己脚本的位置 -->
+    <script>
+      (function() {
+        let installPrompt = null;
+        const menuItem = document.getElementById('pwaInstallMenuItem');
+        const installButton = document.getElementById('pwaInstallButton');
+
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(function() {});
+          });
+        }
+
+        window.addEventListener('beforeinstallprompt', function(event) {
+          event.preventDefault();
+          installPrompt = event;
+          if (menuItem) menuItem.hidden = false;
+        });
+
+        if (installButton) {
+          installButton.addEventListener('click', async function() {
+            if (!installPrompt) return;
+            installPrompt.prompt();
+            await installPrompt.userChoice;
+            installPrompt = null;
+            if (menuItem) menuItem.hidden = true;
+          });
+        }
+
+        window.addEventListener('appinstalled', function() {
+          installPrompt = null;
+          if (menuItem) menuItem.hidden = true;
+        });
+      })();
+    </script>
     <script>
       (function() {
         const LIVE2D_SRC = 'https://live2d.03vps.cn/dist/autoload.js';

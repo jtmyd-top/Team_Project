@@ -2,6 +2,13 @@
 from .common import *  # noqa: F401,F403
 from . import common as _common
 from .media import protected_media_view, public_profile_media_view  # noqa: F401
+from django.db import transaction
+from accounts.storage_quota import (
+    StorageQuotaExceeded,
+    ensure_storage_available,
+    lock_user_storage_quota,
+    quota_exceeded_payload,
+)
 
 
 def _validate_image_upload(uploaded_file, *, ckeditor=False):
@@ -56,29 +63,27 @@ def image_upload_view(request):
         logger.error(f"查询重复图片时出错: {e}", exc_info=True)
         # 即使查询出错，我们也可以继续尝试保存，而不是中断流程
 
-    # --- 如果不是重复文件，则执行保存逻辑 ---
-    # 3. 采用“两阶段保存”策略，保存新文件
+    # --- 如果不是重复文件，则在同一事务和用户锁内检查配额并保存 ---
     try:
-        # 创建一个不包含文件的实例
-        new_asset = Asset(
-            uploader=current_user,
-            asset_type='image',
-            image_hash=file_hash,
-            name=image_file.name
-            # 注意：project=None 已经不再需要，因为模型里没有这个字段了
-        )
-        new_asset.save()  # 第一次保存
-
-        # 关联并保存文件
-        new_asset.file = image_file
-        new_asset.save()  # 第二次保存
-
+        with transaction.atomic():
+            lock_user_storage_quota(current_user)
+            ensure_storage_available(current_user, getattr(image_file, 'size', 0) or 0)
+            # 创建一个不包含文件的实例，先取得稳定的用户路径。
+            new_asset = Asset(
+                uploader=current_user,
+                asset_type='image',
+                image_hash=file_hash,
+                name=image_file.name,
+            )
+            new_asset.save()
+            new_asset.file = image_file
+            new_asset.save()
         logger.info(f"为用户 {current_user.id} 上传了新图片。")
         return JsonResponse({'location': new_asset.get_protected_url()})
-
+    except StorageQuotaExceeded as exc:
+        return JsonResponse(quota_exceeded_payload(exc.summary), status=413)
     except Exception as e:
         logger.error(f"为用户 {current_user.id} 保存新图片失败: {e}", exc_info=True)
-        # 清理可能产生的孤立记录
         if 'new_asset' in locals() and new_asset.pk:
             new_asset.delete()
         return JsonResponse({'error': '服务器保存文件时出错。'}, status=500)
@@ -123,25 +128,24 @@ def ckeditor_image_upload_view(request):
     except Exception as e:
         logger.error(f"[CKEditor] 查询重复图片时出错: {e}", exc_info=True)
 
-    # 3. 采用“两阶段保存” (逻辑不变)
+    # 3. 同一事务和用户锁内检查配额并保存。
     try:
-        # 阶段一：保存元数据
-        new_asset = Asset(
-            uploader=current_user,
-            asset_type='image',
-            image_hash=file_hash,
-            name=image_file.name
-        )
-        new_asset.save()
-
-        # 阶段二：关联并保存文件
-        new_asset.file = image_file
-        new_asset.save()
-
+        with transaction.atomic():
+            lock_user_storage_quota(current_user)
+            ensure_storage_available(current_user, getattr(image_file, 'size', 0) or 0)
+            new_asset = Asset(
+                uploader=current_user,
+                asset_type='image',
+                image_hash=file_hash,
+                name=image_file.name,
+            )
+            new_asset.save()
+            new_asset.file = image_file
+            new_asset.save()
         logger.info(f"[CKEditor] 为用户 {current_user.id} 上传了新图片。")
-        # 【核心修改】直接返回新建资产的、受保护的相对URL
         return JsonResponse({'url': new_asset.get_protected_url()})
-
+    except StorageQuotaExceeded as exc:
+        return JsonResponse(quota_exceeded_payload(exc.summary), status=413)
     except Exception as e:
         logger.error(f"[CKEditor] 为用户 {current_user.id} 保存新图片失败: {e}", exc_info=True)
         if 'new_asset' in locals() and new_asset.pk:

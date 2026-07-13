@@ -13,6 +13,9 @@ export function usePrimarySidebar(emit) {
     { id: 'my-space', label: '我的空间', icon: 'fas fa-folder' },
     { id: 'favorites', label: '收藏夹', icon: 'fas fa-star' },
     { id: 'vault', label: '保密柜', icon: 'fas fa-lock' },
+    { id: 'notifications', label: '通知中心', icon: 'fas fa-bell' },
+    { id: 'shares', label: '分享管理', icon: 'fas fa-share-nodes' },
+    { id: 'files', label: '文件中心', icon: 'fas fa-folder-open' },
     { id: 'trash', label: '回收站', icon: 'fas fa-trash' },
   ]
 

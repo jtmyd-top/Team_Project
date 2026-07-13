@@ -4,7 +4,7 @@
     <div v-if="showToc" class="reading-progress-bar" :style="{ width: scrollProgress + '%' }"></div>
 
     <!-- 主内容区 -->
-    <div ref="hostRef" class="shadow-host"></div>
+    <div ref="hostRef" class="shadow-host" @mouseup="captureSelection"></div>
 
     <!-- 目录侧边栏（阈值触发显示） -->
     <Transition name="slide-in">
@@ -56,6 +56,7 @@ const props = defineProps({
     default: null
   }
 })
+const emit = defineEmits(['selection'])
 
 const {
   hostRef,
@@ -65,6 +66,29 @@ const {
   scrollProgress,
   scrollToHeading
 } = useNoteShadowViewer(props)
+
+function captureSelection() {
+  const selection = window.getSelection?.()
+  const root = hostRef.value?.shadowRoot
+  if (!selection || selection.rangeCount === 0 || !root || selection.isCollapsed) return
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.commonAncestorContainer)) return
+  const text = selection.toString().trim()
+  if (!text) return
+
+  const prefix = document.createRange()
+  prefix.selectNodeContents(root)
+  prefix.setEnd(range.startContainer, range.startOffset)
+  const fullText = root.textContent || ''
+  const start = prefix.toString().length
+  const end = start + text.length
+  emit('selection', {
+    text: text.slice(0, 1000),
+    start,
+    end,
+    context: fullText.slice(Math.max(0, start - 80), Math.min(fullText.length, end + 80)),
+  })
+}
 </script>
 
 <style scoped>

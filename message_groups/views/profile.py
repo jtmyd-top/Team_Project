@@ -46,6 +46,16 @@ def create_message_group_api(request):
             return JsonResponse({'error': 'member_ids 必须是数组'}, status=400)
 
         policy = MessageGroupPolicy.get_current()
+        profile = getattr(request.user, 'profile', None)
+        if not (profile and profile.two_fa_enabled):
+            return JsonResponse({
+                'status': 'error',
+                'code': 'require_2fa_setup',
+                'error': '创建群组前请先开启两因素认证（2FA）',
+                'message': '创建群组前请先开启两因素认证（2FA）',
+                'policy': _policy_payload(policy, request.user),
+            }, status=403)
+
         policy_payload = _policy_payload(policy, request.user)
         if not policy_payload['eligible']:
             return JsonResponse({

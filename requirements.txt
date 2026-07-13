@@ -20,3 +20,5 @@ jieba==0.42.1
 nh3==0.2.18
 msal==1.30.0
 PySocks==1.7.1
+pywebpush==2.3.0
+py-vapid==1.9.2

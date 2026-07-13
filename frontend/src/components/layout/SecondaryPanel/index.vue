@@ -365,6 +365,17 @@
     </aside>
   </transition>
 
+  <button
+    v-if="canReopenSecondaryPanel && sidebarStore.isCollapsed"
+    class="secondary-panel-expand-btn"
+    type="button"
+    @click="sidebarStore.toggleCollapse()"
+    title="展开侧边栏"
+    aria-label="展开侧边栏"
+  >
+    <i class="fas fa-chevron-right"></i>
+  </button>
+
   <!-- 右键菜单 -->
   <NoteContextMenu
     :visible="contextMenuVisible"
@@ -386,6 +397,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import FolderTreeItem from '@/components/common/FolderTreeItem/index.vue'
 import NoteListItem from '@/components/common/NoteListItem/index.vue'
 import NoteContextMenu from '@/components/common/NoteContextMenu/index.vue'
@@ -495,4 +507,8 @@ const {
   // Stores
   sidebarStore
 } = useSecondaryPanel(props, emit)
+
+const canReopenSecondaryPanel = computed(() => (
+  ['all-notes', 'my-space', 'favorites', 'trash', 'vault'].includes(sidebarStore.activeModule)
+))
 </script>

@@ -14,6 +14,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from Team_Project.middleware import SessionTimeoutMiddleware, VaultLockMiddleware
+from messaging.models import MessageGroup
 from notes.models import Note, NoteComment
 from knowledge_project.views.auth.login import (
     LOGIN_2FA_EMAIL_CODE_SESSION_KEY,
@@ -112,6 +113,39 @@ class TwoFactorDisableFixTests(TestCase):
         self.assertEqual(response.status_code, 200)
         profile.refresh_from_db()
         self.assertFalse(profile.two_fa_enabled)
+        mocked_verify.assert_called_once()
+
+    @patch('knowledge_project.views.auth.two_factor.verify_2fa_for_request', return_value=(True, 'ok'))
+    def test_disable_2fa_blocks_when_secure_resources_exist(self, mocked_verify):
+        user = make_user('twofa_user_with_resources')
+        profile = user.profile
+        profile.two_fa_enabled = True
+        profile.two_fa_method = 'totp'
+        profile.totp_secret = 'SECRET'
+        profile.save(update_fields=['two_fa_enabled', 'two_fa_method', 'totp_secret'])
+        Note.objects.create(
+            author=user,
+            title='secret',
+            content='encrypted',
+            is_secret=True,
+        )
+        MessageGroup.objects.create(name='owned group', owner=user, created_by=user)
+
+        request = self.factory.post(
+            reverse('disable_2fa'),
+            data=json.dumps({'password': 'pass-word-123!', 'code': '123456', 'use_backup': False}),
+            content_type='application/json',
+        )
+        request.user = user
+        response = disable_2fa(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = parse(response)
+        self.assertEqual(body['code'], 'cannot_disable_2fa_dependencies')
+        self.assertEqual(body['secret_notes_count'], 1)
+        self.assertEqual(body['owned_groups_count'], 1)
+        profile.refresh_from_db()
+        self.assertTrue(profile.two_fa_enabled)
         mocked_verify.assert_called_once()
 
 

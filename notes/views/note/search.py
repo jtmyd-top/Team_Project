@@ -12,7 +12,17 @@ def search_notes_api(request):
     user = request.user
     # 【修改点】查询条件简化：标题或内容包含查询字符串，并且作者是当前用户
     search_condition = Q(title__icontains=query) | Q(content__icontains=query)
-    results = Note.objects.filter(search_condition, author=user, is_secret=False).order_by('-updated_at').values('id', 'title')
+    results = (
+        Note.objects.filter(
+            search_condition,
+            Q(author=user) | Q(collaborators__user=user),
+            is_secret=False,
+            is_trashed=False,
+        )
+        .distinct()
+        .order_by('-updated_at')
+        .values('id', 'title')
+    )
 
     return JsonResponse(list(results), safe=False)
 
@@ -25,13 +35,13 @@ def get_all_notes_api(request):
     # 这样可以确保 is_secret 过滤总是准确的
     all_notes = list(
         Note.objects.filter(
-            author=user,
+            Q(author=user) | Q(collaborators__user=user),
             is_secret=False,  # 排除保密柜笔记
             is_trashed=False
         )
+        .distinct()
         .order_by('-updated_at')
         .values('id', 'title', 'is_secret', 'folder_id', 'is_favorited')
     )
 
     return JsonResponse(all_notes, safe=False)
-

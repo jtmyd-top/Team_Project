@@ -146,17 +146,29 @@
         :closable="false"
         style="margin-bottom: 16px;"
       >
-        开启后，私信页面在后台或你正在查看其他会话时，收到新私信会显示浏览器桌面通知。
+        开启后，系统会在网页关闭或退到后台时通过系统通知提醒你收到的新私信。
       </el-alert>
       <el-form label-position="left" label-width="180px">
-        <el-form-item label="新消息浏览器通知">
+        <el-form-item label="新消息后台通知">
           <el-switch
             v-model="notifications.browser_enabled"
-            :disabled="!browserNotificationSupported"
+            :disabled="!browserPushSupported || browserPushLoading"
+            :loading="browserPushLoading"
             @change="handleBrowserNotificationToggle"
           />
           <div class="form-hint">
-            {{ browserNotificationSupported ? '首次开启时浏览器会请求通知权限。' : '当前浏览器不支持桌面通知。' }}
+            <template v-if="!browserPushSupported">
+              当前浏览器不支持 Service Worker 后台推送通知。
+            </template>
+            <template v-else-if="!browserPushConfigured">
+              服务器尚未配置 Web Push 密钥，暂时无法开启。
+            </template>
+            <template v-else-if="browserPushSubscribed">
+              已为当前设备建立 {{ browserPushSubscriptionCount }} 个有效后台推送订阅。
+            </template>
+            <template v-else>
+              开启时浏览器会请求通知权限，并为当前设备创建后台推送订阅。
+            </template>
           </div>
         </el-form-item>
       </el-form>
@@ -174,7 +186,11 @@ const {
   notificationItems,
   unreadCount,
   notificationsLoading,
-  browserNotificationSupported,
+  browserPushSupported,
+  browserPushConfigured,
+  browserPushSubscribed,
+  browserPushSubscriptionCount,
+  browserPushLoading,
   markNotificationRead,
   markAllNotificationsRead,
   saveNotifications,

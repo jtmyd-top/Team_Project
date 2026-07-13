@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry
+from .models import BackupRecord
 
 
 @admin.register(LogEntry)
@@ -20,3 +21,24 @@ class LogEntryAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
+
+
+@admin.register(BackupRecord)
+class BackupRecordAdmin(admin.ModelAdmin):
+    list_display = ('id', 'kind', 'status', 'started_at', 'completed_at', 'size_bytes')
+    list_filter = ('kind', 'status')
+    search_fields = ('storage_path', 'error_message')
+    readonly_fields = (
+        'kind',
+        'status',
+        'started_at',
+        'completed_at',
+        'storage_path',
+        'size_bytes',
+        'metadata',
+        'error_message',
+        'created_by',
+    )
+
+    def has_add_permission(self, request):
+        return False

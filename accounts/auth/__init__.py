@@ -31,6 +31,8 @@ from .two_factor import (
     disable_2fa,
     regenerate_backup_codes,
     generate_backup_codes_list,
+    start_update_totp,
+    verify_update_totp,
     verify_2fa_login,
     resend_2fa_email,
 )
@@ -57,6 +59,7 @@ __all__ = [
     'SignUpView',
     'send_operation_2fa_code', 'enable_2fa', 'verify_2fa_setup', 'disable_2fa',
     'regenerate_backup_codes', 'generate_backup_codes_list',
+    'start_update_totp', 'verify_update_totp',
     'verify_2fa_login', 'resend_2fa_email',
     '_send_email_async_helper', 'send_password_change_notification', 'change_password',
     'forgot_password_view', 'password_reset_api', 'reset_password_view',

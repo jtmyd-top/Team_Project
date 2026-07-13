@@ -398,7 +398,11 @@ def _visible_messages_qs(viewer, peer, viewer_settings=None):
     if viewer_settings and viewer_settings.cleared_before:
         qs = qs.filter(created_at__gt=viewer_settings.cleared_before)
 
-    return qs.select_related('sender', 'recipient').prefetch_related('attachments').order_by('created_at', 'id')
+    return (
+        qs.select_related('sender', 'recipient', 'note_share__note__author', 'note_share__shared_by')
+        .prefetch_related('attachments')
+        .order_by('created_at', 'id')
+    )
 
 
 def _apply_disappearing(viewer, peer, viewer_settings=None, peer_settings=None):
@@ -456,6 +460,41 @@ def _count_unread(user, peer, viewer_settings=None):
 # ------------------------------------------------------------------
 # 序列化 payload
 # ------------------------------------------------------------------
+def _direct_note_share_payload(msg):
+    from django.core.exceptions import ObjectDoesNotExist
+    try:
+        share = msg.note_share
+    except ObjectDoesNotExist:
+        return None
+    note = share.note
+    unavailable = bool(share.revoked_at or note.is_trashed or note.is_secret)
+    title = share.title_snapshot or note.title
+    return {
+        'id': share.id,
+        'note_id': note.id,
+        'title': title,
+        'author': {
+            'id': note.author_id,
+            'username': note.author.username,
+            'avatar': _get_avatar_url(note.author),
+        },
+        'shared_by': {
+            'id': share.shared_by_id,
+            'username': share.shared_by.username,
+            'avatar': _get_avatar_url(share.shared_by),
+        },
+        'created_at': share.created_at.isoformat() if share.created_at else None,
+        'is_public': note.is_public,
+        'is_secret': note.is_secret,
+        'allow_forwarding': share.allow_forwarding,
+        'requires_group_membership': False,
+        'is_available': not unavailable,
+        'access_url': f'/api/messages/note-shares/{share.id}/',
+        'view_url': f'/messages/note-shares/{share.id}/view/',
+        'public_url': f'/notes/public/{note.public_id}/' if note.public_id and note.is_public and not note.is_secret else '',
+    }
+
+
 def _message_payload(msg, viewer=None):
     merged_forward = _parse_merged_forward(msg.content)
     return {
@@ -469,10 +508,13 @@ def _message_payload(msg, viewer=None):
         'content_preview': _merged_forward_preview(msg.content) if merged_forward else '',
         'merged_forward': merged_forward,
         'created_at': msg.created_at.isoformat(),
+        'is_edited': getattr(msg, 'is_edited', False),
+        'edited_at': msg.edited_at.isoformat() if getattr(msg, 'edited_at', None) else None,
         'is_read': msg.is_read,
         'read_at': msg.read_at.isoformat() if msg.read_at else None,
         'is_own': (viewer is not None and viewer.id == msg.sender_id),
         'attachments': [_attachment_payload(a) for a in msg.attachments.all()],
+        'note_share': _direct_note_share_payload(msg),
     }
 
 
@@ -487,20 +529,20 @@ def _attachment_payload(attachment):
     }
 
 
-def _clone_forwarded_attachments(source_message, sender, target_message):
+def _clone_forwarded_attachments(source, sender, target_message):
     from messaging.models import MessageAttachment
 
     created = []
-    for source in source_message.attachments.all():
+    for attachment in source.attachments.all():
         forwarded = MessageAttachment.objects.create(
             uploader=sender,
             message=target_message,
-            file=source.file.name,
-            original_name=source.original_name,
-            attachment_type=source.attachment_type,
-            mime_type=source.mime_type,
-            size=source.size,
-            was_reported=source.was_reported,
+            file=attachment.file.name,
+            original_name=attachment.original_name,
+            attachment_type=attachment.attachment_type,
+            mime_type=attachment.mime_type,
+            size=attachment.size,
+            was_reported=attachment.was_reported,
         )
         created.append(forwarded)
     return created
@@ -537,6 +579,31 @@ def _conversation_settings_payload(cs):
         'disappearing_ttl_seconds': cs.disappearing_ttl_seconds,
         'force_unread': cs.force_unread,
         'cleared_before': cs.cleared_before.isoformat() if cs.cleared_before else None,
+    }
+
+
+def _get_active_direct_message_mute(user, muted_user):
+    from messaging.models import DirectMessageMute
+
+    return (
+        DirectMessageMute.objects
+        .filter(user=user, muted_user=muted_user)
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        .first()
+    )
+
+
+def _direct_message_mute_payload(mute):
+    if mute is None:
+        return {
+            'is_active': False,
+            'expires_at': None,
+            'reason': '',
+        }
+    return {
+        'is_active': True,
+        'expires_at': mute.expires_at.isoformat() if mute.expires_at else None,
+        'reason': mute.reason,
     }
 
 
@@ -683,6 +750,9 @@ def _check_send_permissions(sender, recipient):
 
     if UserBlocklist.objects.filter(user=recipient, blocked_user=sender).exists():
         return JsonResponse({'error': '无法向此用户发送私信'}, status=403), None
+
+    if _get_active_direct_message_mute(recipient, sender) is not None:
+        return JsonResponse({'error': '对方暂时限制了你向其发送私信'}, status=403), None
 
     pref, _ = MessagePreference.objects.get_or_create(user=recipient)
     if UserBlocklist.objects.filter(user=sender, blocked_user=recipient).exists():

@@ -4,11 +4,12 @@ from .transfer import (transfer_group_ownership_api)
 from .membership import (set_group_mute_mode_api, add_group_members_api, remove_group_member_api, set_group_member_role_api, mute_group_member_api)
 from .access import (group_invite_links_api, group_bans_api, revoke_group_ban_api, group_audit_logs_api, preview_group_invite_api, revoke_group_invite_link_api, join_group_by_invite_api)
 from .lifecycle import (leave_message_group_api, dissolve_message_group_api, toggle_group_setting_api)
-from .messages import (get_group_messages_api, send_group_message_api, pin_group_message_api, group_shared_items_api, edit_group_message_api, delete_group_message_api, report_group_message_api)
+from .messages import (get_group_messages_api, send_group_message_api, share_note_to_group_api, get_group_note_share_api, group_note_share_view, pin_group_message_api, group_shared_items_api, edit_group_message_api, delete_group_message_api, report_group_message_api)
 from .transfer_check import (check_transfer_eligibility_api)
 from .reactions import (toggle_message_reaction_api)
 from .join_requests import (request_join_group_api, group_join_requests_api, all_pending_join_requests_api, review_join_request_api)
 from .announcements import (update_group_announcement_api, group_announcement_detail_api, group_announcement_reads_api)
+from .work_items import (group_polls_api, vote_group_poll_api, close_group_poll_api, group_tasks_api, complete_group_task_api)
 
 __all__ = [
     'get_group_policy_api',
@@ -33,6 +34,9 @@ __all__ = [
     'toggle_group_setting_api',
     'get_group_messages_api',
     'send_group_message_api',
+    'share_note_to_group_api',
+    'get_group_note_share_api',
+    'group_note_share_view',
     'pin_group_message_api',
     'group_shared_items_api',
     'edit_group_message_api',
@@ -47,4 +51,9 @@ __all__ = [
     'update_group_announcement_api',
     'group_announcement_detail_api',
     'group_announcement_reads_api',
+    'group_polls_api',
+    'vote_group_poll_api',
+    'close_group_poll_api',
+    'group_tasks_api',
+    'complete_group_task_api',
 ]

@@ -147,6 +147,9 @@ export const useSidebarStore = defineStore('sidebar', () => {
       'favorites': '收藏夹',
       'trash': '回收站',
       'vault': '保密柜',
+      'notifications': '通知中心',
+      'shares': '分享管理',
+      'files': '文件中心',
       'settings': '设置'
     }
     return titles[activeModule.value] || ''
@@ -342,6 +345,13 @@ export const useSidebarStore = defineStore('sidebar', () => {
           break
         case 'vault':
           await enterVault()
+          break
+        case 'notifications':
+        case 'shares':
+        case 'files':
+          currentNotes.value = []
+          currentSubfolders.value = []
+          currentFolder.value = null
           break
       }
     } catch (e) {

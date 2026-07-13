@@ -173,6 +173,7 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEFAULT_FILE_STORAGE_BACKEND = os.getenv('DEFAULT_FILE_STORAGE_BACKEND', '').strip()
 MEDIA_URL = os.getenv('MEDIA_URL', '/uploads/')
 MEDIA_ROOT = os.getenv('MEDIA_ROOT', os.path.join(BASE_DIR, 'knowledge_project', 'uploads'))
+BACKUP_DIR = os.getenv('BACKUP_DIR', os.path.join(BASE_DIR, 'backups'))
 IMAGE_UPLOAD_MAX_SIZE = int(os.getenv('IMAGE_UPLOAD_MAX_SIZE', str(10 * 1024 * 1024)))
 IMAGE_UPLOAD_ALLOWED_EXTENSIONS = env_list('IMAGE_UPLOAD_ALLOWED_EXTENSIONS', '.jpg,.jpeg,.png,.gif,.webp')
 IMAGE_UPLOAD_ALLOWED_MIME_TYPES = env_list(
@@ -227,7 +228,9 @@ CACHES = {
 DJANGO_REDIS_LOG_IGNORED_EXCEPTIONS = True
 DJANGO_REDIS_LOGGER = 'django_redis'
 
-SESSION_ENGINE = os.getenv('SESSION_ENGINE', 'django.contrib.sessions.backends.cache')
+# Keep an authoritative session record in MySQL. Redis remains the fast path,
+# but a cache flush must not log every user out.
+SESSION_ENGINE = os.getenv('SESSION_ENGINE', 'django.contrib.sessions.backends.cached_db')
 SESSION_CACHE_ALIAS = 'default'
 SESSION_COOKIE_AGE = 10800
 SESSION_IDLE_TIMEOUT = int(os.getenv('SESSION_IDLE_TIMEOUT', SESSION_COOKIE_AGE))
@@ -270,6 +273,19 @@ REALTIME_MESSAGES_ENABLED = CHANNELS_AVAILABLE and env_bool('REALTIME_MESSAGES_E
 REALTIME_MESSAGES_PATH = os.getenv('REALTIME_MESSAGES_PATH', '/ws/messages/')
 WS_CLIENT_INACTIVITY_TIMEOUT = int(os.getenv('WS_CLIENT_INACTIVITY_TIMEOUT', '300'))
 REQUIRE_SHARED_CHANNEL_LAYER = env_bool('REQUIRE_SHARED_CHANNEL_LAYER', IS_PRODUCTION)
+
+# Web Push remains disabled until a VAPID key pair and contact subject are configured.
+WEB_PUSH_ENABLED = env_bool('WEB_PUSH_ENABLED', False)
+VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '').strip()
+VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '').strip()
+VAPID_SUBJECT = os.getenv('VAPID_SUBJECT', '').strip()
+WEB_PUSH_TTL_SECONDS = int(os.getenv('WEB_PUSH_TTL_SECONDS', '300'))
+WEB_PUSH_CONFIGURED = bool(
+    WEB_PUSH_ENABLED
+    and VAPID_PUBLIC_KEY
+    and VAPID_PRIVATE_KEY
+    and VAPID_SUBJECT
+)
 
 if REALTIME_MESSAGES_ENABLED:
     channel_redis_url = os.getenv('CHANNEL_REDIS_URL') or REDIS_URL or 'redis://127.0.0.1:6379/2'

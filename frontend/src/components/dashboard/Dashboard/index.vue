@@ -43,9 +43,11 @@
         <!-- 中栏: 业务数据 + 中间件状态 -->
         <div class="dashboard-col-center">
           <AssetOverview />
+          <OperationsOverview />
           <MiddlewareStatus />
           <ContentTrend />
           <TrashBacklog />
+          <BackupStatus />
         </div>
 
         <!-- 右栏: 安全态势 + 日志流 -->
@@ -72,9 +74,11 @@ import DiskChart from '../DiskChart/index.vue'
 import CpuTimeline from '../CpuTimeline/index.vue'
 import NetworkWave from '../NetworkWave/index.vue'
 import AssetOverview from '../AssetOverview/index.vue'
+import OperationsOverview from '../OperationsOverview/index.vue'
 import MiddlewareStatus from '../MiddlewareStatus/index.vue'
 import ContentTrend from '../ContentTrend/index.vue'
 import TrashBacklog from '../TrashBacklog/index.vue'
+import BackupStatus from '../BackupStatus/index.vue'
 import VaultAlertPanel from '../VaultAlertPanel/index.vue'
 import LoginMonitor from '../LoginMonitor/index.vue'
 import AuditLog from '../AuditLog/index.vue'

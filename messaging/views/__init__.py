@@ -20,20 +20,27 @@ from ._helpers import _get_avatar_url  # noqa: F401
 
 from .attachment import (
     blocked_message_attachment_media_api,
+    list_my_message_attachments_api,
     message_attachment_file_api,
     upload_message_attachment_api,
 )
 from .conversation import (
     bulk_delete_messages_api,
     clear_conversation_api,
+    clear_direct_message_mute_api,
     delete_message_api,
+    direct_note_share_view,
+    edit_message_api,
     forward_message_api,
     get_conversation_settings_api,
     get_message_conversations_api,
     get_messages_api,
+    get_direct_note_share_api,
     mark_conversation_read_api,
     mark_conversation_unread_api,
     send_message_api,
+    set_direct_message_mute_api,
+    share_note_to_user_api,
     set_disappearing_api,
     toggle_archive_api,
     toggle_mute_api,
@@ -59,6 +66,12 @@ from .users import (
     messages_view,
     search_users_api,
     touch_messages_page_api,
+)
+from .note_shares import (
+    list_note_share_reads_api,
+    list_note_shares_api,
+    revoke_note_share_api,
+    update_note_share_forwarding_api,
 )
 
 _GROUP_VIEW_EXPORTS = {
@@ -112,19 +125,26 @@ def __getattr__(name):
 __all__ = [
     # attachment
     'blocked_message_attachment_media_api',
+    'list_my_message_attachments_api',
     'message_attachment_file_api',
     'upload_message_attachment_api',
     # conversation
     'bulk_delete_messages_api',
     'clear_conversation_api',
+    'clear_direct_message_mute_api',
     'delete_message_api',
+    'direct_note_share_view',
+    'edit_message_api',
     'forward_message_api',
     'get_conversation_settings_api',
     'get_message_conversations_api',
     'get_messages_api',
+    'get_direct_note_share_api',
     'mark_conversation_read_api',
     'mark_conversation_unread_api',
     'send_message_api',
+    'set_direct_message_mute_api',
+    'share_note_to_user_api',
     'set_disappearing_api',
     'toggle_archive_api',
     'toggle_mute_api',
@@ -166,6 +186,10 @@ __all__ = [
     'update_group_announcement_api',
     'update_group_profile_api',
     # preference
+    'list_note_share_reads_api',
+    'list_note_shares_api',
+    'revoke_note_share_api',
+    'update_note_share_forwarding_api',
     'block_user_api',
     'get_blocked_users_api',
     'get_message_preference_api',

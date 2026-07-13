@@ -197,6 +197,12 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="投票与任务" name="work">
+        <div class="tab-content">
+          <GroupWorkPanel :group-id="groupId" :current-user-id="currentUserId" />
+        </div>
+      </el-tab-pane>
+
       <!-- Invites Tab -->
       <el-tab-pane label="邀请链接" name="invites" v-if="canInvite">
         <div class="tab-content">
@@ -319,6 +325,7 @@ import { Close, Plus, Search, More, Link } from '@element-plus/icons-vue';
 import TransferOwnershipDialog from './TransferOwnershipDialog.vue';
 import BanMemberDialog from './BanMemberDialog.vue';
 import InvitePreviewDialog from './InvitePreviewDialog.vue';
+import GroupWorkPanel from './GroupWorkPanel.vue';
 import { getCsrfToken } from '../../../utils/csrf';
 
 export default {
@@ -332,6 +339,7 @@ export default {
     TransferOwnershipDialog,
     BanMemberDialog,
     InvitePreviewDialog,
+    GroupWorkPanel,
   },
   props: {
     groupId: {
@@ -694,24 +702,7 @@ export default {
     };
 
     const confirmDissolve = async () => {
-      try {
-        await ElMessageBox.confirm(
-          '解散群组后，所有数据将被永久删除且无法恢复。请输入群组名称确认解散。',
-          '确认解散群组',
-          {
-            confirmButtonText: '确定解散',
-            cancelButtonText: '取消',
-            type: 'error',
-            inputPattern: new RegExp(`^${groupForm.value.name}$`),
-            inputPlaceholder: '请输入群组名称',
-            inputErrorMessage: '群组名称不匹配',
-          }
-        );
-
-        await dissolveGroup();
-      } catch (error) {
-        // User cancelled
-      }
+      await dissolveGroup();
     };
 
     const dissolveGroup = async () => {
@@ -723,14 +714,62 @@ export default {
           },
         });
         const data = await resp.json();
-        if (data.status === 'success') {
+        if (data.status === 'require_2fa' || data.code === 'require_2fa') {
+          const method = data.method || 'totp';
+          const methodLabel = method === 'totp' ? 'TOTP 验证器' : method === 'email' ? '邮箱验证码' : '两步验证';
+          if (method === 'email') {
+            await fetch('/api/security/send-operation-2fa/', {
+              method: 'POST',
+              headers: {
+                'X-CSRFToken': getCsrfToken(),
+              },
+            });
+            ElMessage.success('验证码已发送至你的邮箱');
+          }
+
+          const result = await ElMessageBox.prompt(
+            `解散群组是高危操作，需要进行两步验证。\n请输入您的 ${methodLabel} 验证码：`,
+            '两步验证',
+            {
+              confirmButtonText: '确认',
+              cancelButtonText: '取消',
+              inputPattern: /^(\d{6}|[A-Za-z0-9]{8})$/,
+              inputErrorMessage: '请输入 6 位验证码或 8 位备用验证码',
+              inputPlaceholder: '6 位验证码 / 8 位备用码',
+              type: 'warning',
+            }
+          );
+
+          const verifyResp = await fetch(`/api/messages/groups/${props.groupId}/dissolve/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCsrfToken(),
+            },
+            body: JSON.stringify({
+              two_fa_code: result.value,
+              use_backup: /^[A-Za-z0-9]{8}$/.test(result.value) && !/^\d{6}$/.test(result.value),
+            }),
+          });
+          const verifyData = await verifyResp.json().catch(() => ({}));
+          if (!verifyResp.ok || verifyData.status !== 'success') {
+            ElMessage.error(verifyData.message || verifyData.error || '验证失败');
+            return;
+          }
+          ElMessage.success('群组已解散');
+          emit('close');
+          emit('update');
+        } else if (data.code === 'require_2fa_setup') {
+          ElMessage.warning(data.message || '请先在安全设置中开启 2FA');
+        } else if (data.status === 'success') {
           ElMessage.success('群组已解散');
           emit('close');
           emit('update');
         } else {
-          ElMessage.error(data.error || '解散失败');
+          ElMessage.error(data.message || data.error || '解散失败');
         }
       } catch (error) {
+        if (error === 'cancel' || error === 'close') return;
         console.error('解散群组失败:', error);
         ElMessage.error('操作失败');
       }

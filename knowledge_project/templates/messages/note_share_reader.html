@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if note %}{{ note.title }} - 笔记阅览{% else %}笔记阅览{% endif %}
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  main {
+    padding-top: 0 !important;
+  }
+
+  .share-reader-page {
+    min-height: calc(100vh - 72px);
+    padding: 42px 18px 72px;
+    background:
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 32%),
+      linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.96));
+  }
+
+  .share-reader-shell {
+    width: min(920px, 100%);
+    margin: 0 auto;
+  }
+
+  .share-reader-card {
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.86);
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+  }
+
+  .share-reader-header {
+    padding: 34px 38px 24px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.82));
+  }
+
+  .share-reader-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.09);
+    color: #1d4ed8;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .share-reader-title {
+    margin: 0;
+    color: #0f172a;
+    font-size: clamp(28px, 4vw, 44px);
+    line-height: 1.14;
+    letter-spacing: 0;
+  }
+
+  .share-reader-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    margin-top: 18px;
+    color: #64748b;
+    font-size: 14px;
+  }
+
+  .share-reader-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .share-reader-content {
+    padding: 34px 38px 46px;
+    color: #1e293b;
+    font-size: 16px;
+    line-height: 1.82;
+  }
+
+  .share-reader-content :is(h1, h2, h3, h4) {
+    margin: 1.2em 0 0.55em;
+    color: #0f172a;
+    line-height: 1.28;
+    letter-spacing: 0;
+  }
+
+  .share-reader-content p {
+    margin: 0.85em 0;
+  }
+
+  .share-reader-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 12px;
+  }
+
+  .share-reader-content pre {
+    overflow-x: auto;
+    padding: 16px;
+    border-radius: 12px;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+
+  .share-reader-content blockquote {
+    margin: 1.1em 0;
+    padding: 2px 0 2px 18px;
+    border-left: 4px solid #93c5fd;
+    color: #475569;
+  }
+
+  .share-reader-empty {
+    padding: 64px 36px;
+    text-align: center;
+  }
+
+  .share-reader-empty h1 {
+    margin: 0 0 12px;
+    color: #0f172a;
+    font-size: 28px;
+    letter-spacing: 0;
+  }
+
+  .share-reader-empty p {
+    margin: 0;
+    color: #64748b;
+  }
+
+  [data-theme="dark"] .share-reader-page {
+    background:
+      radial-gradient(circle at top left, rgba(34, 211, 238, 0.11), transparent 32%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.98));
+  }
+
+  [data-theme="dark"] .share-reader-card {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(15, 23, 42, 0.78);
+  }
+
+  [data-theme="dark"] .share-reader-header {
+    border-bottom-color: rgba(148, 163, 184, 0.16);
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.72));
+  }
+
+  [data-theme="dark"] .share-reader-title,
+  [data-theme="dark"] .share-reader-content :is(h1, h2, h3, h4),
+  [data-theme="dark"] .share-reader-empty h1 {
+    color: #f8fafc;
+  }
+
+  [data-theme="dark"] .share-reader-content {
+    color: #cbd5e1;
+  }
+
+  [data-theme="dark"] .share-reader-meta,
+  [data-theme="dark"] .share-reader-empty p {
+    color: #94a3b8;
+  }
+
+  @media (max-width: 640px) {
+    .share-reader-page {
+      padding: 20px 12px 46px;
+    }
+
+    .share-reader-header,
+    .share-reader-content {
+      padding-left: 22px;
+      padding-right: 22px;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="share-reader-page">
+  <div class="share-reader-shell">
+    <section class="share-reader-card">
+      {% if error_message %}
+        <div class="share-reader-empty">
+          <h1>无法阅览这篇笔记</h1>
+          <p>{{ error_message }}</p>
+        </div>
+      {% else %}
+        <header class="share-reader-header">
+          <div class="share-reader-kicker">
+            <i class="fas fa-note-sticky"></i>
+            {{ share.label }}
+          </div>
+          <h1 class="share-reader-title">{{ note.title }}</h1>
+          <div class="share-reader-meta">
+            <span><i class="fas fa-user-edit"></i> {{ share.shared_by }}</span>
+            {% if share.group_name %}
+              <span><i class="fas fa-users"></i> {{ share.group_name }}</span>
+            {% elif share.recipient %}
+              <span><i class="fas fa-user"></i> 分享给 {{ share.recipient }}</span>
+            {% endif %}
+            {% if share.created_at %}
+              <span><i class="fas fa-clock"></i> {{ share.created_at|date:"Y-m-d H:i" }}</span>
+            {% endif %}
+            {% if share.requires_group_membership %}
+              <span><i class="fas fa-lock"></i> 仅当前群成员可见</span>
+            {% endif %}
+          </div>
+        </header>
+        <article class="share-reader-content">
+          {{ note_content|safe }}
+        </article>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

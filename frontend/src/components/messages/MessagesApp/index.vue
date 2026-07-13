@@ -248,7 +248,14 @@
             >
               <i class="fas" :class="selectionMode ? 'fa-xmark' : 'fa-check-double'"></i>
             </button>
-            <button class="action-btn" @click="openChatSearch" title="在对话中搜索">
+            <button class="action-btn" @click="openGlobalSearch" title="全局搜索 (Ctrl+K)">
+              <i class="fas fa-globe"></i>
+            </button>
+            <button
+              class="action-btn"
+              @click="openChatSearch"
+              :title="isCurrentGroup ? '搜索当前群消息' : '搜索当前私信'"
+            >
               <i class="fas fa-search"></i>
             </button>
             <div class="menu-wrap" @click.stop>
@@ -267,6 +274,15 @@
                 </button>
                 <button v-if="isCurrentGroup" class="dm-item" @click="openGroupFiles">
                   <i class="fas fa-folder-open"></i> 群文件
+                </button>
+                <button class="dm-item" @click="openKnowledgeModule('files')">
+                  <i class="fas fa-folder-tree"></i> 文件中心
+                </button>
+                <button class="dm-item" @click="openKnowledgeModule('shares')">
+                  <i class="fas fa-share-nodes"></i> 分享管理
+                </button>
+                <button class="dm-item" @click="openGlobalSearch">
+                  <i class="fas fa-magnifying-glass"></i> 全局搜索
                 </button>
                 <button v-if="!isCurrentGroup" class="dm-item" @click="toggleMarkRead">
                   <i class="fas" :class="currentSettings.force_unread || hasUnread ? 'fa-check-double' : 'fa-envelope'"></i>
@@ -287,6 +303,10 @@
                 <button v-if="!isCurrentGroup" class="dm-item" @click="toggleMute">
                   <i class="fas" :class="currentSettings.is_muted ? 'fa-bell' : 'fa-bell-slash'"></i>
                   {{ currentSettings.is_muted ? '取消免打扰' : '消息免打扰' }}
+                </button>
+                <button v-if="!isCurrentGroup" class="dm-item" @click="isDirectMessageMuted ? clearDirectMessageMute() : openDirectMessageMute()">
+                  <i class="fas" :class="isDirectMessageMuted ? 'fa-microphone' : 'fa-microphone-slash'"></i>
+                  {{ isDirectMessageMuted ? '解除发言限制' : '限制发言' }}
                 </button>
                 <button v-if="isCurrentGroup" class="dm-item" @click="toggleGroupMute">
                   <i class="fas" :class="currentSettings.is_muted ? 'fa-bell' : 'fa-bell-slash'"></i>
@@ -329,13 +349,17 @@
 
         <!-- 消息搜索栏 -->
         <div v-if="showChatSearch" class="chat-search-bar">
+          <span class="chat-search-context">
+            <i class="fas" :class="isCurrentGroup ? 'fa-users' : 'fa-user'"></i>
+            {{ isCurrentGroup ? '当前群消息' : '当前私信' }}
+          </span>
           <div class="search-input-wrap">
             <i class="fas fa-search"></i>
             <input
               ref="chatSearchInputRef"
               v-model="chatSearchQuery"
               type="text"
-              placeholder="搜索消息内容..."
+              :placeholder="isCurrentGroup ? '搜索当前群消息' : '搜索当前私信'"
               @input="onChatSearchInput"
               @keyup.enter="performChatSearch"
             />
@@ -343,6 +367,77 @@
               <i class="fas fa-times-circle"></i>
             </button>
           </div>
+          <div
+            v-if="chatSearchMatchMessages.length"
+            class="chat-search-navigator"
+            role="group"
+            aria-label="搜索结果导航"
+          >
+            <span class="chat-search-match-count" aria-live="polite">
+              {{ activeChatSearchMatchIndex + 1 }} / {{ chatSearchMatchMessages.length }}
+            </span>
+            <button
+              type="button"
+              class="chat-search-nav-btn"
+              title="上一条匹配消息"
+              aria-label="上一条匹配消息"
+              :disabled="activeChatSearchMatchIndex <= 0"
+              @click="moveChatSearchMatch(-1)"
+            >
+              <i class="fas fa-chevron-up"></i>
+            </button>
+            <button
+              type="button"
+              class="chat-search-nav-btn"
+              title="下一条匹配消息"
+              aria-label="下一条匹配消息"
+              :disabled="activeChatSearchMatchIndex >= chatSearchMatchMessages.length - 1"
+              @click="moveChatSearchMatch(1)"
+            >
+              <i class="fas fa-chevron-down"></i>
+            </button>
+          </div>
+          <template v-if="isCurrentGroup">
+            <select
+              v-if="groupSearchMembers.length"
+              v-model="chatSearchFilters.senderId"
+              class="chat-search-filter"
+              aria-label="按成员筛选"
+              @change="performChatSearch"
+            >
+              <option value="">全部成员</option>
+              <option v-for="member in groupSearchMembers" :key="member.user_id" :value="String(member.user_id)">
+                {{ member.username }}
+              </option>
+            </select>
+            <input
+              v-model="chatSearchFilters.dateFrom"
+              class="chat-search-date"
+              type="date"
+              aria-label="开始日期"
+              @change="performChatSearch"
+            />
+            <input
+              v-model="chatSearchFilters.dateTo"
+              class="chat-search-date"
+              type="date"
+              aria-label="结束日期"
+              @change="performChatSearch"
+            />
+            <label class="chat-search-attachment">
+              <input v-model="chatSearchFilters.hasAttachment" type="checkbox" @change="performChatSearch" />
+              附件
+            </label>
+            <button
+              v-if="hasActiveChatSearchFilters"
+              class="reset-search-filters-btn"
+              type="button"
+              title="清除群消息筛选"
+              @click="resetChatSearchFilters"
+            >
+              <i class="fas fa-rotate-left"></i>
+            </button>
+          </template>
           <button class="close-search-btn" @click="closeChatSearch">
             <i class="fas fa-times"></i>
           </button>
@@ -424,16 +519,21 @@
                   v-for="m in group.messages"
                   :key="m.id"
                   :data-msg-id="m.id"
-                  :class="{ 'jump-highlighted': highlightMessageId === m.id && !globalSearch && !chatSearchQuery }"
+                  :class="{ 'jump-highlighted': activeChatSearchMessageId === m.id || (highlightMessageId === m.id && !globalSearch && !chatSearchQuery) }"
                   :msg="m"
-                  :highlight="highlightMessageId === m.id ? (globalSearch || chatSearchQuery) : ''"
+                  :highlight="chatSearchQuery || (highlightMessageId === m.id ? globalSearch : '')"
                   :selectable="selectionMode"
                   :selected="selectedMessageIds.has(m.id)"
+                  :is-editing="editingMessageId === m.id"
+                  :edit-saving="editingMessageSavingId === m.id"
                   @context-menu="onMessageContextMenu"
                   @toggle-selected="toggleMessageSelected"
                   @open-merged-forward="openMergedForwardDialog"
                   @open-media-preview="openMediaPreview"
                   @reaction-toggle="handleReactionToggle"
+                  @save-edit="saveInlineMessageEdit"
+                  @cancel-edit="cancelInlineMessageEdit"
+                  @sender-avatar-click="onMessageSenderAvatarClick"
                 />
               </div>
               <div v-if="typingIndicator.visible" class="typing-indicator">
@@ -460,6 +560,12 @@
         <div v-if="peerBlockedByMe" class="blocked-tip">
           <i class="fas fa-ban"></i>
           你已屏蔽此用户。          <button class="link-btn" @click="unblockPeer">解除屏蔽</button>
+        </div>
+        <div v-else-if="isDirectMessageMuted" class="blocked-tip">
+          <i class="fas fa-microphone-slash"></i>
+          你已限制该用户向你发送私信
+          <span class="direct-mute-expiry">（{{ formatDirectMuteExpiry(currentSettings.direct_mute?.expires_at) }}）</span>
+          <button class="link-btn" @click="clearDirectMessageMute">解除限制</button>
         </div>
         <div v-else-if="isGroupComposerBlocked" class="blocked-tip">
           <i class="fas fa-microphone-slash"></i>
@@ -530,12 +636,92 @@
               </button>
             </div>
           </div>
+          <div v-if="showNotePicker" class="note-picker-panel" @click.stop>
+            <div class="note-picker-header">
+              <div>
+                <strong>发送文章</strong>
+                <span>选择已有文章或普通笔记</span>
+              </div>
+              <button class="note-picker-close" type="button" @click="closeNotePickerPanel" title="关闭">
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>
+            <label class="note-picker-search">
+              <i class="fas fa-search"></i>
+              <input
+                v-model="notePickerSearch"
+                type="text"
+                placeholder="搜索标题或编号"
+                @keydown.esc="closeNotePickerPanel"
+              />
+            </label>
+            <div v-if="notePickerLoading" class="note-picker-state">
+              <i class="fas fa-spinner fa-spin"></i>
+              <span>正在读取文章...</span>
+            </div>
+            <div v-else-if="!filteredNotePickerNotes.length" class="note-picker-state">
+              <i class="fas fa-file-lines"></i>
+              <span>{{ notePickerSearch.trim() ? '没有匹配的文章' : '暂无可发送的文章' }}</span>
+            </div>
+            <div v-else class="note-picker-list">
+              <button
+                v-for="note in filteredNotePickerNotes"
+                :key="note.id"
+                class="note-picker-item"
+                type="button"
+                :disabled="notePickerSendingId === note.id"
+                @click="sharePickedNote(note)"
+              >
+                <span class="note-picker-icon">
+                  <i :class="note.is_favorited ? 'fas fa-star' : 'fas fa-file-lines'"></i>
+                </span>
+                <span class="note-picker-meta">
+                  <strong>{{ note.title || '未命名文章' }}</strong>
+                  <em>#{{ note.id }}</em>
+                </span>
+                <span class="note-picker-send">
+                  <i v-if="notePickerSendingId === note.id" class="fas fa-spinner fa-spin"></i>
+                  <i v-else class="fas fa-paper-plane"></i>
+                </span>
+              </button>
+            </div>
+          </div>
           <div class="composer-shell">
-            <button class="tool-btn" @click="showEmojiPicker = !showEmojiPicker" title="表情">
+            <div class="composer-more-wrap" @click.stop>
+              <button
+                class="tool-btn more-tool"
+                :class="{ active: showComposerMore }"
+                type="button"
+                @click="toggleComposerMore"
+                title="更多功能"
+              >
+                <i class="fas fa-plus"></i>
+              </button>
+              <div v-if="showComposerMore" class="composer-more-menu">
+                <button type="button" class="composer-more-item" @click="openAttachmentPicker('photo')">
+                  <span class="composer-more-icon"><i class="fas fa-image"></i></span>
+                  <span>照片</span>
+                </button>
+                <button type="button" class="composer-more-item" @click="openCameraCapture">
+                  <span class="composer-more-icon"><i class="fas fa-camera"></i></span>
+                  <span>相机</span>
+                </button>
+                <button type="button" class="composer-more-item" @click="openAttachmentPicker('file')">
+                  <span class="composer-more-icon"><i class="fas fa-paperclip"></i></span>
+                  <span>文件</span>
+                </button>
+                <button type="button" class="composer-more-item" @click="openNotePickerPanel">
+                  <span class="composer-more-icon"><i class="fas fa-newspaper"></i></span>
+                  <span>文章</span>
+                </button>
+                <button type="button" class="composer-more-item" @click="toggleCodeInputFromMore">
+                  <span class="composer-more-icon"><i class="fas fa-code"></i></span>
+                  <span>代码块</span>
+                </button>
+              </div>
+            </div>
+            <button class="tool-btn" type="button" @click="toggleEmojiPicker" title="表情">
               <i class="fas fa-face-smile"></i>
-            </button>
-            <button class="tool-btn" @click="toggleCodeInput" title="代码块">
-              <i class="fas fa-code"></i>
             </button>
             <button
               class="tool-btn"
@@ -546,21 +732,13 @@
             >
               <i :class="isRecordingVoice ? 'fas fa-stop' : 'fas fa-microphone'"></i>
             </button>
-            <button
-              class="tool-btn"
-              :disabled="isUploadingAttachment || pendingAttachments.length >= maxPendingAttachments"
-              @click="openFilePicker"
-              title="添加图片或文件"
-            >
-              <i v-if="!isUploadingAttachment" class="fas fa-paperclip"></i>
-              <i v-else class="fas fa-spinner fa-spin"></i>
-            </button>
             <input
               ref="fileInputRef"
               class="hidden-file-input"
               type="file"
               multiple
-              accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,audio/webm,audio/ogg,audio/mpeg,audio/mp4,audio/wav,.pdf,.txt,.md,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+              :accept="attachmentInputAccept"
+              :capture="attachmentInputCapture"
               @change="onAttachmentSelected"
             />
             <textarea
@@ -578,7 +756,7 @@
             <div v-if="mentionPicker.visible" class="mention-picker">
               <button
                 v-for="(item, index) in mentionSuggestions"
-                :key="item.type === 'all' ? 'mention-all' : item.user_id"
+                :key="item.type === 'all' ? 'mention-all' : item.type === 'command' ? item.command : item.user_id"
                 class="mention-option"
                 :class="{ active: index === mentionPicker.activeIndex }"
                 type="button"
@@ -587,10 +765,13 @@
                 <span v-if="item.type === 'all'" class="mention-avatar mention-avatar-all">
                   <i class="fas fa-bullhorn"></i>
                 </span>
+                <span v-else-if="item.type === 'command'" class="mention-avatar mention-avatar-command">
+                  <i class="fas fa-microphone-slash"></i>
+                </span>
                 <img v-else class="mention-avatar" :src="item.avatar" :alt="item.username" />
                 <span class="mention-meta">
                   <strong>{{ item.label || item.username }}</strong>
-                  <em>{{ item.type === 'all' ? '通知所有群成员' : roleLabel(item.role) }}</em>
+                  <em>{{ item.type === 'command' ? item.hint : item.type === 'all' ? '通知所有群成员' : roleLabel(item.role) }}</em>
                 </span>
               </button>
               <div v-if="!mentionSuggestions.length" class="mention-empty">没有匹配的成员</div>
@@ -657,11 +838,22 @@
       <button class="dm-item" @click="messageCtxAction('multi_select')">
         <i class="fas fa-check-double"></i> 多选
       </button>
-      <button class="dm-item" @click="messageCtxAction('forward')">
+      <button
+        v-if="messageCtxMenu.msg?.note_share?.allow_forwarding !== false"
+        class="dm-item"
+        @click="messageCtxAction('forward')"
+      >
         <i class="fas fa-share"></i> 转发
       </button>
       <button class="dm-item" @click="messageCtxAction('copy')">
         <i class="fas fa-copy"></i> 复制
+      </button>
+      <button
+        v-if="canOpenNoteShareInWindow(messageCtxMenu.msg)"
+        class="dm-item"
+        @click="messageCtxAction('open_note_window')"
+      >
+        <i class="fas fa-up-right-from-square"></i> 新窗口阅览
       </button>
       <button
         v-if="isCurrentGroup && canManageCurrentGroup"
@@ -672,7 +864,7 @@
         {{ messageCtxMenu.msg?.is_pinned ? '取消置顶消息' : '置顶消息' }}
       </button>
       <button
-        v-if="isCurrentGroup && messageCtxMenu.msg?.is_own"
+        v-if="messageCtxMenu.msg?.is_own"
         class="dm-item"
         @click="messageCtxAction('edit')"
       >
@@ -838,6 +1030,47 @@
                 保存公告
               </button>
             </div>
+            <div
+              v-if="groupPanel.announcementReadStats?.announcement_id"
+              class="group-announcement-reads"
+            >
+              <div class="announcement-read-summary">
+                <span>
+                  <i class="fas fa-eye"></i>
+                  已读 {{ groupPanel.announcementReadStats.read_count }} / {{ groupPanel.announcementReadStats.total_members }}
+                </span>
+                <span v-if="canManageCurrentGroup">
+                  未读 {{ groupPanel.announcementReadStats.unread_count }}
+                </span>
+              </div>
+              <button
+                v-if="!groupPanel.announcementReadStats.viewer_has_read"
+                class="group-secondary-btn small"
+                type="button"
+                :disabled="groupPanel.announcementReadsSaving"
+                @click="confirmGroupAnnouncementRead"
+              >
+                <i v-if="groupPanel.announcementReadsSaving" class="fas fa-spinner fa-spin"></i>
+                <i v-else class="fas fa-check"></i>
+                确认已读
+              </button>
+              <span v-else class="announcement-read-confirmed">
+                <i class="fas fa-circle-check"></i> 你已确认
+              </span>
+              <details
+                v-if="canManageCurrentGroup && groupPanel.announcementReadStats.unread_users?.length"
+                class="announcement-unread-members"
+              >
+                <summary>查看未读成员</summary>
+                <span
+                  v-for="member in groupPanel.announcementReadStats.unread_users"
+                  :key="member.id"
+                  class="announcement-unread-member"
+                >
+                  {{ member.username }}
+                </span>
+              </details>
+            </div>
             <div v-if="groupPanel.detail.announcement_history?.length" class="group-history-list">
               <div
                 v-for="item in groupPanel.detail.announcement_history"
@@ -901,6 +1134,17 @@
                 </template>
               </div>
             </div>
+          </div>
+
+          <div class="group-config-box group-work-config-box">
+            <div class="group-section-title">
+              <span><i class="fas fa-list-check"></i> 群协作</span>
+              <span class="group-section-meta">投票与任务</span>
+            </div>
+            <GroupWorkPanel
+              :group-id="selectedGroupId()"
+              :current-user-id="currentUserId"
+            />
           </div>
 
           <div v-if="canManageCurrentGroup" class="group-config-box compact">
@@ -1424,6 +1668,60 @@
       </section>
     </div>
 
+    <div v-if="cameraCapture.visible" class="camera-capture-overlay" @click.self="closeCameraCapture">
+      <section class="camera-capture-modal" role="dialog" aria-modal="true" aria-label="相机">
+        <header class="camera-capture-header">
+          <strong>相机</strong>
+          <button
+            class="camera-capture-icon-btn"
+            type="button"
+            title="关闭相机"
+            aria-label="关闭相机"
+            :disabled="cameraCapture.capturing"
+            @click="closeCameraCapture"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+        <div class="camera-capture-stage">
+          <div v-if="cameraCapture.starting" class="camera-capture-loading">
+            <i class="fas fa-spinner fa-spin"></i>
+          </div>
+          <video
+            ref="cameraVideoRef"
+            v-show="!cameraCapture.starting"
+            class="camera-capture-video"
+            autoplay
+            playsinline
+            muted
+          ></video>
+        </div>
+        <footer class="camera-capture-footer">
+          <button
+            class="camera-capture-icon-btn"
+            type="button"
+            title="取消"
+            aria-label="取消"
+            :disabled="cameraCapture.capturing"
+            @click="closeCameraCapture"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+          <button
+            class="camera-capture-shutter"
+            type="button"
+            title="拍照"
+            aria-label="拍照"
+            :disabled="cameraCapture.starting || cameraCapture.capturing"
+            @click="captureCameraPhoto"
+          >
+            <i :class="cameraCapture.capturing ? 'fas fa-spinner fa-spin' : 'fas fa-camera'"></i>
+          </button>
+          <span class="camera-capture-footer-spacer" aria-hidden="true"></span>
+        </footer>
+      </section>
+    </div>
+
     <div v-if="mediaPreview.visible" class="media-preview-overlay" @click.self="closeMediaPreview">
       <section class="media-preview-modal">
         <header class="media-preview-header">
@@ -1476,6 +1774,98 @@
       @close="showDisappearingDialog = false"
       @saved="onDisappearingSaved"
     />
+
+    <div
+      v-if="groupMessageMuteDialog.visible"
+      class="direct-mute-overlay"
+      @click.self="closeMessageMemberMuteDialog"
+    >
+      <section class="direct-mute-dialog" role="dialog" aria-modal="true" aria-labelledby="group-message-mute-title">
+        <header class="direct-mute-header">
+          <div>
+            <h3 id="group-message-mute-title"><i class="fas fa-microphone-slash"></i> 禁言群成员</h3>
+            <p>将限制 {{ groupMessageMuteDialog.member?.username || '该成员' }} 在当前群组内发言。</p>
+          </div>
+          <button type="button" class="direct-mute-close" title="关闭" @click="closeMessageMemberMuteDialog">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+        <div class="direct-mute-body">
+          <label class="direct-mute-label">禁言时长</label>
+          <div class="direct-mute-duration-grid">
+            <button
+              v-for="option in muteDurationOptions"
+              :key="option.value"
+              type="button"
+              class="direct-mute-duration"
+              :class="{ active: groupMessageMuteDialog.durationMinutes === option.value }"
+              @click="groupMessageMuteDialog.durationMinutes = option.value"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+        </div>
+        <footer class="direct-mute-footer">
+          <button type="button" class="direct-mute-secondary" :disabled="groupMessageMuteDialog.saving" @click="closeMessageMemberMuteDialog">
+            取消
+          </button>
+          <button type="button" class="direct-mute-primary" :disabled="groupMessageMuteDialog.saving" @click="confirmMessageMemberMute">
+            <i v-if="groupMessageMuteDialog.saving" class="fas fa-spinner fa-spin"></i>
+            {{ groupMessageMuteDialog.saving ? '处理中' : '确认禁言' }}
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="directMuteDialog.visible" class="direct-mute-overlay" @click.self="closeDirectMessageMute">
+      <section class="direct-mute-dialog" role="dialog" aria-modal="true" aria-labelledby="direct-mute-title">
+        <header class="direct-mute-header">
+          <div>
+            <h3 id="direct-mute-title"><i class="fas fa-microphone-slash"></i> 限制私信发言</h3>
+            <p>对方将暂时无法向你发送私信，不影响其群聊或其他会话。</p>
+          </div>
+          <button type="button" class="direct-mute-close" title="关闭" @click="closeDirectMessageMute">
+            <i class="fas fa-times"></i>
+          </button>
+        </header>
+        <div class="direct-mute-body">
+          <label class="direct-mute-label">限制时长</label>
+          <div class="direct-mute-duration-grid">
+            <button
+              v-for="option in directMuteDurationOptions"
+              :key="option.value"
+              type="button"
+              class="direct-mute-duration"
+              :class="{ active: directMuteDialog.durationMinutes === option.value }"
+              @click="directMuteDialog.durationMinutes = option.value"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <label class="direct-mute-label" for="direct-mute-reason">
+            原因 <span>可选</span>
+          </label>
+          <textarea
+            id="direct-mute-reason"
+            v-model="directMuteDialog.reason"
+            class="direct-mute-reason"
+            maxlength="500"
+            rows="3"
+            placeholder="仅供自己记录，不会告知对方"
+          ></textarea>
+          <div class="direct-mute-count">{{ directMuteDialog.reason.length }}/500</div>
+        </div>
+        <footer class="direct-mute-footer">
+          <button type="button" class="direct-mute-secondary" :disabled="directMuteDialog.saving" @click="closeDirectMessageMute">
+            取消
+          </button>
+          <button type="button" class="direct-mute-primary" :disabled="directMuteDialog.saving" @click="saveDirectMessageMute">
+            <i v-if="directMuteDialog.saving" class="fas fa-spinner fa-spin"></i>
+            {{ directMuteDialog.saving ? '保存中' : '确认限制' }}
+          </button>
+        </footer>
+      </section>
+    </div>
 
     <!-- Turnstile 兜底：当日新对话超额时要求人机验证 -->
     <div v-if="turnstileGate.visible" class="turnstile-gate-overlay" @click.self="cancelTurnstileGate">
@@ -1640,6 +2030,7 @@
         </div>
       </Transition>
     </Teleport>
+    <GlobalSearchDialog />
   </div>
 </template>
 
@@ -1661,7 +2052,9 @@ import DisappearingSettingDialog from '@components/messages/DisappearingSettingD
 import MergedForwardDialog from '@components/messages/MergedForwardDialog/index.vue'
 import GroupInvitePreview from '@components/messages/GroupInvitePreview/index.vue'
 import GroupJoinRequests from '@components/messages/GroupJoinRequests/index.vue'
+import GroupWorkPanel from '@components/messages/GroupManagementPanel/GroupWorkPanel.vue'
 import Turnstile from '@components/common/Turnstile/index.vue'
+import GlobalSearchDialog from '@components/common/GlobalSearchDialog/index.vue'
 import {
   encodeMergedForward,
   mergedForwardPlainText,
@@ -1673,6 +2066,7 @@ import {
 // ==== 常量 ====
 const recallWindowSeconds = 120
 const MESSAGE_PAGE_SIZE = 50
+const GROUP_MUTE_COMMAND_PATTERN = /^\/disabled(?:\s+(.*))?$/i
 
 // ==== 状态 ====
 const currentUserId = ref(0)
@@ -1706,6 +2100,11 @@ const currentSettings = ref({
   disappearing_enabled: false,
   disappearing_ttl_seconds: 86400,
   force_unread: false,
+  direct_mute: {
+    is_active: false,
+    expires_at: null,
+    reason: '',
+  },
 })
 const newMessage = ref('')
 const isSending = ref(false)
@@ -1716,11 +2115,19 @@ const inputRef = ref(null)
 const fileInputRef = ref(null)
 const groupAvatarInputRef = ref(null)
 const peerProfileVideoRef = ref(null)
+const cameraVideoRef = ref(null)
 const showNewMessageDialog = ref(false)
 const showChatMenu = ref(false)
 const showChatSearch = ref(false)
 const chatSearchQuery = ref('')
 const chatSearchInputRef = ref(null)
+const activeChatSearchMessageId = ref(null)
+const chatSearchFilters = ref({
+  senderId: '',
+  dateFrom: '',
+  dateTo: '',
+  hasAttachment: false,
+})
 const showDisappearingDialog = ref(false)
 const groupFilesVisible = ref(false)
 const groupMembersVisible = ref(false)
@@ -1732,6 +2139,11 @@ const mediaPreview = ref({
   type: '',
   url: '',
   name: '',
+})
+const cameraCapture = ref({
+  visible: false,
+  starting: false,
+  capturing: false,
 })
 const groupPanel = ref({
   visible: false,
@@ -1753,6 +2165,9 @@ const groupPanel = ref({
   announcementEditDraft: '',
   announcementEditPinned: false,
   savingAnnouncement: false,
+  announcementReadsLoading: false,
+  announcementReadsSaving: false,
+  announcementReadStats: null,
   memberSearch: '',
   memberRoleFilter: 'all',
   auditLoading: false,
@@ -1785,8 +2200,33 @@ const muteDurationOptions = [
   { label: '24 小时', value: 1440 },
   { label: '永久禁言', value: 'permanent' },
 ]
+const directMuteDurationOptions = [
+  { label: '10 分钟', value: 10 },
+  { label: '30 分钟', value: 30 },
+  { label: '1 小时', value: 60 },
+  { label: '3 小时', value: 180 },
+  { label: '6 小时', value: 360 },
+  { label: '24 小时', value: 1440 },
+  { label: '7 天', value: 10080 },
+  { label: '30 天', value: 43200 },
+  { label: '永久', value: 'permanent' },
+]
+const directMuteDialog = ref({
+  visible: false,
+  saving: false,
+  durationMinutes: 60,
+  reason: '',
+})
+const groupMessageMuteDialog = ref({
+  visible: false,
+  saving: false,
+  member: null,
+  durationMinutes: 60,
+})
 const ctxMenu = ref({ visible: false, x: 0, y: 0, conv: null })
 const messageCtxMenu = ref({ visible: false, x: 0, y: 0, msg: null })
+const editingMessageId = ref(null)
+const editingMessageSavingId = ref(null)
 const selectionMode = ref(false)
 const selectedMessageIds = ref(new Set())
 const typingIndicator = ref({ visible: false, username: '' })
@@ -1806,9 +2246,19 @@ let preserveMessageScrollOnLengthChange = false
 const pendingAttachments = ref([])
 const showEmojiPicker = ref(false)
 const showCodeInput = ref(false)
+const showComposerMore = ref(false)
+const showNotePicker = ref(false)
+const notePickerLoading = ref(false)
+const notePickerLoaded = ref(false)
+const notePickerSearch = ref('')
+const notePickerNotes = ref([])
+const notePickerSendingId = ref(null)
+const attachmentInputAccept = ref('image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,audio/webm,audio/ogg,audio/mpeg,audio/mp4,audio/wav,.pdf,.txt,.md,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx')
+const attachmentInputCapture = ref(null)
 const codeDraft = ref('')
 const mentionPicker = ref({
   visible: false,
+  mode: 'mention',
   query: '',
   start: -1,
   end: -1,
@@ -1835,6 +2285,7 @@ const reminderProcessingIds = ref(new Set())
 let voiceRecorder = null
 let voiceStream = null
 let voiceChunks = []
+let cameraStream = null
 let chatSocket = null
 // 客户端节流定时器：同一会话内 1.4s 最多发一次 typing
 let typingThrottleTimer = null
@@ -1880,9 +2331,33 @@ const selectedConversation = computed(() => {
 const peerOnline = computed(() => selectedConversation.value?.peer_online ?? true)
 
 const isCurrentGroup = computed(() => selectedConversation.value?.conversation_type === 'group')
+const groupSearchMembers = computed(() => {
+  if (!isCurrentGroup.value || !groupPanel.value.detail?.can_view_members) return []
+  return groupPanel.value.detail.members || []
+})
+const hasActiveChatSearchFilters = computed(() => {
+  const filters = chatSearchFilters.value
+  return Boolean(filters.senderId || filters.dateFrom || filters.dateTo || filters.hasAttachment)
+})
+const chatSearchMatchMessages = computed(() => {
+  if (!chatSearchQuery.value.trim()) return []
+  return messages.value
+})
+const activeChatSearchMatchIndex = computed(() => {
+  const activeId = activeChatSearchMessageId.value
+  const index = chatSearchMatchMessages.value.findIndex(
+    (message) => String(message.id) === String(activeId)
+  )
+  return index >= 0 ? index : 0
+})
 
 const canManageCurrentGroup = computed(() =>
-  ['owner', 'admin'].includes(groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || '')
+  ['owner', 'admin'].includes(
+    groupPanel.value.detail?.viewer_role ||
+    currentSettings.value.group_role ||
+    selectedConversation.value?.viewer_role ||
+    ''
+  )
 )
 
 // 独立存储管理权限状态，避免在切换到待审核标签时因 conversations 清空而失效
@@ -1963,7 +2438,10 @@ const isCurrentGroupOwner = computed(() =>
 )
 
 const currentGroupRole = computed(() =>
-  groupPanel.value.detail?.viewer_role || currentSettings.value.group_role || ''
+  groupPanel.value.detail?.viewer_role ||
+  currentSettings.value.group_role ||
+  selectedConversation.value?.viewer_role ||
+  ''
 )
 
 const canViewCurrentGroupMembers = computed(() =>
@@ -2007,6 +2485,16 @@ const mentionMembers = computed(() => {
 const mentionSuggestions = computed(() => {
   if (!mentionPicker.value.visible) return []
   const query = mentionPicker.value.query.trim().toLowerCase()
+  if (mentionPicker.value.mode === 'command') {
+    return 'disabled'.startsWith(query)
+      ? [{
+          type: 'command',
+          command: '/disabled',
+          label: '/disabled',
+          hint: '禁言群成员',
+        }]
+      : []
+  }
   const suggestions = []
   if (canMentionAllCurrentGroup.value && (!query || '全体成员'.includes(query) || 'all'.startsWith(query))) {
     suggestions.push({ type: 'all', label: '@全体成员', username: '全体成员' })
@@ -2020,7 +2508,24 @@ const mentionSuggestions = computed(() => {
   return suggestions.slice(0, 8)
 })
 
+const filteredNotePickerNotes = computed(() => {
+  const q = notePickerSearch.value.trim().toLowerCase()
+  const notes = [...notePickerNotes.value].sort((a, b) => {
+    if (!!a.is_favorited !== !!b.is_favorited) return a.is_favorited ? -1 : 1
+    return Number(b.id || 0) - Number(a.id || 0)
+  })
+  if (!q) return notes
+  return notes.filter((note) => {
+    const title = String(note.title || '').toLowerCase()
+    const id = String(note.id || '')
+    return title.includes(q) || id.includes(q)
+  })
+})
+
 const peerBlockedByMe = computed(() => !!selectedConversation.value?.is_blocked)
+const isDirectMessageMuted = computed(
+  () => !isCurrentGroup.value && !!currentSettings.value.direct_mute?.is_active
+)
 
 const totalUnread = computed(() =>
   conversations.value.reduce((s, c) => s + (c.unread_count || 0), 0)
@@ -2502,11 +3007,9 @@ function updateBrowserNotificationSnapshot(nextConversations) {
     return
   }
 
-  const canNotify =
-    browserNotificationsEnabled.value &&
-    typeof window !== 'undefined' &&
-    'Notification' in window &&
-    Notification.permission === 'granted'
+  // Browser notifications are delivered by the Service Worker push handler.
+  // Keeping this polling path disabled avoids duplicate desktop notifications.
+  const canNotify = false
 
   if (canNotify) {
     for (const conv of nextConversations) {
@@ -2797,13 +3300,20 @@ function showJoinRequestNotification(event) {
   }
 }
 
-function buildMessagesUrl({ offset = 0, limit = MESSAGE_PAGE_SIZE, query = '' } = {}) {
+function buildMessagesUrl({ offset = 0, limit = MESSAGE_PAGE_SIZE, query = '', includeSearchFilters = true } = {}) {
   const groupId = selectedGroupId()
   const params = new URLSearchParams()
   if (limit) params.set('limit', String(limit))
   if (offset) params.set('offset', String(offset))
   if (query) params.set('q', query)
   if (groupId) {
+    if (includeSearchFilters && showChatSearch.value) {
+      const filters = chatSearchFilters.value
+      if (filters.senderId) params.set('sender_id', filters.senderId)
+      if (filters.dateFrom) params.set('date_from', filters.dateFrom)
+      if (filters.dateTo) params.set('date_to', filters.dateTo)
+      if (filters.hasAttachment) params.set('has_attachment', '1')
+    }
     const qs = params.toString()
     return `/api/messages/groups/${groupId}/messages/${qs ? `?${qs}` : ''}`
   }
@@ -2820,12 +3330,12 @@ function applyMessagesPagination(pagination, loadedCount, requestedLimit) {
   }
 }
 
-async function loadMessages({ silent = false, limit = null, query = '' } = {}) {
+async function loadMessages({ silent = false, limit = null, query = '', includeSearchFilters = true } = {}) {
   if (!selectedConversationKey.value) return
   if (!silent) loadingMessages.value = true
   try {
     const requestedLimit = limit || (silent ? Math.max(MESSAGE_PAGE_SIZE, messages.value.length || 0) : MESSAGE_PAGE_SIZE)
-    const url = buildMessagesUrl({ limit: requestedLimit, offset: 0, query })
+    const url = buildMessagesUrl({ limit: requestedLimit, offset: 0, query, includeSearchFilters })
     const r = await fetch(url)
     if (r.ok) {
       const d = await r.json()
@@ -2863,6 +3373,7 @@ async function loadOlderMessages({ keepPosition = true } = {}) {
     const url = buildMessagesUrl({
       limit: requestedLimit,
       offset: Math.max(messagesPaging.value.nextOffset || 0, messages.value.length || 0),
+      query: chatSearchQuery.value.trim(),
     })
     const r = await fetch(url)
     if (!r.ok) return false
@@ -2901,6 +3412,7 @@ function selectConversation(conv) {
   hideTypingIndicator()
   selectionMode.value = false
   clearSelectedMessages()
+  cancelInlineMessageEdit()
   applyDraftForConversation(selectedConversationKey.value)
   pendingAttachments.value = []
   showEmojiPicker.value = false
@@ -2939,6 +3451,15 @@ async function sendMessage(turnstileToken = '') {
     const groupId = selectedGroupId()
     if (groupId) {
       await ensureGroupMembersForMention()
+      const muteCommand = parseGroupMuteCommand(finalContent)
+      if (muteCommand) {
+        if (attachmentIds.length) {
+          ElMessage.warning('禁言命令不能附带文件或图片')
+          return
+        }
+        await executeGroupMuteCommand(muteCommand)
+        return
+      }
       const mentionPayload = buildMentionPayload(finalContent)
       const d = await apiPost(`/api/messages/groups/${groupId}/send/`, {
         content: finalContent,
@@ -3100,6 +3621,93 @@ async function sendChatlogForwardToGroup(groupId, content) {
   } finally {
     isSending.value = false
   }
+}
+
+function parseGroupMuteCommand(content) {
+  const match = String(content || '').trim().match(GROUP_MUTE_COMMAND_PATTERN)
+  if (!match) return null
+
+  const parts = String(match[1] || '').trim().split(/\s+/).filter(Boolean)
+  const username = String(parts.shift() || '').replace(/^@/, '')
+  if (!username) {
+    return {
+      error: '用法：/disabled @用户名 [时长]。例如：/disabled @alice 1h',
+    }
+  }
+
+  let durationMinutes = 60
+  if (parts.length) {
+    const parsedDuration = parseGroupMuteDuration(parts[0])
+    if (!parsedDuration.valid) {
+      return {
+        error: '禁言时长格式不正确。可使用 30m、1h、7d 或 permanent。',
+      }
+    }
+    durationMinutes = parsedDuration.value
+  }
+
+  return {
+    username,
+    durationMinutes,
+  }
+}
+
+function parseGroupMuteDuration(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (!raw) return { valid: false, value: null }
+  if (['permanent', '永久', '永久禁言'].includes(raw)) {
+    return { valid: true, value: 'permanent' }
+  }
+
+  const match = raw.match(/^(\d+)(m|分钟|h|小时|d|天)?$/)
+  if (!match) return { valid: false, value: null }
+  const count = Number(match[1])
+  const unit = match[2] || 'm'
+  if (!Number.isInteger(count) || count <= 0) return { valid: false, value: null }
+
+  const multiplier = ['h', '小时'].includes(unit) ? 60 : ['d', '天'].includes(unit) ? 1440 : 1
+  const minutes = count * multiplier
+  if (minutes > 43200) return { valid: false, value: null }
+  return { valid: true, value: minutes }
+}
+
+async function executeGroupMuteCommand(command) {
+  if (command.error) {
+    ElMessage.warning(command.error)
+    return
+  }
+  if (!canManageCurrentGroup.value) {
+    ElMessage.error('只有群主或管理员可以使用禁言命令')
+    return
+  }
+
+  const members = groupPanel.value.detail?.members || []
+  const targetName = String(command.username || '').toLowerCase()
+  const member = members.find((item) => String(item.username || '').toLowerCase() === targetName)
+  if (!member) {
+    ElMessage.warning(`未找到群成员 @${command.username}`)
+    return
+  }
+  if (!canManageGroupMember(member)) {
+    ElMessage.warning('不能对该成员执行禁言操作')
+    return
+  }
+
+  const muted = await muteGroupMember(member, command.durationMinutes, { showFeedback: false })
+  if (!muted) return
+
+  clearDraftForConversation(selectedConversationKey.value)
+  newMessage.value = ''
+  applyDraftPreviews()
+  closeMentionPicker()
+  replyDraft.value = null
+  forwardDraft.value = null
+  resetComposerHeight()
+  ElMessage.success(
+    command.durationMinutes === 'permanent'
+      ? `已永久禁言 @${member.username}`
+      : `已禁言 @${member.username}`
+  )
 }
 
 async function openTurnstileGate(pendingContent, recipientId, quotaLimit, pendingAttachmentIds = [], options = {}) {
@@ -3300,9 +3908,143 @@ function formatForwardTime(iso) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function openFilePicker() {
+const attachmentAcceptPresets = {
+  photo: 'image/jpeg,image/png,image/gif,image/webp',
+  file: 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,audio/webm,audio/ogg,audio/mpeg,audio/mp4,audio/wav,.pdf,.txt,.md,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
+}
+
+function toggleComposerMore() {
+  showComposerMore.value = !showComposerMore.value
+  showEmojiPicker.value = false
+  if (showComposerMore.value) {
+    showCodeInput.value = false
+    showNotePicker.value = false
+  }
+}
+
+function toggleEmojiPicker() {
+  showEmojiPicker.value = !showEmojiPicker.value
+  showComposerMore.value = false
+  if (showEmojiPicker.value) {
+    showCodeInput.value = false
+    showNotePicker.value = false
+  }
+}
+
+function openAttachmentPicker(kind = 'file') {
   if (isUploadingAttachment.value || pendingAttachments.value.length >= maxPendingAttachments) return
-  fileInputRef.value?.click()
+  attachmentInputAccept.value = attachmentAcceptPresets[kind] || attachmentAcceptPresets.file
+  attachmentInputCapture.value = null
+  showComposerMore.value = false
+  showNotePicker.value = false
+  nextTick(() => fileInputRef.value?.click())
+}
+
+async function openCameraCapture() {
+  if (isUploadingAttachment.value || pendingAttachments.value.length >= maxPendingAttachments) return
+  if (!navigator.mediaDevices?.getUserMedia) {
+    ElMessage.error('当前浏览器不支持相机')
+    return
+  }
+
+  showComposerMore.value = false
+  showNotePicker.value = false
+  cameraCapture.value = { visible: true, starting: true, capturing: false }
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    })
+    await nextTick()
+    const video = cameraVideoRef.value
+    if (!video) throw new Error('相机预览未初始化')
+    video.srcObject = cameraStream
+    await video.play()
+    cameraCapture.value.starting = false
+  } catch (error) {
+    cleanupCameraCapture()
+    cameraCapture.value = { visible: false, starting: false, capturing: false }
+    ElMessage.error('无法使用相机，请检查浏览器权限')
+  }
+}
+
+function cleanupCameraCapture() {
+  const video = cameraVideoRef.value
+  if (video) {
+    video.pause()
+    video.srcObject = null
+  }
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop())
+    cameraStream = null
+  }
+}
+
+function closeCameraCapture() {
+  if (cameraCapture.value.capturing) return
+  cleanupCameraCapture()
+  cameraCapture.value = { visible: false, starting: false, capturing: false }
+}
+
+function cameraPhotoFileName() {
+  const now = new Date()
+  const date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('')
+  const time = [
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('')
+  return `camera-${date}-${time}.jpg`
+}
+
+async function captureCameraPhoto() {
+  const video = cameraVideoRef.value
+  if (!video || !cameraStream || video.videoWidth <= 0 || video.videoHeight <= 0) {
+    ElMessage.error('相机尚未准备好')
+    return
+  }
+  cameraCapture.value.capturing = true
+  const maxEdge = 2048
+  const scale = Math.min(1, maxEdge / Math.max(video.videoWidth, video.videoHeight))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(video.videoWidth * scale)
+  canvas.height = Math.round(video.videoHeight * scale)
+  const context = canvas.getContext('2d')
+  if (!context) {
+    cameraCapture.value.capturing = false
+    ElMessage.error('无法处理照片')
+    return
+  }
+  context.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+  try {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+    if (!blob) throw new Error('照片生成失败')
+    const photo = new File([blob], cameraPhotoFileName(), { type: 'image/jpeg' })
+    cleanupCameraCapture()
+    cameraCapture.value = { visible: false, starting: false, capturing: false }
+    isUploadingAttachment.value = true
+    await uploadAttachmentFile(photo)
+    ElMessage.success('照片已加入待发送')
+  } catch (error) {
+    cameraCapture.value.capturing = false
+    ElMessage.error(error.message || '照片上传失败')
+  } finally {
+    isUploadingAttachment.value = false
+  }
+}
+
+function openFilePicker() {
+  openAttachmentPicker('file')
 }
 
 async function uploadAttachmentFile(file) {
@@ -3355,7 +4097,14 @@ function appendEmoji(emoji) {
 function toggleCodeInput() {
   showCodeInput.value = !showCodeInput.value
   showEmojiPicker.value = false
+  showComposerMore.value = false
+  showNotePicker.value = false
   if (showCodeInput.value) nextTick(() => document.querySelector('.code-input')?.focus())
+}
+
+function toggleCodeInputFromMore() {
+  showComposerMore.value = false
+  toggleCodeInput()
 }
 
 function buildCodeBlock() {
@@ -3386,6 +4135,91 @@ async function sendCodeBlock() {
   codeDraft.value = ''
   showCodeInput.value = false
   await sendMessage()
+}
+
+function closeNotePickerPanel() {
+  showNotePicker.value = false
+  notePickerSendingId.value = null
+}
+
+function normalizeNotePickerItem(note) {
+  return {
+    id: normalizeUserId(note?.id),
+    title: String(note?.title || '').trim() || '未命名文章',
+    is_secret: !!note?.is_secret,
+    is_trashed: !!note?.is_trashed,
+    is_favorited: !!note?.is_favorited,
+    folder_id: note?.folder_id ?? null,
+  }
+}
+
+async function loadNotePickerNotes({ force = false } = {}) {
+  if (notePickerLoading.value || (notePickerLoaded.value && !force)) return
+  notePickerLoading.value = true
+  try {
+    const data = await apiRequest('/api/notes/all/')
+    const rawNotes = Array.isArray(data?.notes) ? data.notes : Array.isArray(data) ? data : []
+    notePickerNotes.value = rawNotes
+      .map(normalizeNotePickerItem)
+      .filter((note) => note.id && !note.is_secret && !note.is_trashed)
+    notePickerLoaded.value = true
+  } catch (e) {
+    ElMessage.error(e.message || '读取文章失败')
+  } finally {
+    notePickerLoading.value = false
+  }
+}
+
+async function openNotePickerPanel() {
+  if (!selectedConversationKey.value) {
+    ElMessage.warning('请先选择一个会话')
+    return
+  }
+  showComposerMore.value = false
+  showEmojiPicker.value = false
+  showCodeInput.value = false
+  showNotePicker.value = true
+  await loadNotePickerNotes()
+  nextTick(() => document.querySelector('.note-picker-search input')?.focus())
+}
+
+async function sharePickedNote(note) {
+  if (!note?.id || notePickerSendingId.value) return
+  const groupId = selectedGroupId()
+  const recipientId = normalizeUserId(selectedUserId.value)
+  if (!groupId && !recipientId) {
+    ElMessage.warning('请先选择一个会话')
+    return
+  }
+  notePickerSendingId.value = note.id
+  const content = newMessage.value.trim()
+  try {
+    const payload = content ? { note_id: note.id, content } : { note_id: note.id }
+    const data = groupId
+      ? await apiPost(`/api/messages/groups/${groupId}/notes/share/`, payload)
+      : await apiPost('/api/messages/notes/share/', { ...payload, recipient_id: recipientId })
+    const sentMessage = normalizeIncomingMessage(data.message)
+    if (sentMessage?.id && !messages.value.some((message) => message.id === sentMessage.id)) {
+      messages.value.push(sentMessage)
+    }
+    if (content) {
+      clearDraftForConversation(selectedConversationKey.value)
+      newMessage.value = ''
+      applyDraftPreviews()
+      resetComposerHeight()
+    }
+    showNotePicker.value = false
+    notePickerSearch.value = ''
+    await nextTick()
+    scrollToBottomSoon()
+    if (!groupId) upsertConversationPreviewFromMessage(sentMessage, recipientId, { preserveOrder: true })
+    loadConversations({ silent: true, preserveOrder: true })
+    ElMessage.success('文章已发送')
+  } catch (e) {
+    ElMessage.error(e.message || '发送文章失败')
+  } finally {
+    notePickerSendingId.value = null
+  }
 }
 
 function getSupportedVoiceMimeType() {
@@ -3592,6 +4426,7 @@ function onComposerInput() {
 function closeMentionPicker() {
   mentionPicker.value = {
     visible: false,
+    mode: 'mention',
     query: '',
     start: -1,
     end: -1,
@@ -3625,6 +4460,19 @@ function updateMentionPicker() {
   if (!el) return
   const cursor = el.selectionStart ?? newMessage.value.length
   const before = newMessage.value.slice(0, cursor)
+  const commandMatch = before.match(/^\/([a-z]{0,24})$/i)
+  if (commandMatch && canManageCurrentGroup.value) {
+    mentionPicker.value = {
+      visible: true,
+      mode: 'command',
+      query: commandMatch[1] || '',
+      start: 0,
+      end: cursor,
+      activeIndex: Math.min(mentionPicker.value.activeIndex, Math.max(mentionSuggestions.value.length - 1, 0)),
+    }
+    ensureGroupMembersForMention()
+    return
+  }
   const match = before.match(/(?:^|\s)@([^\s@]{0,24})$/)
   if (!match) {
     closeMentionPicker()
@@ -3634,6 +4482,7 @@ function updateMentionPicker() {
   const atIndex = before.lastIndexOf('@')
   mentionPicker.value = {
     visible: true,
+    mode: 'mention',
     query,
     start: atIndex,
     end: cursor,
@@ -3657,6 +4506,19 @@ function onMentionArrow(event, delta) {
 
 function selectMention(item) {
   if (!item || mentionPicker.value.start < 0) return
+  if (item.type === 'command') {
+    newMessage.value = `${item.command} `
+    closeMentionPicker()
+    nextTick(() => {
+      const el = inputRef.value
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(newMessage.value.length, newMessage.value.length)
+      autoGrowComposer()
+      saveCurrentDraft()
+    })
+    return
+  }
   const label = item.type === 'all' ? '@全体成员' : `@${item.username}`
   const before = newMessage.value.slice(0, mentionPicker.value.start)
   const after = newMessage.value.slice(mentionPicker.value.end)
@@ -3960,7 +4822,10 @@ async function jumpToResult(r) {
 
 async function jumpToMessage(m) {
   showChatSearch.value = false
+  chatSearchQuery.value = ''
+  resetChatSearchFilters({ reload: false })
   highlightMessageId.value = m.id
+  await loadMessages({ includeSearchFilters: false })
   await scrollToMessage(m.id)
   setTimeout(() => (highlightMessageId.value = null), 2500)
 }
@@ -3971,50 +4836,83 @@ let chatSearchDebounceTimer = null
 function openChatSearch() {
   showChatSearch.value = true
   chatSearchQuery.value = ''
+  resetChatSearchFilters({ reload: false })
+  if (isCurrentGroup.value) refreshCurrentGroupDetail()
   nextTick(() => {
     chatSearchInputRef.value?.focus()
   })
 }
 
+function openGlobalSearch() {
+  showChatMenu.value = false
+  window.dispatchEvent(new CustomEvent('open-global-search'))
+}
+
+function openKnowledgeModule(module) {
+  showChatMenu.value = false
+  window.location.href = `/knowledge/?module=${encodeURIComponent(module)}`
+}
+
 function closeChatSearch() {
+  const wasSearching = Boolean(chatSearchQuery.value.trim() || hasActiveChatSearchFilters.value)
   showChatSearch.value = false
   chatSearchQuery.value = ''
-  if (chatSearchQuery.value) {
-    // 清除搜索，重新加载所有消息
-    loadMessages()
-  }
+  activeChatSearchMessageId.value = null
+  resetChatSearchFilters({ reload: false })
+  if (wasSearching) loadMessages({ includeSearchFilters: false })
 }
 
 function clearChatSearch() {
   chatSearchQuery.value = ''
+  activeChatSearchMessageId.value = null
   loadMessages()
 }
 
+function resetChatSearchFilters({ reload = true } = {}) {
+  chatSearchFilters.value = {
+    senderId: '',
+    dateFrom: '',
+    dateTo: '',
+    hasAttachment: false,
+  }
+  if (reload) performChatSearch()
+}
+
 function onChatSearchInput() {
+  activeChatSearchMessageId.value = null
   clearTimeout(chatSearchDebounceTimer)
   chatSearchDebounceTimer = setTimeout(performChatSearch, 300)
 }
 
 async function performChatSearch() {
   const query = chatSearchQuery.value.trim()
-  if (!query) {
-    loadMessages()
+  if (!query && !hasActiveChatSearchFilters.value) {
+    activeChatSearchMessageId.value = null
+    loadMessages({ includeSearchFilters: false })
     return
   }
   await loadMessages({ query })
-  // 搜索后滚动到顶部，显示第一个结果
-  if (messages.value.length > 0) {
-    nextTick(() => {
-      const firstMessage = messages.value[0]
-      if (firstMessage) {
-        highlightMessageId.value = firstMessage.id
-        scrollToMessage(firstMessage.id, { fallbackToBottom: false })
-        setTimeout(() => {
-          highlightMessageId.value = null
-        }, 3000)
-      }
-    })
+  if (!query || !chatSearchMatchMessages.value.length) {
+    activeChatSearchMessageId.value = null
+    return
   }
+  await selectChatSearchMatch(0)
+}
+
+async function selectChatSearchMatch(index) {
+  const matches = chatSearchMatchMessages.value
+  if (!matches.length) {
+    activeChatSearchMessageId.value = null
+    return
+  }
+  const targetIndex = Math.max(0, Math.min(index, matches.length - 1))
+  const target = matches[targetIndex]
+  activeChatSearchMessageId.value = target.id
+  await scrollToMessage(target.id, { fallbackToBottom: false })
+}
+
+function moveChatSearchMatch(direction) {
+  selectChatSearchMatch(activeChatSearchMatchIndex.value + direction)
 }
 
 function hasLoadedMessage(messageId) {
@@ -4063,6 +4961,7 @@ async function jumpToGroupAnnouncement(announcement) {
 // ==== 消息操作 ====
 function toggleSelectionMode() {
   selectionMode.value = !selectionMode.value
+  if (selectionMode.value) cancelInlineMessageEdit()
   if (!selectionMode.value) clearSelectedMessages()
   closeMessageCtxMenu()
 }
@@ -4089,6 +4988,7 @@ function toggleMessageSelected(message) {
 }
 
 function enterSelectionModeWithMessage(message) {
+  cancelInlineMessageEdit()
   selectionMode.value = true
   selectedMessageIds.value = new Set([message.id])
   closeMessageCtxMenu()
@@ -4285,41 +5185,46 @@ async function recallMessage(m) {
   }
 }
 
-async function editGroupMessage(message) {
-  const groupId = selectedGroupId()
-  if (!groupId || !message?.is_own) return
-  let result
-  try {
-    result = await ElMessageBox.prompt('编辑已发送的群消息', '编辑消息', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputType: 'textarea',
-      inputValue: message.content || '',
-      inputValidator: (value) => {
-        const text = String(value || '').trim()
-        if (!text) return '消息内容不能为空'
-        if (text.length > 5000) return '消息内容不能超过 5000 字'
-        return true
-      },
-    })
-  } catch {
+function startInlineMessageEdit(message) {
+  if (!message?.id || !message.is_own) return
+  if (selectionMode.value) return
+  editingMessageId.value = message.id
+}
+
+function cancelInlineMessageEdit() {
+  if (editingMessageSavingId.value) return
+  editingMessageId.value = null
+}
+
+async function saveInlineMessageEdit({ msg, content }) {
+  if (!msg?.id || !msg.is_own) return
+  const nextContent = String(content || '').trim()
+  if (!nextContent || nextContent === String(msg.content || '').trim()) {
+    editingMessageId.value = null
     return
   }
 
-  const content = String(result?.value || '').trim()
-  if (!content || content === String(message.content || '').trim()) return
+  const groupId = selectedGroupId()
+  const url = groupId
+    ? `/api/messages/groups/${groupId}/messages/${msg.id}/edit/`
+    : `/api/messages/${msg.id}/edit/`
+
+  editingMessageSavingId.value = msg.id
   try {
-    const d = await apiPost(`/api/messages/groups/${groupId}/messages/${message.id}/edit/`, { content })
+    const d = await apiPost(url, { content: nextContent })
     const edited = normalizeIncomingMessage(d.message)
     const index = messages.value.findIndex((item) => item.id === edited.id)
     if (index !== -1) {
       messages.value[index] = edited
       messages.value = [...messages.value]
     }
+    editingMessageId.value = null
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('已保存编辑')
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    editingMessageSavingId.value = null
   }
 }
 
@@ -4431,6 +5336,84 @@ async function toggleMute() {
     ElMessage.success(v ? '已开启免打扰' : '已关闭免打扰')
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+function openDirectMessageMute() {
+  if (!selectedUserId.value || isCurrentGroup.value) return
+  showChatMenu.value = false
+  directMuteDialog.value = {
+    visible: true,
+    saving: false,
+    durationMinutes: 60,
+    reason: currentSettings.value.direct_mute?.reason || '',
+  }
+}
+
+function closeDirectMessageMute() {
+  if (directMuteDialog.value.saving) return
+  directMuteDialog.value.visible = false
+}
+
+function formatDirectMuteExpiry(expiresAt) {
+  if (!expiresAt) return '永久'
+  const date = new Date(expiresAt)
+  if (Number.isNaN(date.getTime())) return '已设置期限'
+  return `至 ${date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })}`
+}
+
+async function saveDirectMessageMute() {
+  if (!selectedUserId.value || directMuteDialog.value.saving) return
+  directMuteDialog.value.saving = true
+  try {
+    const data = await apiPost('/api/messages/conversation/direct-mute/', {
+      user_id: selectedUserId.value,
+      duration_minutes: directMuteDialog.value.durationMinutes,
+      reason: directMuteDialog.value.reason,
+    })
+    currentSettings.value.direct_mute = data.mute || {
+      is_active: true,
+      expires_at: null,
+      reason: directMuteDialog.value.reason.trim(),
+    }
+    directMuteDialog.value.visible = false
+    ElMessage.success(
+      directMuteDialog.value.durationMinutes === 'permanent' ? '已永久限制对方发言' : '已限制对方发言'
+    )
+  } catch (e) {
+    ElMessage.error(e.message || '设置发言限制失败')
+  } finally {
+    directMuteDialog.value.saving = false
+  }
+}
+
+async function clearDirectMessageMute() {
+  if (!selectedUserId.value || isCurrentGroup.value) return
+  showChatMenu.value = false
+  try {
+    await ElMessageBox.confirm('解除后，对方可以再次向你发送私信。', '解除发言限制', {
+      type: 'warning',
+      confirmButtonText: '解除限制',
+      cancelButtonText: '取消',
+    })
+    const data = await apiPost('/api/messages/conversation/direct-mute/clear/', {
+      user_id: selectedUserId.value,
+    })
+    currentSettings.value.direct_mute = data.mute || {
+      is_active: false,
+      expires_at: null,
+      reason: '',
+    }
+    ElMessage.success('已解除发言限制')
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error(e.message || '解除发言限制失败')
   }
 }
 
@@ -4601,6 +5584,7 @@ async function openGroupInfo() {
     }
     cancelEditGroupAnnouncement()
     syncConversationAnnouncementFromGroup(d.group)
+    await loadGroupAnnouncementReads()
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
     if (canManageCurrentGroup.value) {
       loadGroupInviteLinks()
@@ -4629,6 +5613,9 @@ function closeGroupInfo() {
   groupPanel.value.sharedMedia = []
   groupPanel.value.sharedFiles = []
   groupPanel.value.sharedTab = 'media'
+  groupPanel.value.announcementReadStats = null
+  groupPanel.value.announcementReadsLoading = false
+  groupPanel.value.announcementReadsSaving = false
   groupPanel.value.memberSearch = ''
   groupPanel.value.memberRoleFilter = 'all'
   groupPanel.value.savingAnnouncement = false
@@ -4716,6 +5703,7 @@ async function refreshCurrentGroupDetail({ loading = false } = {}) {
         allow_new_members_view_history: !!d.group.allow_new_members_view_history,
         mute_mode: d.group.mute_mode || 'none',
       }
+      if (groupPanel.value.visible) await loadGroupAnnouncementReads()
     }
     if (d.settings) currentSettings.value = { ...currentSettings.value, ...d.settings }
     return d.group || null
@@ -4724,6 +5712,35 @@ async function refreshCurrentGroupDetail({ loading = false } = {}) {
     return null
   } finally {
     if (loading) groupPanel.value.loading = false
+  }
+}
+
+async function loadGroupAnnouncementReads() {
+  const groupId = selectedGroupId()
+  if (!groupId) return
+  groupPanel.value.announcementReadsLoading = true
+  try {
+    const data = await apiRequest(`/api/messages/groups/${groupId}/announcement/reads/`)
+    groupPanel.value.announcementReadStats = data.read_stats || null
+  } catch {
+    groupPanel.value.announcementReadStats = null
+  } finally {
+    groupPanel.value.announcementReadsLoading = false
+  }
+}
+
+async function confirmGroupAnnouncementRead() {
+  const groupId = selectedGroupId()
+  if (!groupId || groupPanel.value.announcementReadsSaving) return
+  groupPanel.value.announcementReadsSaving = true
+  try {
+    const data = await apiPost(`/api/messages/groups/${groupId}/announcement/reads/`, {})
+    groupPanel.value.announcementReadStats = data.read_stats || null
+    ElMessage.success('已确认阅读群公告')
+  } catch (error) {
+    ElMessage.error(error.message || '确认已读失败')
+  } finally {
+    groupPanel.value.announcementReadsSaving = false
   }
 }
 
@@ -4856,6 +5873,7 @@ async function saveGroupAnnouncement() {
     groupPanel.value.announcementOriginal = groupPanel.value.announcementDraft
     groupPanel.value.announcementPinnedOriginal = groupPanel.value.announcementPinned
     cancelEditGroupAnnouncement()
+    await loadGroupAnnouncementReads()
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('群公告已保存')
   } catch (e) {
@@ -4904,6 +5922,7 @@ async function updateGroupAnnouncement(item) {
       syncConversationAnnouncementFromGroup(d.group)
     }
     cancelEditGroupAnnouncement()
+    await loadGroupAnnouncementReads()
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('历史公告已更新')
   } catch (e) {
@@ -4946,6 +5965,7 @@ async function deleteGroupAnnouncement(item) {
     }
     messages.value = messages.value.filter((message) => message.id !== item.message_id)
     cancelEditGroupAnnouncement()
+    await loadGroupAnnouncementReads()
     loadConversations({ silent: true, preserveOrder: true })
     ElMessage.success('公告已删除')
   } catch (e) {
@@ -5100,6 +6120,50 @@ function canManageGroupMember(member) {
   return viewerRole === 'owner' || member.role === 'member'
 }
 
+async function onMessageSenderAvatarClick(message) {
+  if (!isCurrentGroup.value || !message?.sender_id) return
+
+  await ensureGroupMembersForMention()
+  if (!canManageCurrentGroup.value) return
+
+  const senderId = normalizeUserId(message.sender_id)
+  const member = (groupPanel.value.detail?.members || []).find(
+    (item) => normalizeUserId(item.user_id) === senderId
+  )
+  if (!member) {
+    ElMessage.info('该成员已不在当前群组')
+    return
+  }
+  if (!canManageGroupMember(member)) {
+    ElMessage.warning('不能对该成员执行禁言操作')
+    return
+  }
+
+  groupMessageMuteDialog.value = {
+    visible: true,
+    saving: false,
+    member,
+    durationMinutes: 60,
+  }
+}
+
+function closeMessageMemberMuteDialog() {
+  if (groupMessageMuteDialog.value.saving) return
+  groupMessageMuteDialog.value.visible = false
+}
+
+async function confirmMessageMemberMute() {
+  const dialog = groupMessageMuteDialog.value
+  if (!dialog.member || dialog.saving) return
+  dialog.saving = true
+  try {
+    const muted = await muteGroupMember(dialog.member, dialog.durationMinutes)
+    if (muted) dialog.visible = false
+  } finally {
+    dialog.saving = false
+  }
+}
+
 function canChangeGroupRole(member) {
   return (groupPanel.value.detail?.viewer_role || currentSettings.value.group_role) === 'owner' && member?.role !== 'owner'
 }
@@ -5135,9 +6199,9 @@ async function setGroupMemberRole(member, role) {
   }
 }
 
-async function muteGroupMember(member, durationMinutes = 60) {
+async function muteGroupMember(member, durationMinutes = 60, { showFeedback = true } = {}) {
   const groupId = selectedGroupId()
-  if (!groupId || !member?.user_id) return
+  if (!groupId || !member?.user_id) return false
   try {
     const payload = durationMinutes === 'permanent'
       ? { duration: 'permanent' }
@@ -5147,9 +6211,23 @@ async function muteGroupMember(member, durationMinutes = 60) {
     })
     groupPanel.value.detail = d.group
     activeMuteMenuUserId.value = null
-    ElMessage.success(durationMinutes === 'permanent' ? '已永久禁言' : '已禁言')
+    if (d.notice) {
+      const notice = normalizeIncomingMessage(d.notice)
+      if (
+        selectedConversationKey.value === `group:${groupId}`
+        && !messages.value.some((message) => message.id === notice.id)
+      ) {
+        messages.value = [...messages.value, notice]
+        await nextTick()
+        scrollToBottomSoon()
+      }
+    }
+    loadConversations({ silent: true, preserveOrder: true })
+    if (showFeedback) ElMessage.success(durationMinutes === 'permanent' ? '已永久禁言' : '已禁言')
+    return true
   } catch (e) {
     ElMessage.error(e.message)
+    return false
   }
 }
 
@@ -5369,12 +6447,6 @@ async function dissolveCurrentGroup() {
   if (!groupId) return
 
   try {
-    await ElMessageBox.confirm('解散后所有成员都无法继续使用该群组，确认解散？', '解散群组', { type: 'warning' })
-  } catch {
-    return
-  }
-
-  try {
     // 第一次请求，检查是否需要 2FA
     const firstResponse = await apiPost(`/api/messages/groups/${groupId}/dissolve/`, {})
 
@@ -5382,6 +6454,10 @@ async function dissolveCurrentGroup() {
     if (firstResponse.status === 'require_2fa' || firstResponse.code === 'require_2fa') {
       const method = firstResponse.method || 'totp'
       const methodLabel = method === 'totp' ? 'TOTP 验证器' : method === 'email' ? '邮箱验证码' : '两步验证'
+      if (method === 'email') {
+        await apiPost('/api/security/send-operation-2fa/', {})
+        ElMessage.success('验证码已发送至你的邮箱')
+      }
 
       let twoFaCode = ''
       try {
@@ -5391,9 +6467,9 @@ async function dissolveCurrentGroup() {
           {
             confirmButtonText: '确认',
             cancelButtonText: '取消',
-            inputPattern: /^\d{6}$/,
-            inputErrorMessage: '请输入 6 位数字验证码',
-            inputPlaceholder: '请输入 6 位验证码',
+            inputPattern: /^(\d{6}|[A-Za-z0-9]{8})$/,
+            inputErrorMessage: '请输入 6 位验证码或 8 位备用验证码',
+            inputPlaceholder: '6 位验证码 / 8 位备用码',
             type: 'warning',
           }
         )
@@ -5405,6 +6481,7 @@ async function dissolveCurrentGroup() {
       // 第二次请求，带上验证码
       const secondResponse = await apiPost(`/api/messages/groups/${groupId}/dissolve/`, {
         two_fa_code: twoFaCode,
+        use_backup: /^[A-Za-z0-9]{8}$/.test(twoFaCode) && !/^\d{6}$/.test(twoFaCode),
       })
 
       if (secondResponse.status === 'success') {
@@ -5429,6 +6506,10 @@ async function dissolveCurrentGroup() {
       ElMessage.error(firstResponse.message || '操作失败')
     }
   } catch (e) {
+    if (e.data?.code === 'require_2fa_setup') {
+      ElMessage.warning(e.data.message || '请先在安全设置中开启 2FA')
+      return
+    }
     ElMessage.error(e.message || '操作失败')
   }
 }
@@ -5512,6 +6593,44 @@ function closeMessageCtxMenu() {
   messageCtxMenu.value.visible = false
 }
 
+function deriveNoteShareViewUrl(accessUrl) {
+  if (!accessUrl) return ''
+  try {
+    const pathname = new URL(accessUrl, window.location.origin).pathname
+    const directMatch = pathname.match(/^\/api\/messages\/note-shares\/(\d+)\/?$/)
+    if (directMatch) {
+      return `/messages/note-shares/${directMatch[1]}/view/`
+    }
+    const groupMatch = pathname.match(/^\/api\/messages\/groups\/(\d+)\/note-shares\/(\d+)\/?$/)
+    if (groupMatch) {
+      return `/messages/groups/${groupMatch[1]}/note-shares/${groupMatch[2]}/view/`
+    }
+  } catch (error) {
+    console.warn('无法解析笔记分享链接:', error)
+  }
+  return ''
+}
+
+function getNoteShareWindowUrl(msg) {
+  const share = msg?.note_share
+  if (!share?.is_available) return ''
+  return share.view_url || share.reader_url || deriveNoteShareViewUrl(share.access_url) || share.public_url || ''
+}
+
+function canOpenNoteShareInWindow(msg) {
+  return !!getNoteShareWindowUrl(msg)
+}
+
+function openNoteShareInNewWindow(msg) {
+  const url = getNoteShareWindowUrl(msg)
+  if (!url) {
+    ElMessage.warning('该笔记暂不支持新窗口阅览')
+    return
+  }
+  const absoluteUrl = new URL(url, window.location.origin).href
+  window.open(absoluteUrl, '_blank', 'noopener,noreferrer')
+}
+
 // Phase 2: 表情回应处理
 async function handleReactionToggle({ msg, emoji }) {
   if (!msg || !emoji) return
@@ -5566,6 +6685,10 @@ async function messageCtxAction(action) {
     return
   }
   if (action === 'forward') {
+    if (msg.note_share?.allow_forwarding === false) {
+      ElMessage.warning('这篇共享笔记已禁止转发')
+      return
+    }
     if (selectionMode.value || selectedMessageIds.value.size > 0) {
       if (!selectedMessageIds.value.has(msg.id)) {
         selectedMessageIds.value = new Set([...selectedMessageIds.value, msg.id])
@@ -5581,12 +6704,16 @@ async function messageCtxAction(action) {
     await copyMessageContent(msg)
     return
   }
+  if (action === 'open_note_window') {
+    openNoteShareInNewWindow(msg)
+    return
+  }
   if (action === 'pin_group_message') {
     await togglePinnedGroupMessage(msg)
     return
   }
   if (action === 'edit') {
-    await editGroupMessage(msg)
+    startInlineMessageEdit(msg)
     return
   }
   if (action === 'report') {
@@ -5742,9 +6869,15 @@ function onGlobalClick() {
   closeMessageCtxMenu()
   activeMuteMenuUserId.value = null
   showChatMenu.value = false
+  showComposerMore.value = false
+  showNotePicker.value = false
 }
 
 function onGlobalKeydown(event) {
+  if (event.key === 'Escape' && cameraCapture.value.visible) {
+    closeCameraCapture()
+    return
+  }
   if (event.key === 'Escape' && mediaPreview.value.visible) {
     closeMediaPreview()
   }
@@ -5859,6 +6992,7 @@ onBeforeUnmount(() => {
   clearTimeout(typingHideTimer)
   if (isRecordingVoice.value) stopVoiceRecording()
   cleanupVoiceRecording()
+  cleanupCameraCapture()
   chatSocket?.close()
   document.removeEventListener('click', onGlobalClick)
   document.removeEventListener('keydown', onGlobalKeydown)
@@ -6543,6 +7677,119 @@ watch(
   box-shadow: 0 22px 60px rgba(15, 23, 42, 0.24);
 }
 
+.camera-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10520;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(8, 13, 24, 0.78);
+}
+
+.camera-capture-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(760px, 100%);
+  height: min(760px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: #111827;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+}
+
+.camera-capture-header,
+.camera-capture-footer {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  padding: 8px 14px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.96);
+}
+
+.camera-capture-header {
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.camera-capture-header strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.camera-capture-stage {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #020617;
+}
+
+.camera-capture-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.camera-capture-loading {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 22px;
+}
+
+.camera-capture-footer {
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.camera-capture-footer-spacer,
+.camera-capture-icon-btn {
+  width: 38px;
+  height: 38px;
+}
+
+.camera-capture-icon-btn,
+.camera-capture-shutter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+}
+
+.camera-capture-icon-btn {
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.camera-capture-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.camera-capture-shutter {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: var(--primary-color, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3);
+}
+
+.camera-capture-shutter:hover:not(:disabled) {
+  background: var(--primary-hover, #1d4ed8);
+}
+
+.camera-capture-icon-btn:disabled,
+.camera-capture-shutter:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .media-preview-overlay {
   position: fixed;
   inset: 0;
@@ -6830,8 +8077,20 @@ watch(
   border-bottom: 1px solid var(--border-color);
 }
 
+.chat-search-context {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--primary-color);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .search-input-wrap {
   flex: 1;
+  min-width: 150px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6865,6 +8124,66 @@ watch(
   color: var(--text-tertiary);
 }
 
+.chat-search-filter,
+.chat-search-date {
+  flex: 0 1 132px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.chat-search-date {
+  flex-basis: 124px;
+}
+
+.chat-search-filter:focus,
+.chat-search-date:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  background: var(--bg-primary);
+}
+
+.chat-search-attachment {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-search-attachment input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary-color);
+}
+
+.reset-search-filters-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.reset-search-filters-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
 .clear-search-btn {
   background: none;
   border: none;
@@ -6880,6 +8199,49 @@ watch(
 
 .clear-search-btn:hover {
   color: var(--text-secondary);
+}
+
+.chat-search-navigator {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 98px;
+  height: 36px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.chat-search-match-count {
+  min-width: 38px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.chat-search-nav-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.chat-search-nav-btn:hover:not(:disabled) {
+  background: var(--bg-primary);
+  color: var(--primary-color);
+}
+
+.chat-search-nav-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .close-search-btn {
@@ -7588,6 +8950,70 @@ watch(
 
 .group-config-box.compact {
   gap: 14px;
+}
+
+.group-work-config-box {
+  padding-top: 18px;
+  padding-bottom: 20px;
+}
+
+.group-announcement-reads {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-secondary) 62%, var(--bg-primary));
+}
+
+.announcement-read-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.announcement-read-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.announcement-read-summary i {
+  color: var(--primary-color, #2563eb);
+}
+
+.announcement-read-confirmed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #16a34a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.announcement-unread-members {
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.announcement-unread-members summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--primary-color, #2563eb);
+}
+
+.announcement-unread-member {
+  display: inline-flex;
+  margin: 8px 6px 0 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-primary) 78%, var(--danger-color, #ef4444));
+  color: var(--text-secondary);
 }
 
 .group-section-title {
@@ -9030,7 +10456,7 @@ watch(
 .composer-shell {
   position: relative;
   display: grid;
-  grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   padding: 8px;
@@ -9064,6 +10490,13 @@ watch(
   background: color-mix(in srgb, var(--bg-tertiary) 88%, transparent);
 }
 
+.tool-btn.active,
+.more-tool.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--primary-color) 24%, transparent);
+}
+
 .tool-btn.recording {
   color: #fff;
   background: var(--danger-color, #ef4444);
@@ -9086,6 +10519,248 @@ watch(
 
 .hidden-file-input {
   display: none;
+}
+
+.composer-more-wrap {
+  position: relative;
+  display: flex;
+}
+
+.composer-more-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 75;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(108px, 1fr));
+  gap: 6px;
+  width: 236px;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.composer-more-menu::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  transform: rotate(45deg);
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+}
+
+.composer-more-item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-more-item:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+  color: var(--primary-color);
+}
+
+.composer-more-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+  color: var(--primary-color);
+  flex: 0 0 auto;
+}
+
+.note-picker-panel {
+  width: min(520px, 100%);
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.note-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-picker-header strong,
+.note-picker-header span {
+  display: block;
+}
+
+.note-picker-header strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.note-picker-header span {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.note-picker-close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.note-picker-close:hover {
+  color: var(--danger-color, #ef4444);
+  background: color-mix(in srgb, var(--danger-color, #ef4444) 10%, transparent);
+}
+
+.note-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  color: var(--text-tertiary);
+}
+
+.note-picker-search:focus-within {
+  border-color: color-mix(in srgb, var(--primary-color) 58%, var(--border-color));
+  color: var(--primary-color);
+}
+
+.note-picker-search input {
+  min-width: 0;
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.note-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.note-picker-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-picker-item:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary-color) 30%, transparent);
+  background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+}
+
+.note-picker-item:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.note-picker-icon,
+.note-picker-send {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+}
+
+.note-picker-icon {
+  background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+  color: var(--primary-color);
+}
+
+.note-picker-send {
+  color: var(--text-tertiary);
+}
+
+.note-picker-item:hover:not(:disabled) .note-picker-send {
+  color: var(--primary-color);
+}
+
+.note-picker-meta {
+  min-width: 0;
+}
+
+.note-picker-meta strong,
+.note-picker-meta em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-picker-meta strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.note-picker-meta em {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.note-picker-state {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
 
 .emoji-picker {
@@ -9165,6 +10840,14 @@ watch(
   justify-content: center;
   color: var(--primary-color);
   background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-secondary));
+}
+
+.mention-avatar-command {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 12%, var(--bg-secondary));
 }
 
 .mention-meta {
@@ -9432,6 +11115,42 @@ watch(
 
 /* ========== 鍝嶅簲寮?========== */
 @media (max-width: 768px) {
+  .chat-search-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  .chat-search-context {
+    order: 0;
+  }
+
+  .search-input-wrap {
+    order: 1;
+    flex-basis: calc(100% - 120px);
+  }
+
+  .chat-search-navigator {
+    order: 1;
+    margin-left: auto;
+  }
+
+  .chat-search-filter,
+  .chat-search-date {
+    order: 2;
+    flex: 1 1 120px;
+  }
+
+  .chat-search-attachment,
+  .reset-search-filters-btn {
+    order: 2;
+  }
+
+  .close-search-btn {
+    order: 0;
+    margin-left: auto;
+  }
+
   .messages-container {
     grid-template-columns: 1fr;
   }
@@ -9512,10 +11231,21 @@ watch(
   }
 
   .composer-shell {
-    grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto;
     gap: 4px;
     padding: 7px;
     border-radius: 16px;
+  }
+
+  .composer-more-menu {
+    grid-template-columns: 1fr;
+    width: min(220px, calc(100vw - 32px));
+  }
+
+  .note-picker-panel {
+    width: 100%;
+    max-height: 280px;
+    padding: 10px;
   }
 
   .mention-picker {
@@ -9762,6 +11492,203 @@ watch(
 
 .turnstile-gate-actions .btn-ghost:hover {
   background: var(--bg-tertiary, #f2f2f2);
+}
+
+.direct-mute-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.direct-mute-dialog {
+  width: min(100%, 440px);
+  max-height: min(700px, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.24);
+}
+
+.direct-mute-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.direct-mute-header h3 {
+  margin: 0;
+  color: var(--text-primary, #111827);
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.direct-mute-header h3 i {
+  margin-right: 8px;
+  color: #dc2626;
+}
+
+.direct-mute-header p {
+  margin: 6px 0 0;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.direct-mute-close {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+}
+
+.direct-mute-close:hover {
+  background: var(--bg-tertiary, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.direct-mute-body {
+  padding: 18px 20px 20px;
+}
+
+.direct-mute-label {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.direct-mute-label span {
+  margin-left: 4px;
+  color: var(--text-tertiary, #9ca3af);
+  font-weight: 400;
+}
+
+.direct-mute-duration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.direct-mute-duration {
+  min-height: 34px;
+  padding: 6px 4px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary, #374151);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.direct-mute-duration:hover,
+.direct-mute-duration.active {
+  border-color: #dc2626;
+  background: color-mix(in srgb, #dc2626 8%, var(--bg-primary, #fff));
+  color: #b91c1c;
+}
+
+.direct-mute-reason {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  background: var(--bg-secondary, #fff);
+  color: var(--text-primary, #111827);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.direct-mute-reason:focus {
+  outline: 0;
+  border-color: var(--primary-color, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #2563eb) 15%, transparent);
+}
+
+.direct-mute-count {
+  margin-top: 5px;
+  color: var(--text-tertiary, #9ca3af);
+  font-size: 12px;
+  text-align: right;
+}
+
+.direct-mute-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.direct-mute-footer button {
+  min-width: 84px;
+  min-height: 34px;
+  padding: 7px 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.direct-mute-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.direct-mute-secondary {
+  border: 1px solid var(--border-color, #d1d5db);
+  background: transparent;
+  color: var(--text-primary, #374151);
+}
+
+.direct-mute-primary {
+  border: 1px solid #dc2626;
+  background: #dc2626;
+  color: #fff;
+}
+
+.direct-mute-primary:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.direct-mute-expiry {
+  margin-left: 4px;
+}
+
+@media (max-width: 480px) {
+  .direct-mute-overlay {
+    padding: 12px;
+  }
+
+  .direct-mute-header,
+  .direct-mute-body,
+  .direct-mute-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .direct-mute-duration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
 

@@ -10,15 +10,24 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+
+from messaging.models import GroupMessage, Message, MessageGroup
+from ops.models import BackupRecord
 
 from ._helpers import login, make_user, parse, post_json
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    SECURE_SSL_REDIRECT=False,
+)
 class _DashboardTestBase(TestCase):
     def setUp(self):
         cache.clear()
@@ -81,6 +90,28 @@ class DashboardStatsApiTests(_DashboardTestBase):
         body = parse(response)
         self.assertEqual(body['status'], 'success')
         self.assertIn('assets', body)
+
+    def test_superuser_can_get_operations_section(self):
+        admin = make_user('ds04_admin', is_superuser=True)
+        member = make_user('ds04_member')
+        group = MessageGroup.objects.create(
+            name='Operations group',
+            owner=admin,
+            created_by=admin,
+        )
+        Message.objects.create(sender=admin, recipient=member, content='direct activity')
+        GroupMessage.objects.create(group=group, sender=admin, content='group activity')
+        login(self.client, admin)
+
+        response = self.client.get(reverse('dashboard_stats_api') + '?section=operations')
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        self.assertEqual(body['status'], 'success')
+        self.assertEqual(body['operations']['active_groups'], 1)
+        self.assertEqual(body['operations']['direct_messages_7d'], 1)
+        self.assertEqual(body['operations']['group_messages_7d'], 1)
+        self.assertIn('activity_trend', body['operations'])
 
 
 # =========================================================================
@@ -154,3 +185,30 @@ class HealthCheckTests(_DashboardTestBase):
         self.assertIn(response.status_code, (200, 503))
         body = parse(response)
         self.assertIn('checks', body)
+
+    def test_service_worker_is_available_from_origin_root(self):
+        with TemporaryDirectory() as static_root:
+            worker_dir = Path(static_root) / 'dist'
+            worker_dir.mkdir()
+            (worker_dir / 'sw.js').write_text('self.addEventListener("install", () => {});', encoding='utf-8')
+            with override_settings(STATIC_ROOT=static_root):
+                response = self.client.get(reverse('service_worker'))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['Service-Worker-Allowed'], '/')
+                self.assertIn('no-cache', response['Cache-Control'])
+                response.close()
+
+
+class BackupCommandTests(_DashboardTestBase):
+    def test_run_backup_creates_a_snapshot_record_and_archive(self):
+        with TemporaryDirectory() as backup_dir:
+            call_command(
+                'run_backup',
+                output_dir=backup_dir,
+                retention_days=0,
+            )
+
+            record = BackupRecord.objects.get(kind=BackupRecord.KIND_SNAPSHOT)
+            self.assertEqual(record.status, BackupRecord.STATUS_SUCCEEDED)
+            self.assertTrue(Path(record.storage_path).is_file())
+            self.assertGreater(record.size_bytes, 0)

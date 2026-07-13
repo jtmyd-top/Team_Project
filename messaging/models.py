@@ -42,6 +42,8 @@ class Message(models.Model):
     # 撤回：双方均不可见（发送者 2 分钟内可撤回 / 阅后即焚触发）
     is_recalled = models.BooleanField(default=False, verbose_name="已撤回")
     recalled_at = models.DateTimeField(null=True, blank=True, verbose_name="撤回时间")
+    is_edited = models.BooleanField(default=False, verbose_name="已编辑")
+    edited_at = models.DateTimeField(null=True, blank=True, verbose_name="编辑时间")
     was_reported = models.BooleanField(default=False, verbose_name="是否曾被举报")
     pending_purge_at = models.DateTimeField(null=True, blank=True, verbose_name="计划物理清理时间")
     purged_at = models.DateTimeField(null=True, blank=True, verbose_name="实际物理清理时间")
@@ -134,6 +136,63 @@ class MessageAttachment(models.Model):
         return self.original_name or self.file.name
 
 
+class DirectNoteShare(models.Model):
+    """A note shared into a one-to-one message without making the note public."""
+    message = models.OneToOneField(
+        Message, on_delete=models.CASCADE, related_name='note_share', verbose_name="Message"
+    )
+    note = models.ForeignKey(
+        'notes.Note', on_delete=models.CASCADE, related_name='direct_note_shares', verbose_name="Note"
+    )
+    shared_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='shared_direct_notes', verbose_name="Shared by"
+    )
+    recipient = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='received_direct_note_shares', verbose_name="Recipient"
+    )
+    title_snapshot = models.CharField(max_length=255, blank=True, default='', verbose_name="Title snapshot")
+    was_public_at_share = models.BooleanField(default=False, verbose_name="Was public at share")
+    allow_forwarding = models.BooleanField(default=True, verbose_name="Allow forwarding")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Shared at")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="Revoked at")
+
+    class Meta:
+        verbose_name = "Direct note share"
+        verbose_name_plural = "Direct note shares"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['shared_by', '-created_at']),
+            models.Index(fields=['recipient', '-created_at']),
+            models.Index(fields=['note', '-created_at']),
+            models.Index(fields=['revoked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.title_snapshot or self.note_id} -> {self.recipient.username}"
+
+
+class DirectNoteShareRead(models.Model):
+    """A reader's access record for a direct note share."""
+    share = models.ForeignKey(
+        DirectNoteShare, on_delete=models.CASCADE, related_name='read_records', verbose_name="Share"
+    )
+    reader = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='direct_note_share_reads', verbose_name="Reader"
+    )
+    view_count = models.PositiveIntegerField(default=0, verbose_name="View count")
+    first_read_at = models.DateTimeField(auto_now_add=True, verbose_name="First read at")
+    last_read_at = models.DateTimeField(auto_now=True, verbose_name="Last read at")
+
+    class Meta:
+        verbose_name = "Direct note share read"
+        verbose_name_plural = "Direct note share reads"
+        unique_together = ('share', 'reader')
+        indexes = [
+            models.Index(fields=['share', '-last_read_at']),
+            models.Index(fields=['reader', '-last_read_at']),
+        ]
+
+
 class MessagePreference(models.Model):
     """用户的私信偏好设置"""
     MESSAGE_MODE_CHOICES = [
@@ -224,12 +283,50 @@ class UserBlocklist(models.Model):
         verbose_name = "用户屏蔽"
         verbose_name_plural = "用户屏蔽"
         unique_together = ('user', 'blocked_user')
-        indexes = [
-            models.Index(fields=['user', 'blocked_user']),
-        ]
 
     def __str__(self):
         return f"{self.user.username} 屏蔽了 {self.blocked_user.username}"
+
+
+class DirectMessageMute(models.Model):
+    """A user's temporary restriction on messages from one direct-message peer."""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='direct_message_mutes',
+        verbose_name="禁言发起人",
+    )
+    muted_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='muted_in_direct_messages',
+        verbose_name="被禁言用户",
+    )
+    reason = models.CharField(max_length=500, blank=True, verbose_name="禁言原因")
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="禁言到期时间",
+        help_text="留空表示永久禁言",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="禁言时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "私信禁言"
+        verbose_name_plural = "私信禁言"
+        unique_together = ('user', 'muted_user')
+        indexes = [
+            models.Index(fields=['user', 'expires_at']),
+        ]
+
+    @property
+    def is_active(self):
+        return self.expires_at is None or self.expires_at > timezone.now()
+
+    def __str__(self):
+        return f"{self.user.username} 禁言了 {self.muted_user.username}"
 
 
 class UserFollow(models.Model):
@@ -253,7 +350,6 @@ class UserFollow(models.Model):
         verbose_name_plural = "用户关注"
         unique_together = ('follower', 'following')
         indexes = [
-            models.Index(fields=['follower', 'following']),
             models.Index(fields=['following', '-created_at']),
         ]
 
@@ -507,7 +603,6 @@ class MessageGroupInviteLink(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['group', 'revoked_at'], name='knowledge_p_group_i_6012d6_idx'),
-            models.Index(fields=['token'], name='knowledge_p_token_cf0d54_idx'),
         ]
 
     def __str__(self):
@@ -623,6 +718,13 @@ class MessageGroupAnnouncementRead(models.Model):
 
 
 class GroupMessage(models.Model):
+    VISIBILITY_ALL = 'all'
+    VISIBILITY_STAFF_AND_TARGET = 'staff_and_target'
+    VISIBILITY_SCOPE_CHOICES = [
+        (VISIBILITY_ALL, 'All group members'),
+        (VISIBILITY_STAFF_AND_TARGET, 'Group managers and target member'),
+    ]
+
     """群组消息。独立于一对一 Message，避免继承阅后即焚语义。"""
     group = models.ForeignKey(
         MessageGroup, on_delete=models.CASCADE, related_name='messages', verbose_name="群组"
@@ -648,12 +750,29 @@ class GroupMessage(models.Model):
     recalled_at = models.DateTimeField(null=True, blank=True, verbose_name="撤回时间")
     was_reported = models.BooleanField(default=False, verbose_name="是否曾被举报")
 
+    visibility_scope = models.CharField(
+        max_length=24,
+        choices=VISIBILITY_SCOPE_CHOICES,
+        default=VISIBILITY_ALL,
+        db_index=True,
+        verbose_name="Visibility scope",
+    )
+    visibility_target = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='targeted_group_messages',
+        verbose_name="Visibility target user",
+    )
+
     class Meta:
         verbose_name = "群组消息"
         verbose_name_plural = "群组消息"
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['group', 'visibility_scope', '-created_at']),
             models.Index(fields=['sender', '-created_at']),
             models.Index(fields=['was_reported']),
         ]
@@ -676,6 +795,63 @@ class GroupMessageDeletion(models.Model):
         unique_together = ('message', 'user')
         indexes = [
             models.Index(fields=['user', 'message']),
+        ]
+
+
+class GroupNoteShare(models.Model):
+    """A note shared into a group message without making the note public."""
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='note_shares', verbose_name="Group"
+    )
+    message = models.OneToOneField(
+        GroupMessage, on_delete=models.CASCADE, related_name='note_share', verbose_name="Group message"
+    )
+    note = models.ForeignKey(
+        'notes.Note', on_delete=models.CASCADE, related_name='group_note_shares', verbose_name="Note"
+    )
+    shared_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='shared_group_notes', verbose_name="Shared by"
+    )
+    title_snapshot = models.CharField(max_length=255, blank=True, default='', verbose_name="Title snapshot")
+    was_public_at_share = models.BooleanField(default=False, verbose_name="Was public at share")
+    allow_forwarding = models.BooleanField(default=True, verbose_name="Allow forwarding")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Shared at")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="Revoked at")
+
+    class Meta:
+        verbose_name = "Group note share"
+        verbose_name_plural = "Group note shares"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['note', '-created_at']),
+            models.Index(fields=['shared_by', '-created_at']),
+            models.Index(fields=['revoked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.title_snapshot or self.note_id} @ {self.group.name}"
+
+
+class GroupNoteShareRead(models.Model):
+    """A member's access record for a group note share."""
+    share = models.ForeignKey(
+        GroupNoteShare, on_delete=models.CASCADE, related_name='read_records', verbose_name="Share"
+    )
+    reader = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='group_note_share_reads', verbose_name="Reader"
+    )
+    view_count = models.PositiveIntegerField(default=0, verbose_name="View count")
+    first_read_at = models.DateTimeField(auto_now_add=True, verbose_name="First read at")
+    last_read_at = models.DateTimeField(auto_now=True, verbose_name="Last read at")
+
+    class Meta:
+        verbose_name = "Group note share read"
+        verbose_name_plural = "Group note share reads"
+        unique_together = ('share', 'reader')
+        indexes = [
+            models.Index(fields=['share', '-last_read_at']),
+            models.Index(fields=['reader', '-last_read_at']),
         ]
 
 
@@ -884,6 +1060,114 @@ class GroupJoinRequest(models.Model):
 
     def __str__(self):
         return f"{self.user.username} -> {self.group.name} ({self.get_status_display()})"
+
+
+class GroupPoll(models.Model):
+    """A member poll owned by a group manager."""
+
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='polls', verbose_name='Group'
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='created_group_polls', verbose_name='Created by'
+    )
+    question = models.CharField(max_length=240, verbose_name='Question')
+    allow_multiple = models.BooleanField(default=False, verbose_name='Allow multiple choices')
+    closes_at = models.DateTimeField(null=True, blank=True, verbose_name='Closes at')
+    closed_at = models.DateTimeField(null=True, blank=True, verbose_name='Closed at')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Created at')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Updated at')
+
+    class Meta:
+        verbose_name = 'Group poll'
+        verbose_name_plural = 'Group polls'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['group', '-created_at']),
+            models.Index(fields=['closed_at', 'closes_at']),
+        ]
+
+    def is_open(self, now=None):
+        now = now or timezone.now()
+        return self.closed_at is None and (self.closes_at is None or self.closes_at > now)
+
+    def __str__(self):
+        return f'{self.group.name}: {self.question[:40]}'
+
+
+class GroupPollOption(models.Model):
+    poll = models.ForeignKey(
+        GroupPoll, on_delete=models.CASCADE, related_name='options', verbose_name='Poll'
+    )
+    text = models.CharField(max_length=160, verbose_name='Option')
+    position = models.PositiveSmallIntegerField(default=0, verbose_name='Position')
+
+    class Meta:
+        verbose_name = 'Group poll option'
+        verbose_name_plural = 'Group poll options'
+        ordering = ['position', 'id']
+        unique_together = ('poll', 'position')
+
+
+class GroupPollVote(models.Model):
+    poll = models.ForeignKey(
+        GroupPoll, on_delete=models.CASCADE, related_name='votes', verbose_name='Poll'
+    )
+    option = models.ForeignKey(
+        GroupPollOption, on_delete=models.CASCADE, related_name='votes', verbose_name='Option'
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='group_poll_votes', verbose_name='User'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Voted at')
+
+    class Meta:
+        verbose_name = 'Group poll vote'
+        verbose_name_plural = 'Group poll votes'
+        unique_together = ('poll', 'option', 'user')
+        indexes = [
+            models.Index(fields=['poll', 'user']),
+        ]
+
+
+class GroupTask(models.Model):
+    STATUS_OPEN = 'open'
+    STATUS_COMPLETED = 'completed'
+    STATUS_CHOICES = [
+        (STATUS_OPEN, 'Open'),
+        (STATUS_COMPLETED, 'Completed'),
+    ]
+
+    group = models.ForeignKey(
+        MessageGroup, on_delete=models.CASCADE, related_name='tasks', verbose_name='Group'
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='created_group_tasks', verbose_name='Created by'
+    )
+    assignee = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='assigned_group_tasks', verbose_name='Assignee'
+    )
+    title = models.CharField(max_length=180, verbose_name='Title')
+    description = models.TextField(max_length=1200, blank=True, default='', verbose_name='Description')
+    due_at = models.DateTimeField(null=True, blank=True, verbose_name='Due at')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    completed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='completed_group_tasks', verbose_name='Completed by'
+    )
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name='Completed at')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Created at')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Updated at')
+
+    class Meta:
+        verbose_name = 'Group task'
+        verbose_name_plural = 'Group tasks'
+        ordering = ['status', 'due_at', '-created_at']
+        indexes = [
+            models.Index(fields=['group', 'status', 'due_at']),
+            models.Index(fields=['assignee', 'status']),
+        ]
 
 
 class GroupTag(models.Model):

@@ -36,6 +36,7 @@ def get_message_conversations_api(request):
         messages = (
             Message.objects.filter(Q(sender=request.user) | Q(recipient=request.user))
             .exclude(is_recalled=True)
+            .select_related('note_share__note__author', 'note_share__shared_by')
             .prefetch_related('attachments')
             .order_by('-created_at')
         )
@@ -185,6 +186,14 @@ def get_message_conversations_api(request):
             unread_filters = []
             for membership in scoped_memberships:
                 visible_filter = Q(group_id=membership.group_id, is_recalled=False)
+                if membership.role not in ('owner', 'admin'):
+                    visible_filter &= (
+                        Q(visibility_scope=GroupMessage.VISIBILITY_ALL)
+                        | Q(
+                            visibility_scope=GroupMessage.VISIBILITY_STAFF_AND_TARGET,
+                            visibility_target_id=request.user.id,
+                        )
+                    )
                 if membership.cleared_before:
                     visible_filter &= Q(created_at__gt=membership.cleared_before)
                 elif not membership.group.allow_new_members_view_history and membership.joined_at:
@@ -202,6 +211,14 @@ def get_message_conversations_api(request):
                     threshold = membership.joined_at
 
                 unread_filter = Q(group_id=membership.group_id)
+                if membership.role not in ('owner', 'admin'):
+                    unread_filter &= (
+                        Q(visibility_scope=GroupMessage.VISIBILITY_ALL)
+                        | Q(
+                            visibility_scope=GroupMessage.VISIBILITY_STAFF_AND_TARGET,
+                            visibility_target_id=request.user.id,
+                        )
+                    )
                 if threshold:
                     unread_filter &= Q(created_at__gt=threshold)
                 unread_filters.append(unread_filter)

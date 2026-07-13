@@ -6,6 +6,7 @@ import SettingsSecurity from '../components/settings/SettingsSecurity/index.vue'
 import SettingsNotifications from '../components/settings/SettingsNotifications/index.vue';
 import SettingsPrivacy from '../components/settings/SettingsPrivacy/index.vue';
 import SettingsTheme from '../components/settings/SettingsTheme/index.vue';
+import SettingsStorage from '../components/settings/SettingsStorage/index.vue';
 
 export function useSettingsApp() {
   const userStore = useUserStore();
@@ -20,6 +21,7 @@ export function useSettingsApp() {
     { id: 'security', label: '安全设置', icon: 'fas fa-shield-alt', component: SettingsSecurity },
     { id: 'notifications', label: '通知设置', icon: 'fas fa-bell', component: SettingsNotifications },
     { id: 'privacy', label: '隐私与通信', icon: 'fas fa-user-shield', component: SettingsPrivacy },
+    { id: 'storage', label: '存储用量', icon: 'fas fa-database', component: SettingsStorage },
     { id: 'theme', label: '主题设置', icon: 'fas fa-palette', component: SettingsTheme }
   ];
 
@@ -52,11 +54,16 @@ export function useSettingsApp() {
 
   const initViewFromHash = () => {
     const hash = window.location.hash.slice(1);
-    if (hash) {
-      const validView = navItems.find(item => item.id === hash);
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    const targetView = hash || tab;
+    if (targetView) {
+      const validView = navItems.find(item => item.id === targetView);
       if (validView) {
-        activeView.value = hash;
+        activeView.value = targetView;
         activeComponent.value = validView.component;
+        if (!hash && tab) {
+          window.history.replaceState({}, '', `${window.location.pathname}#${targetView}`);
+        }
         return;
       }
     }

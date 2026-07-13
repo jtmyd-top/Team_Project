@@ -8,11 +8,15 @@ from .users import _group_avatar_url, _user_payload
 def _policy_payload(policy, user, exclude_group_id=None):
     policy_eligible, stats = policy.can_create_group(user)
     owned_limit = _owned_group_limit_payload(user, exclude_group_id=exclude_group_id)
-    eligible = policy_eligible and owned_limit['within_owned_group_limit']
+    profile = getattr(user, 'profile', None)
+    two_fa_enabled = bool(profile and profile.two_fa_enabled)
+    eligible = policy_eligible and owned_limit['within_owned_group_limit'] and two_fa_enabled
     return {
         'enabled': policy.enabled,
         'min_public_notes': policy.min_public_notes,
         'min_followers': policy.min_followers,
+        'two_fa_required': True,
+        'two_fa_enabled': two_fa_enabled,
         'stats': stats,
         'eligible': eligible,
         'policy_eligible': policy_eligible,
@@ -23,6 +27,7 @@ def _policy_payload(policy, user, exclude_group_id=None):
             'public_notes': stats['public_notes'] >= policy.min_public_notes,
             'followers': stats['followers'] >= policy.min_followers,
             'owned_groups': owned_limit['within_owned_group_limit'],
+            'two_fa': two_fa_enabled,
         },
     }
 
@@ -43,6 +48,34 @@ def _group_settings_payload(membership):
         'force_unread': membership.force_unread,
         'cleared_before': membership.cleared_before.isoformat() if membership.cleared_before else None,
         'group_role': membership.role,
+    }
+
+def _group_note_share_payload(message):
+    from django.core.exceptions import ObjectDoesNotExist
+    try:
+        share = message.note_share
+    except ObjectDoesNotExist:
+        share = None
+    if not share:
+        return None
+    note = share.note
+    unavailable = bool(share.revoked_at or note.is_trashed or note.is_secret)
+    title = share.title_snapshot or note.title
+    return {
+        'id': share.id,
+        'note_id': note.id,
+        'title': title,
+        'author': _user_payload(note.author),
+        'shared_by': _user_payload(share.shared_by),
+        'created_at': share.created_at.isoformat() if share.created_at else None,
+        'is_public': note.is_public,
+        'is_secret': note.is_secret,
+        'allow_forwarding': share.allow_forwarding,
+        'requires_group_membership': not note.is_public,
+        'is_available': not unavailable,
+        'access_url': f'/api/messages/groups/{message.group_id}/note-shares/{share.id}/',
+        'view_url': f'/messages/groups/{message.group_id}/note-shares/{share.id}/view/',
+        'public_url': f'/notes/public/{note.public_id}/' if note.public_id and note.is_public and not note.is_secret else '',
     }
 
 def _group_message_payload(message, viewer=None):
@@ -96,6 +129,8 @@ def _group_message_payload(message, viewer=None):
                 'reacted_by_me': viewer and any(r.user_id == viewer.id for r in users) if viewer else False,
             }
 
+    note_share_data = _group_note_share_payload(message)
+
     return {
         'id': message.id,
         'conversation_type': 'group',
@@ -120,6 +155,10 @@ def _group_message_payload(message, viewer=None):
         'forwarded_from': forwarded_from_data,
         'mentions': mentions,
         'reactions': reactions,
+        'note_share': note_share_data,
+        'is_private_moderation_notice': (
+            message.visibility_scope == message.VISIBILITY_STAFF_AND_TARGET
+        ),
         'is_pinned': bool(
             getattr(message.group, 'pinned_message_id', None) == message.id
         ) if getattr(message, 'group_id', None) else False,
@@ -193,17 +232,27 @@ def _group_detail_payload(group, viewer_membership=None):
     }
 
 def _visible_group_messages_qs(group, membership):
+    from django.db.models import Q
     from messaging.models import GroupMessage
     qs = (
         GroupMessage.objects
         .filter(group=group, is_recalled=False)
         .select_related('sender', 'group')
+        .select_related('note_share__note__author', 'note_share__shared_by')
         .prefetch_related('attachments', 'mentions__mentioned_user', 'reactions__user')
     )
     if membership.cleared_before:
         qs = qs.filter(created_at__gt=membership.cleared_before)
     elif not getattr(group, 'allow_new_members_view_history', False) and membership.joined_at:
         qs = qs.filter(created_at__gte=membership.joined_at)
+    if not _is_group_manager(membership):
+        qs = qs.filter(
+            Q(visibility_scope=GroupMessage.VISIBILITY_ALL)
+            | Q(
+                visibility_scope=GroupMessage.VISIBILITY_STAFF_AND_TARGET,
+                visibility_target_id=membership.user_id,
+            )
+        )
     qs = qs.exclude(deletions__user=membership.user)
     return qs.order_by('created_at', 'id')
 

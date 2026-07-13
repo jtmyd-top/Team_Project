@@ -1,6 +1,14 @@
 <template>
   <div class="primary-sidebar">
     <div class="primary-top">
+      <button
+        class="nav-item global-search-trigger"
+        title="全局搜索 (Ctrl+K)"
+        @click="openGlobalSearch"
+      >
+        <i class="fas fa-magnifying-glass"></i>
+        <span class="nav-label">搜索</span>
+      </button>
       <!-- 品牌/Logo区域 (可选) -->
       <!-- <div class="brand-icon">
         <i class="fas fa-book-reader"></i>
@@ -17,7 +25,7 @@
           :title="item.label"
         >
           <i :class="item.icon"></i>
-          <!-- <span class="nav-label">{{ item.label }}</span> -->
+          <span class="nav-label">{{ item.label }}</span>
         </button>
       </nav>
     </div>
@@ -30,6 +38,7 @@
         title="设置"
       >
         <i class="fas fa-cog"></i>
+        <span class="nav-label">设置</span>
       </button>
 
       <div class="user-avatar" @click="handleUserProfile">
@@ -47,6 +56,10 @@ import { usePrimarySidebar } from '@composables/usePrimarySidebar'
 import '@/assets/styles/components/primary-sidebar.css'
 
 const emit = defineEmits(['user-profile'])
+
+function openGlobalSearch() {
+  window.dispatchEvent(new CustomEvent('open-global-search'))
+}
 
 const {
   sidebarStore,

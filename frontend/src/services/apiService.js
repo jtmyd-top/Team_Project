@@ -92,6 +92,35 @@ async function getRequest(url, params = {}) {
 }
 
 /**
+ * Unified DELETE request wrapper for JSON APIs.
+ */
+async function deleteRequest(url, body = {}) {
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": getCsrfToken()
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    createResponseError(extractNonJsonErrorMessage(response, text), response, text);
+  }
+
+  if (!response.ok) {
+    const errorMessage = extractApiErrorMessage(data, '请求失败');
+    createResponseError(errorMessage, response, data);
+  }
+
+  return data;
+}
+
+/**
  * API 服务对象
  */
 const apiService = {
@@ -236,6 +265,20 @@ const apiService = {
   verify2FASetup(code) {
     return postRequest('/api/security/verify-2fa-setup/', { code });
   },
+
+  /**
+   * 开始更换验证器应用
+   */
+  startUpdateTOTP(password, code, useBackup = false) {
+    return postRequest('/api/security/update-totp/start/', { password, code, use_backup: useBackup });
+  },
+
+  /**
+   * 验证新的验证器应用
+   */
+  verifyUpdateTOTP(code) {
+    return postRequest('/api/security/update-totp/verify/', { code });
+  },
   
   /**
    * 禁用2FA
@@ -277,6 +320,18 @@ const apiService = {
 
   markNotificationsRead(payload = {}) {
     return postRequest('/api/notifications/mark-read/', payload);
+  },
+
+  getPushSubscriptionConfiguration() {
+    return getRequest('/api/notifications/push-subscriptions/');
+  },
+
+  registerPushSubscription(payload) {
+    return postRequest('/api/notifications/push-subscriptions/', payload);
+  },
+
+  removePushSubscription(payload) {
+    return deleteRequest('/api/notifications/push-subscriptions/', payload);
   },
   
   // ==================== 主题设置相关 ====================
