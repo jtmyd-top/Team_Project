@@ -290,6 +290,20 @@
       "assets/home.css"
     ]
   },
+  "src/entries/insights.js": {
+    "file": "insights.js",
+    "name": "insights",
+    "src": "src/entries/insights.js",
+    "isEntry": true,
+    "imports": [
+      "_vue-vendor-woEyfMi-.js",
+      "__plugin-vue_export-helper-DlAUqK2U.js",
+      "_echarts-vendor-QKxWV3yE.js"
+    ],
+    "css": [
+      "assets/insights.css"
+    ]
+  },
   "src/entries/knowledge-element.js": {
     "file": "knowledge-element.js",
     "name": "knowledge-element",

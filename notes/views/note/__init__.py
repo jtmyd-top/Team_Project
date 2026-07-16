@@ -42,6 +42,7 @@ from .search import get_all_notes_api, search_notes_api
 from .quick_search import quick_search_api
 from .export import export_note_api
 from .wiki_links import note_links_api
+from .insights import insights_api, insights_view
 
 __all__ = [
     '_get_public_notes_cache_version',
@@ -73,6 +74,8 @@ __all__ = [
     'quick_search_api',
     'export_note_api',
     'note_links_api',
+    'insights_view',
+    'insights_api',
     'note_history_api',
     'record_note_history_api',
     'note_revisions_api',

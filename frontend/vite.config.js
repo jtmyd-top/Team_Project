@@ -81,6 +81,7 @@ export default defineConfig({
         // 涓炬姤澶勭疆涓績
         'moderation': path.resolve(__dirname, 'src/entries/moderation.js'),
         'command-palette': path.resolve(__dirname, 'src/entries/command-palette.js'),
+        'insights': path.resolve(__dirname, 'src/entries/insights.js'),
       },
       output: {
         format: 'es',  // 涓绘牸寮忎负 ES 妯″潡

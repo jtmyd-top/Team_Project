@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}数据洞察{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{% static 'dist/assets/insights.css' %}">
+{% endblock %}
+
+{% block content %}
+<div id="insights-app"></div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{% static 'dist/insights.js' %}"></script>
+{% endblock %}

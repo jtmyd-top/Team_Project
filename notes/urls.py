@@ -6,6 +6,8 @@ from .views import comment, folder, note
 urlpatterns = [
     path('', note.home_view, name='home'),
     path('knowledge/', note.knowledge_list, name='knowledge_list'),
+    path('insights/', note.insights_view, name='insights'),
+    path('api/insights/', note.insights_api, name='api_insights'),
     path('api/toggle-note-like/', note.toggle_note_like, name='toggle_note_like'),
     path('api/notes/search/', note.search_notes_api, name='api_search_notes'),
     path('api/quick-search/', note.quick_search_api, name='api_quick_search'),
