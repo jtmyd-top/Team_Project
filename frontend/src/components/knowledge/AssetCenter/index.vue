@@ -110,7 +110,8 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElDialog, ElMessage, ElMessageBox } from 'element-plus'
+import 'element-plus/es/components/dialog/style/css'
 import { formatMonthDayShortTime } from '@/utils/datetime'
 import { extractApiErrorMessage } from '@/utils/apiError'
 

@@ -39,7 +39,8 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElDialog, ElMessage } from 'element-plus'
+import 'element-plus/es/components/dialog/style/css'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

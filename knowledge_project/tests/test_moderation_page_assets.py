@@ -45,3 +45,19 @@ class ModerationPageAssetsTests(TestCase):
     def test_tag_falls_back_without_manifest_entry(self):
         html = vite_entry_css('nonexistent-entry')
         self.assertIn('assets/nonexistent-entry.css', html)
+
+
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    SECURE_SSL_REDIRECT=False,
+)
+class KnowledgePageAssetsTests(TestCase):
+    def test_page_links_all_entry_css(self):
+        user = make_user('mod03')
+        login(self.client, user)
+        response = self.client.get(reverse('knowledge_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'assets/knowledge.css')
+        # 分享管理的 el-switch/el-dialog 等组件样式在拆分的 chunk CSS 里
+        self.assertContains(response, 'assets/el-select.css')
+        self.assertContains(response, 'assets/el-overlay.css')
