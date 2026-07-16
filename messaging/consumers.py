@@ -156,3 +156,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'user': event.get('user', {}),
             'request_message': event.get('request_message', ''),
         }))
+
+    async def notification(self, event):
+        """站内通知实时推送（评论/关注/群公告/私信等）"""
+        await self.send(text_data=json.dumps({
+            'type': 'notification',
+            'notification': event.get('notification', {}),
+            'unread_count': event.get('unread_count'),
+        }))

@@ -82,6 +82,7 @@ export default defineConfig({
         'moderation': path.resolve(__dirname, 'src/entries/moderation.js'),
         'command-palette': path.resolve(__dirname, 'src/entries/command-palette.js'),
         'insights': path.resolve(__dirname, 'src/entries/insights.js'),
+        'realtime-notify': path.resolve(__dirname, 'src/entries/realtime-notify.js'),
       },
       output: {
         format: 'es',  // 涓绘牸寮忎负 ES 妯″潡

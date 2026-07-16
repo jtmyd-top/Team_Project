@@ -15,6 +15,10 @@
       "_apiError-BVbL-ZBU.js"
     ]
   },
+  "_chatWebSocket-DnabIQIh.js": {
+    "file": "chunks/chatWebSocket-DnabIQIh.js",
+    "name": "chatWebSocket"
+  },
   "_datetime-DAc_1THF.js": {
     "file": "chunks/datetime-DAc_1THF.js",
     "name": "datetime"
@@ -379,6 +383,7 @@
       "_index-CrjtT0vO.js",
       "_index-DQlOUCFw.js",
       "_element-plus-vendor-BdXxpGbs.js",
+      "_chatWebSocket-DnabIQIh.js",
       "src/utils/csrf.js",
       "_datetime-DAc_1THF.js",
       "_ubb-CK3LmT06.js",
@@ -449,6 +454,15 @@
     "name": "public-notes-list",
     "src": "src/entries/public-notes-list.js",
     "isEntry": true
+  },
+  "src/entries/realtime-notify.js": {
+    "file": "realtime-notify.js",
+    "name": "realtime-notify",
+    "src": "src/entries/realtime-notify.js",
+    "isEntry": true,
+    "imports": [
+      "_chatWebSocket-DnabIQIh.js"
+    ]
   },
   "src/entries/reset-password.js": {
     "file": "reset-password.js",

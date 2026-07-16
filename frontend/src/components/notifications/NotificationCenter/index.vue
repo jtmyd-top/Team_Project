@@ -78,7 +78,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { formatMonthDayShortTime } from '@/utils/datetime'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -212,7 +212,31 @@ function kindIcon(kind) {
   return map[kind] || 'fas fa-bell'
 }
 
-onMounted(fetchNotifications)
+// 全局实时通道（realtime-notify 入口）派发的通知事件 → 列表实时插入
+function handleRealtimeNotification(event) {
+  const detail = event?.detail || {}
+  if (typeof detail.unread_count === 'number') {
+    unreadCount.value = detail.unread_count
+  } else {
+    unreadCount.value += 1
+  }
+  const notification = detail.notification
+  if (!notification || !notification.id) return
+  if (notifications.value.some(item => item.id === notification.id)) return
+  // 分页浏览更早的通知时不打乱列表
+  if (pagination.value.page === 1) {
+    notifications.value = [notification, ...notifications.value]
+  }
+}
+
+onMounted(() => {
+  fetchNotifications()
+  window.addEventListener('app:notification', handleRealtimeNotification)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('app:notification', handleRealtimeNotification)
+})
 </script>
 
 <style scoped>

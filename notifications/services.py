@@ -4,6 +4,7 @@ import logging
 from django.conf import settings
 from django.db import transaction
 
+from core.realtime import push_user_event
 from notifications.models import BrowserPushSubscription, UserNotification
 
 
@@ -102,6 +103,34 @@ def _send_browser_pushes(notification_id):
             )
 
 
+def _realtime_notification_payload(notification):
+    return {
+        'id': notification.id,
+        'kind': notification.kind,
+        'title': notification.title,
+        'body': notification.body,
+        'data': notification.data or {},
+        'is_read': notification.is_read,
+        'created_at': notification.created_at.isoformat(),
+    }
+
+
+def _push_realtime_notification(notification_id):
+    """事务提交后向用户的 WebSocket 组推送通知事件。"""
+    notification = UserNotification.objects.filter(id=notification_id).first()
+    if notification is None:
+        return
+    unread_count = UserNotification.objects.filter(
+        user_id=notification.user_id,
+        is_read=False,
+    ).count()
+    push_user_event(notification.user_id, {
+        'type': 'notification',
+        'notification': _realtime_notification_payload(notification),
+        'unread_count': unread_count,
+    })
+
+
 def notify_user(user, kind, title, body='', **data):
     if user is None or not getattr(user, 'id', None):
         return None
@@ -113,6 +142,7 @@ def notify_user(user, kind, title, body='', **data):
         body=(body or '')[:2000],
         data=data or {},
     )
+    transaction.on_commit(lambda: _push_realtime_notification(notification.id))
     if _push_is_enabled_for_user(user, notification):
         transaction.on_commit(lambda: _send_browser_pushes(notification.id))
     return notification

@@ -517,6 +517,14 @@ document.addEventListener("DOMContentLoaded", function() {
     <!-- 全局命令面板 (Ctrl+K) -->
     <link rel="stylesheet" href="{% static 'dist/assets/command-palette.css' %}">
     <script type="module" src="{% static 'dist/command-palette.js' %}"></script>
+    <!-- 全局实时通知 -->
+    <script>
+    window.APP_REALTIME = {
+      enabled: {% if realtime_enabled %}true{% else %}false{% endif %},
+      wsPath: "{{ realtime_ws_path|escapejs }}"
+    };
+    </script>
+    <script type="module" src="{% static 'dist/realtime-notify.js' %}"></script>
     {% endif %}
     {% block scripts %}{% endblock %}
 
