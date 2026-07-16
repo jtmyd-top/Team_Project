@@ -48,6 +48,24 @@
 
     <!-- 编辑器（已解密或非加密笔记时显示） -->
     <template v-if="!isInitializing && (!isSecret || isKeyValid)">
+      <!-- 空白笔记的模板选择条 -->
+      <div v-if="showTemplates" class="template-strip">
+        <span class="template-strip-label"><i class="fas fa-wand-magic-sparkles"></i> 从模板开始</span>
+        <button
+          v-for="tpl in templates"
+          :key="tpl.key"
+          type="button"
+          class="template-chip"
+          :disabled="!editorReady"
+          :title="tpl.description"
+          @click="applyTemplate(tpl)"
+        >
+          <i :class="tpl.icon"></i> {{ tpl.name }}
+        </button>
+        <button type="button" class="template-strip-dismiss" title="不使用模板" @click="showTemplates = false">
+          <i class="fas fa-xmark"></i>
+        </button>
+      </div>
       <input
         v-model="localTitle"
         @input="updateTitle"
@@ -78,6 +96,7 @@ import 'element-plus/es/components/alert/style/css'
 import 'element-plus/es/components/tag/style/css'
 import 'element-plus/es/components/icon/style/css'
 import { useNoteEditor } from '@composables/useNoteEditor'
+import { NOTE_TEMPLATES } from '@/config/noteTemplates'
 import '@/assets/styles/components/note-editor.css'
 
 const props = defineProps({
@@ -104,6 +123,32 @@ const emit = defineEmits(['update:modelValue', 'ready', 'change'])
 
 const editorElRef = ref(null)
 
+// ==================== 笔记模板 ====================
+const templates = NOTE_TEMPLATES
+const showTemplates = ref(false)
+const editorReady = ref(false)
+
+// 拦截 ready 事件以得知编辑器可写入（模板按钮在此之前禁用）
+function wrappedEmit(event, ...args) {
+  if (event === 'ready') {
+    editorReady.value = true
+  }
+  emit(event, ...args)
+}
+
+function applyTemplate(tpl) {
+  const now = new Date()
+  setContent(tpl.render(now))
+  const content = getContent()
+  if (!content) return
+  if (!localTitle.value || localTitle.value === '无标题笔记') {
+    localTitle.value = tpl.defaultTitle(now)
+    updateTitle()
+  }
+  emit('change', content)
+  showTemplates.value = false
+}
+
 const {
   isInitializing,
   isDecrypting,
@@ -122,12 +167,13 @@ const {
   getCurrentTitle,
   updateTitle,
   decryptNoteContent
-} = useNoteEditor(props, emit, editorElRef)
+} = useNoteEditor(props, wrappedEmit, editorElRef)
 
 onMounted(async () => {
   isInitializing.value = true
 
   localTitle.value = props.modelValue.title || ''
+  showTemplates.value = !(props.modelValue.content || '').trim()
 
   try {
     if (props.isSecret) {

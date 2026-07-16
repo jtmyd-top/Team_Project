@@ -49,6 +49,78 @@
   text-align: center;
 }
 
+/* 空白笔记的模板选择条 */
+.template-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px dashed var(--k-border, #d0d7de);
+  border-radius: 8px;
+  background: var(--k-bg-secondary, rgba(64, 158, 255, 0.04));
+}
+
+.template-strip-label {
+  font-size: 13px;
+  color: var(--k-text-secondary, #667085);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.template-strip-label i {
+  color: #409eff;
+  margin-right: 4px;
+}
+
+.template-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--k-text, #344054);
+  background: var(--k-bg, #fff);
+  border: 1px solid var(--k-border, #d0d7de);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, box-shadow .15s;
+}
+
+.template-chip:hover:not(:disabled) {
+  color: #409eff;
+  border-color: #409eff;
+  box-shadow: 0 1px 4px rgba(64, 158, 255, 0.2);
+}
+
+.template-chip:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.template-chip i {
+  font-size: 12px;
+  color: #409eff;
+}
+
+.template-strip-dismiss {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--k-text-secondary, #98a2b3);
+  cursor: pointer;
+}
+
+.template-strip-dismiss:hover {
+  color: var(--k-text, #344054);
+  background: var(--k-bg-hover, rgba(0, 0, 0, 0.05));
+}
+
+
 .title-input {
   width: 100%;
   font-size: 32px;
