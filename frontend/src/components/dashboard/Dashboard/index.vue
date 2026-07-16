@@ -44,6 +44,8 @@
         <div class="dashboard-col-center">
           <AssetOverview />
           <OperationsOverview />
+          <OperationsInbox />
+          <EmailDeliveryOverview />
           <MiddlewareStatus />
           <ContentTrend />
           <TrashBacklog />
@@ -75,6 +77,8 @@ import CpuTimeline from '../CpuTimeline/index.vue'
 import NetworkWave from '../NetworkWave/index.vue'
 import AssetOverview from '../AssetOverview/index.vue'
 import OperationsOverview from '../OperationsOverview/index.vue'
+import OperationsInbox from '../OperationsInbox/index.vue'
+import EmailDeliveryOverview from '../EmailDeliveryOverview/index.vue'
 import MiddlewareStatus from '../MiddlewareStatus/index.vue'
 import ContentTrend from '../ContentTrend/index.vue'
 import TrashBacklog from '../TrashBacklog/index.vue'

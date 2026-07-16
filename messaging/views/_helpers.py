@@ -495,7 +495,7 @@ def _direct_note_share_payload(msg):
     }
 
 
-def _message_payload(msg, viewer=None):
+def _message_payload(msg, viewer=None, is_bookmarked=False):
     merged_forward = _parse_merged_forward(msg.content)
     return {
         'id': msg.id,
@@ -515,6 +515,7 @@ def _message_payload(msg, viewer=None):
         'is_own': (viewer is not None and viewer.id == msg.sender_id),
         'attachments': [_attachment_payload(a) for a in msg.attachments.all()],
         'note_share': _direct_note_share_payload(msg),
+        'is_bookmarked': is_bookmarked,
     }
 
 
@@ -627,6 +628,7 @@ def _serve_attachment_file(attachment, disposition=None):
     response['Content-Disposition'] = (
         f'{disposition}; filename="{fallback_name}"; filename*=UTF-8\'\'{quote(attachment.original_name)}'
     )
+    response['X-Content-Type-Options'] = 'nosniff'
     return response
 
 

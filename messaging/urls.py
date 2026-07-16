@@ -31,6 +31,8 @@ urlpatterns = [
     path('api/messages/note-shares/<int:share_id>/', views.get_direct_note_share_api, name='get_direct_note_share_api'),
     path('messages/note-shares/<int:share_id>/view/', views.direct_note_share_view, name='direct_note_share_view'),
     path('api/messages/forward/', views.forward_message_api, name='forward_message_api'),
+    path('api/messages/bookmarks/', views.list_saved_messages_api, name='list_saved_messages_api'),
+    path('api/messages/bookmarks/toggle/', views.toggle_saved_message_api, name='toggle_saved_message_api'),
     path('api/messages/attachments/upload/', views.upload_message_attachment_api, name='upload_message_attachment_api'),
     path('api/messages/attachments/mine/', views.list_my_message_attachments_api, name='list_my_message_attachments_api'),
     path(

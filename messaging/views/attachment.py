@@ -1,8 +1,6 @@
 # knowledge_project/views/message/attachment.py
 """私信附件上传 / 受控访问 / 历史目录拦截"""
 import logging
-import mimetypes
-import os
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -17,17 +15,15 @@ from accounts.storage_quota import (
     quota_exceeded_payload,
 )
 from core.utils.request_utils import check_rate_limit_atomic
+from messaging.attachment_security import inspect_message_attachment
 from ._constants import (
     MESSAGE_AUDIO_MAX_SIZE,
-    MESSAGE_AUDIO_MIME_TYPES,
     MESSAGE_ATTACHMENT_UPLOAD_RATE_LIMIT,
     MESSAGE_ATTACHMENT_UPLOAD_RATE_WINDOW_SECONDS,
     MESSAGE_FILE_MAX_SIZE,
     MESSAGE_FILE_MIME_TYPES,
     MESSAGE_IMAGE_MAX_SIZE,
-    MESSAGE_IMAGE_MIME_TYPES,
     MESSAGE_VIDEO_MAX_SIZE,
-    MESSAGE_VIDEO_MIME_TYPES,
 )
 from ._helpers import _attachment_payload, _serve_attachment_file
 
@@ -57,29 +53,33 @@ def upload_message_attachment_api(request):
         if not uploaded:
             return JsonResponse({'error': '没有找到上传的文件'}, status=400)
 
-        original_name = os.path.basename(uploaded.name or 'attachment')[:255]
-        mime_type = uploaded.content_type or mimetypes.guess_type(original_name)[0] or 'application/octet-stream'
+        inspection, validation_error = inspect_message_attachment(uploaded)
+        if validation_error:
+            return JsonResponse({'error': validation_error}, status=400)
+
+        original_name = inspection.original_name
+        mime_type = inspection.mime_type
         size = uploaded.size or 0
-        is_image = mime_type in MESSAGE_IMAGE_MIME_TYPES
-        is_audio = mime_type in MESSAGE_AUDIO_MIME_TYPES
-        is_video = mime_type in MESSAGE_VIDEO_MIME_TYPES
+        is_image = inspection.attachment_type == 'image'
+        is_audio = inspection.attachment_type == 'audio'
+        is_video = inspection.attachment_type == 'video'
 
         if is_image:
             if size > MESSAGE_IMAGE_MAX_SIZE:
                 return JsonResponse({'error': '图片不能超过 10MB'}, status=400)
-            attachment_type = 'image'
+            attachment_type = inspection.attachment_type
         elif is_audio:
             if size > MESSAGE_AUDIO_MAX_SIZE:
                 return JsonResponse({'error': '语音不能超过 12MB'}, status=400)
-            attachment_type = 'audio'
+            attachment_type = inspection.attachment_type
         elif is_video:
             if size > MESSAGE_VIDEO_MAX_SIZE:
                 return JsonResponse({'error': '视频不能超过 120MB'}, status=400)
-            attachment_type = 'video'
+            attachment_type = inspection.attachment_type
         elif mime_type in MESSAGE_FILE_MIME_TYPES:
             if size > MESSAGE_FILE_MAX_SIZE:
                 return JsonResponse({'error': '文件不能超过 25MB'}, status=400)
-            attachment_type = 'file'
+            attachment_type = inspection.attachment_type
         else:
             return JsonResponse({'error': '暂不支持该文件类型'}, status=400)
 

@@ -109,6 +109,15 @@ function close() {
 }
 
 function openResult(item) {
+  // 笔记结果在知识库页内直接切换并高亮关键词，避免整页刷新
+  if (item.type === 'note' && item.id && window.location.pathname.startsWith('/knowledge')) {
+    const keyword = query.value.trim()
+    close()
+    window.dispatchEvent(new CustomEvent('search-result-clicked', {
+      detail: { noteId: item.id, highlightKeyword: keyword }
+    }))
+    return
+  }
   if (!item.url) return
   window.location.href = item.url
 }
@@ -136,11 +145,14 @@ function handleOpenEvent() {
 }
 
 onMounted(() => {
+  // 告知全局命令面板（base.html 注入）本页已有更全面的 Ctrl+K 搜索，让其退让
+  window.__globalSearchDialogActive = true
   window.addEventListener('keydown', handleShortcut)
   window.addEventListener('open-global-search', handleOpenEvent)
 })
 
 onBeforeUnmount(() => {
+  window.__globalSearchDialogActive = false
   clearTimeout(timer)
   window.removeEventListener('keydown', handleShortcut)
   window.removeEventListener('open-global-search', handleOpenEvent)

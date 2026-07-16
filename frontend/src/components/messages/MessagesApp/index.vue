@@ -109,6 +109,36 @@
         @updated="loadConversations"
       />
 
+      <div v-else-if="scope === 'saved'" class="conversations-list saved-messages-list">
+        <div v-if="loadingSavedMessages" class="empty-state">
+          <i class="fas fa-spinner fa-spin"></i>
+        </div>
+        <div v-else-if="savedMessages.length === 0" class="empty-state">
+          <i class="fas fa-bookmark"></i>
+          <p>暂无收藏消息</p>
+        </div>
+        <template v-else>
+          <button
+            v-for="item in savedMessages"
+            :key="item.id"
+            class="saved-message-row"
+            type="button"
+            @click="openSavedMessage(item)"
+          >
+            <img v-if="item.avatar" :src="item.avatar" :alt="item.title" class="saved-message-avatar" />
+            <span v-else class="saved-message-avatar saved-message-avatar-fallback">
+              <i :class="item.conversation_type === 'group' ? 'fas fa-users' : 'fas fa-user'"></i>
+            </span>
+            <span class="saved-message-info">
+              <strong>{{ item.title }}</strong>
+              <em v-if="item.conversation_type === 'group' && item.sender">{{ item.sender }}</em>
+              <span>{{ item.content || '[附件消息]' }}</span>
+            </span>
+            <time>{{ formatShortTime(item.created_at) }}</time>
+          </button>
+        </template>
+      </div>
+
       <!-- 对话列表 -->
       <div v-else class="conversations-list">
         <div v-if="scope === 'archived'" class="scope-hint">
@@ -847,6 +877,10 @@
       </button>
       <button class="dm-item" @click="messageCtxAction('copy')">
         <i class="fas fa-copy"></i> 复制
+      </button>
+      <button class="dm-item" @click="messageCtxAction('bookmark')">
+        <i :class="messageCtxMenu.msg?.is_bookmarked ? 'fas fa-bookmark' : 'far fa-bookmark'"></i>
+        {{ messageCtxMenu.msg?.is_bookmarked ? '取消收藏' : '收藏消息' }}
       </button>
       <button
         v-if="canOpenNoteShareInWindow(messageCtxMenu.msg)"
@@ -2078,6 +2112,8 @@ const pendingApprovals = ref([])
 const loadingPendingApprovals = ref(false)
 const pendingApprovalsCount = ref(0)
 const managedApprovalGroupCount = ref(0)
+const savedMessages = ref([])
+const loadingSavedMessages = ref(false)
 const selectedUserId = ref(null)
 const selectedConversationKey = ref(null)
 const messages = ref([])
@@ -2309,6 +2345,7 @@ const turnstileGate = ref({
 const tabs = [
   { value: 'all', label: '全部', icon: 'fas fa-comments' },
   { value: 'unread', label: '未读', icon: 'fas fa-envelope' },
+  { value: 'saved', label: '收藏', icon: 'fas fa-bookmark' },
   { value: 'archived', label: '归档', icon: 'fas fa-box-archive' },
   { value: 'blocked', label: '屏蔽', icon: 'fas fa-ban' },
   { value: 'pending_approvals', label: '待审核', icon: 'fas fa-user-clock' },
@@ -3083,6 +3120,11 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
     conversations.value = []
     return
   }
+  if (scope.value === 'saved') {
+    await loadSavedMessages({ silent })
+    conversations.value = []
+    return
+  }
   if (silent && Date.now() < suppressConversationRefreshUntil) return
   if (!silent) loadingConversations.value = true
   try {
@@ -3124,6 +3166,19 @@ async function loadConversations({ silent = false, preserveOrder = false } = {})
     console.error(e)
   } finally {
     if (!silent) loadingConversations.value = false
+  }
+}
+
+async function loadSavedMessages({ silent = false } = {}) {
+  if (!silent) loadingSavedMessages.value = true
+  try {
+    const data = await apiRequest('/api/messages/bookmarks/')
+    savedMessages.value = Array.isArray(data.items) ? data.items : []
+  } catch (error) {
+    console.error('加载收藏消息失败:', error)
+    if (!silent) ElMessage.error(error.message || '加载收藏消息失败')
+  } finally {
+    if (!silent) loadingSavedMessages.value = false
   }
 }
 
@@ -6704,6 +6759,10 @@ async function messageCtxAction(action) {
     await copyMessageContent(msg)
     return
   }
+  if (action === 'bookmark') {
+    await toggleMessageBookmark(msg)
+    return
+  }
   if (action === 'open_note_window') {
     openNoteShareInNewWindow(msg)
     return
@@ -6727,6 +6786,42 @@ async function messageCtxAction(action) {
   if (action === 'recall') {
     await recallMessage(msg)
   }
+}
+
+async function toggleMessageBookmark(msg) {
+  const conversationType = isCurrentGroup.value ? 'group' : 'direct'
+  const payload = {
+    message_id: msg.id,
+    conversation_type: conversationType,
+  }
+  if (conversationType === 'group') payload.group_id = selectedGroupId()
+
+  try {
+    const data = await apiPost('/api/messages/bookmarks/toggle/', payload)
+    const saved = !!data.saved
+    messages.value = messages.value.map((item) => (
+      item.id === msg.id ? { ...item, is_bookmarked: saved } : item
+    ))
+    ElMessage.success(saved ? '已收藏消息' : '已取消收藏')
+  } catch (error) {
+    ElMessage.error(error.message || '操作失败')
+  }
+}
+
+async function openSavedMessage(item) {
+  scope.value = 'all'
+  await loadConversations()
+  const key = item.conversation_type === 'group'
+    ? `group:${item.group_id}`
+    : `user:${item.peer_id}`
+  const conversation = findConversationByKey(key)
+  if (!conversation) {
+    ElMessage.warning('原会话已不可访问')
+    return
+  }
+  selectConversation(conversation)
+  await loadMessages()
+  await scrollToMessage(item.message_id, { fallbackToBottom: false })
 }
 
 async function togglePinnedGroupMessage(msg) {
@@ -6934,6 +7029,20 @@ function handleVisibilityChange() {
   touchMessagesPagePresence()
 }
 
+function handleOpenGroupFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const rawId = params.get('open_group')
+  if (!rawId) return
+  const groupId = normalizeUserId(rawId)
+  if (groupId) {
+    const conv = findConversationByKey(`group:${groupId}`)
+    if (conv) selectConversation(conv)
+  }
+  const url = new URL(window.location.href)
+  url.searchParams.delete('open_group')
+  window.history.replaceState({}, '', url.toString())
+}
+
 async function handleGroupInviteFromUrl() {
   const params = new URLSearchParams(window.location.search)
   const token = params.get('group_invite')
@@ -6975,6 +7084,7 @@ onMounted(() => {
   loadNotificationPreferences()
   loadConversations().then(() => {
     loadPendingApprovals({ silent: true })
+    handleOpenGroupFromUrl()
   })
   handleGroupInviteFromUrl()
   initRealtimeMessages()
@@ -10424,6 +10534,67 @@ watch(
 
 .typing-dots i:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+.saved-message-row {
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.22));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.saved-message-row:hover {
+  background: var(--hover-bg, rgba(148, 163, 184, 0.12));
+}
+
+.saved-message-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.saved-message-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-color-light-8, rgba(64, 158, 255, 0.16));
+  color: var(--primary-color, #409eff);
+}
+
+.saved-message-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.saved-message-info strong,
+.saved-message-info span,
+.saved-message-info em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-message-info strong {
+  font-size: 13px;
+}
+
+.saved-message-info em,
+.saved-message-info span,
+.saved-message-row time {
+  color: var(--text-secondary, #909399);
+  font-size: 12px;
+  font-style: normal;
 }
 
 @keyframes typing-bounce {

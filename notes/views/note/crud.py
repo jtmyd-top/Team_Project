@@ -40,6 +40,7 @@ def note_detail_api(request, note_id):
                 'author': {'id': note.author.id, 'username': note.author.username},
                 'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),
                 'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),
+                'revision_token': note.updated_at.isoformat(),
                 'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
                 'toc': note.toc or [],
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
@@ -66,6 +67,7 @@ def note_detail_api(request, note_id):
             'author': {'id': note.author.id, 'username': note.author.username},
             'created_at': local_created_at.strftime('%Y-%m-%d %H:%M'),
             'updated_at': local_updated_at.strftime('%Y-%m-%d %H:%M'),
+            'revision_token': note.updated_at.isoformat(),
             'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
             'toc': note.toc or [],
             'pagination': {
@@ -85,6 +87,14 @@ def note_detail_api(request, note_id):
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': '无效的JSON格式'}, status=400)
+
+        base_revision_token = str(data.get('base_revision_token') or '').strip()
+        if base_revision_token and base_revision_token != note.updated_at.isoformat():
+            return JsonResponse({
+                'error': '此笔记已被其他协作者更新，请刷新后合并你的修改',
+                'code': 'note_edit_conflict',
+                'server_revision_token': note.updated_at.isoformat(),
+            }, status=409)
 
         allowed, error_msg, clear_vault_guard = validate_vault_encryption_content_update(request, note, data)
         if not allowed:
@@ -115,6 +125,7 @@ def note_detail_api(request, note_id):
             'is_trashed': note.is_trashed,
             'content': paginated_content,
             'updated_at': put_local_updated_at.strftime('%Y-%m-%d %H:%M'),
+            'revision_token': note.updated_at.isoformat(),
             'author': {'id': note.author.id, 'username': note.author.username},
             'created_at': put_local_created_at.strftime('%Y-%m-%d %H:%M'),
             'tags': [{'id': tag.id, 'name': tag.name} for tag in note.tags.all()],
@@ -136,6 +147,18 @@ def note_detail_api(request, note_id):
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': '无效的JSON格式'}, status=400)
+
+        base_revision_token = str(data.get('base_revision_token') or '').strip()
+        if (
+            base_revision_token
+            and ('title' in data or 'content' in data)
+            and base_revision_token != note.updated_at.isoformat()
+        ):
+            return JsonResponse({
+                'error': '此笔记已被其他协作者更新，请刷新后合并你的修改',
+                'code': 'note_edit_conflict',
+                'server_revision_token': note.updated_at.isoformat(),
+            }, status=409)
 
         try:
             # 【新增】安全檢查：防止保密柜筆記發布為公開
@@ -224,6 +247,7 @@ def note_detail_api(request, note_id):
                 'is_secret': note.is_secret,
                 'public_url': f"/notes/public/{note.public_id}/" if note.public_id and note.is_public else "",
                 'updated_at': patch_local_updated_at.strftime('%Y-%m-%d %H:%M'),
+                'revision_token': note.updated_at.isoformat(),
                 'toc': note.toc or [],
                 'message': '更新成功'
             }

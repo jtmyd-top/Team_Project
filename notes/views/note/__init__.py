@@ -30,6 +30,7 @@ from .revisions import (
 )
 from .maintenance import delete_orphan_note_assets_api, orphan_note_assets_api
 from .collaboration import note_collaborator_detail_api, note_collaborators_api
+from .editing import note_editing_session_api
 from .pages import home_view, knowledge_list
 from .public import (
     public_note_view,
@@ -38,6 +39,9 @@ from .public import (
     toggle_note_like,
 )
 from .search import get_all_notes_api, search_notes_api
+from .quick_search import quick_search_api
+from .export import export_note_api
+from .wiki_links import note_links_api
 
 __all__ = [
     '_get_public_notes_cache_version',
@@ -66,6 +70,9 @@ __all__ = [
     'toggle_secret_api',
     'search_notes_api',
     'get_all_notes_api',
+    'quick_search_api',
+    'export_note_api',
+    'note_links_api',
     'note_history_api',
     'record_note_history_api',
     'note_revisions_api',
@@ -76,4 +83,5 @@ __all__ = [
     'delete_orphan_note_assets_api',
     'note_collaborators_api',
     'note_collaborator_detail_api',
+    'note_editing_session_api',
 ]

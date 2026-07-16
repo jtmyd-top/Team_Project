@@ -78,7 +78,7 @@ def _group_note_share_payload(message):
         'public_url': f'/notes/public/{note.public_id}/' if note.public_id and note.is_public and not note.is_secret else '',
     }
 
-def _group_message_payload(message, viewer=None):
+def _group_message_payload(message, viewer=None, is_bookmarked=False):
     # Phase 2: 获取回复消息信息
     reply_to_data = None
     if message.reply_to:
@@ -162,6 +162,7 @@ def _group_message_payload(message, viewer=None):
         'is_pinned': bool(
             getattr(message.group, 'pinned_message_id', None) == message.id
         ) if getattr(message, 'group_id', None) else False,
+        'is_bookmarked': is_bookmarked,
     }
 
 def _member_payload(membership):

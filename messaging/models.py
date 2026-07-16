@@ -959,6 +959,59 @@ def create_message_preference(sender, instance, created, **kwargs):
 # ==================== Phase 2: 群组消息系统增强 ====================
 
 
+class SavedMessage(models.Model):
+    """A user-owned bookmark for one direct or group message."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='saved_messages',
+        verbose_name='User',
+    )
+    direct_message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='saved_by_users',
+        verbose_name='Direct message',
+    )
+    group_message = models.ForeignKey(
+        'GroupMessage',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='saved_by_users',
+        verbose_name='Group message',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Saved at')
+
+    class Meta:
+        verbose_name = 'Saved message'
+        verbose_name_plural = 'Saved messages'
+        ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(direct_message__isnull=False, group_message__isnull=True)
+                    | models.Q(direct_message__isnull=True, group_message__isnull=False)
+                ),
+                name='saved_message_has_one_source',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'direct_message'],
+                name='saved_direct_message_once',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'group_message'],
+                name='saved_group_message_once',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+
 class GroupMessageMention(models.Model):
     """群组消息@提及记录"""
     message = models.ForeignKey(

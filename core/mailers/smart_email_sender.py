@@ -12,6 +12,8 @@ from django.core.mail import get_connection
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+from core.mailers.metrics import record_email_delivery
+
 logger = logging.getLogger(__name__)
 
 class SmartEmailSender:
@@ -23,13 +25,14 @@ class SmartEmailSender:
     """
 
     def __init__(self):
+        self.last_error = ''
         # QQ邮箱配置
         self.qq_config = {
             'host': 'smtp.qq.com',
             'port': 587,
             'use_tls': True,
-            'user': os.getenv('QQ_EMAIL_USER', '13017172851@qq.com'),
-            'password': os.getenv('EMAIL_PASSWORD'),  # 当前.env中的密码
+            'user': os.getenv('QQ_EMAIL_USER', '').strip(),
+            'password': os.getenv('QQ_EMAIL_PASSWORD', os.getenv('EMAIL_PASSWORD', '')).strip(),
         }
 
         # Outlook配置
@@ -37,12 +40,17 @@ class SmartEmailSender:
             'host': 'smtp.office365.com',
             'port': 587,
             'use_tls': True,
-            'user': 'karwan070@outlook.com',
-            'password': os.getenv('OUTLOOK_PASSWORD'),  # 应用专用密码
+            'user': os.getenv('OUTLOOK_EMAIL', '').strip(),
+            'password': os.getenv('OUTLOOK_PASSWORD', '').strip(),
         }
 
     def send_email_qq(self, subject, message, to_emails, from_email=None):
         """使用QQ邮箱发送邮件"""
+        self.last_error = ''
+        if not self.qq_config['user'] or not self.qq_config['password']:
+            self.last_error = 'QQ SMTP credentials are not configured'
+            logger.warning("QQ SMTP账号或授权码未配置")
+            return False
         try:
             msg = MIMEMultipart()
             msg['From'] = from_email or self.qq_config['user']
@@ -66,13 +74,16 @@ class SmartEmailSender:
             return True
 
         except Exception as e:
+            self.last_error = str(e)
             logger.error(f"QQ邮箱发送失败: {str(e)}")
             return False
 
     def send_email_outlook_smtp(self, subject, message, to_emails, from_email=None):
         """使用Outlook SMTP发送邮件"""
-        if not self.outlook_config['password']:
-            logger.warning("Outlook SMTP密码未配置")
+        self.last_error = ''
+        if not self.outlook_config['user'] or not self.outlook_config['password']:
+            self.last_error = 'Outlook SMTP credentials are not configured'
+            logger.warning("Outlook SMTP账号或授权码未配置")
             return False
 
         try:
@@ -95,10 +106,13 @@ class SmartEmailSender:
             return True
 
         except Exception as e:
+            self.last_error = str(e)
             logger.error(f"Outlook SMTP发送失败: {str(e)}")
             return False
+
     def send_email_django(self, subject, message, to_emails, from_email=None):
         """使用Django默认邮件后端发送"""
+        self.last_error = ''
         try:
             from django.core.mail import send_mail
 
@@ -114,6 +128,7 @@ class SmartEmailSender:
             return result > 0
 
         except Exception as e:
+            self.last_error = str(e)
             logger.error(f"Django邮件发送失败: {str(e)}")
             return False
 
@@ -133,10 +148,24 @@ class SmartEmailSender:
         """
         if preferred_method == 'qq':
             success = self.send_email_qq(subject, message, to_emails, from_email)
+            record_email_delivery(
+                subject=subject,
+                recipient_count=len(to_emails),
+                success=success,
+                provider='qq_smtp',
+                error_message=self.last_error,
+            )
             return success, 'QQ SMTP'
 
         elif preferred_method == 'outlook':
             success = self.send_email_outlook_smtp(subject, message, to_emails, from_email)
+            record_email_delivery(
+                subject=subject,
+                recipient_count=len(to_emails),
+                success=success,
+                provider='outlook_smtp',
+                error_message=self.last_error,
+            )
             return success, 'Outlook SMTP'
 
         elif preferred_method == 'django':
@@ -151,12 +180,22 @@ class SmartEmailSender:
                 ('Outlook SMTP', lambda: self.send_email_outlook_smtp(subject, message, to_emails, from_email)),
             ]
 
+            django_attempted = False
             for method_name, method_func in methods:
                 try:
                     logger.info(f"尝试使用 {method_name} 发送邮件")
+                    if method_name == 'Django SMTP':
+                        django_attempted = True
                     success = method_func()
                     if success:
                         logger.info(f"{method_name} 发送成功")
+                        if method_name != 'Django SMTP':
+                            record_email_delivery(
+                                subject=subject,
+                                recipient_count=len(to_emails),
+                                success=True,
+                                provider=method_name.lower().replace(' ', '_'),
+                            )
                         return True, method_name
                     else:
                         logger.warning(f"{method_name} 发送失败，尝试下一个方法")
@@ -164,6 +203,15 @@ class SmartEmailSender:
                     logger.warning(f"{method_name} 出现异常: {str(e)}")
 
             logger.error("所有邮件发送方法都失败")
+            # Django SMTP is already tracked by TrackingEmailBackend.
+            if not django_attempted:
+                record_email_delivery(
+                    subject=subject,
+                    recipient_count=len(to_emails),
+                    success=False,
+                    provider='smart_email_auto',
+                    error_message=self.last_error,
+                )
             return False, None
 
     def test_all_methods(self, test_email='test_101@03vps.cn'):

@@ -30,6 +30,10 @@ export function useKnowledgeList() {
   const isLoadingNote = ref(false) // 笔记加载中标志
   const noteEditorRef = ref(null)
   const decryptedTitle = ref('') // 存储解密后的标题
+  const activeEditors = ref([])
+  const noteRevisionToken = ref('')
+  let editSessionTimer = null
+  let autoSaveTimer = null
 
   // 当前笔记数据
   const currentNoteData = ref({
@@ -43,6 +47,7 @@ export function useKnowledgeList() {
     is_secret: false,
     is_trashed: false,
     public_url: '',
+    revision_token: '',
     permissions: {}
   })
 
@@ -51,6 +56,7 @@ export function useKnowledgeList() {
 
   function resetCurrentNotePreview(options = {}) {
     const { syncSidebar = false } = options
+    void stopEditingSession()
     currentNoteId.value = null
     currentNoteData.value = {
       id: null,
@@ -63,9 +69,12 @@ export function useKnowledgeList() {
       is_secret: false,
       is_trashed: false,
       public_url: '',
+      revision_token: '',
       permissions: {}
     }
     decryptedTitle.value = ''
+    activeEditors.value = []
+    noteRevisionToken.value = ''
     hasUnsavedChanges.value = false
     isSaving.value = false
     viewMode.value = 'read'
@@ -105,6 +114,121 @@ export function useKnowledgeList() {
 
     return currentNoteData.value.title || '无标题'
   })
+
+  const otherActiveEditors = computed(() => (
+    activeEditors.value.filter(editor => !editor.is_current_user)
+  ))
+
+  const activeEditorsLabel = computed(() => (
+    otherActiveEditors.value.map(editor => editor.username).filter(Boolean).join('、')
+  ))
+
+  function getCsrfToken() {
+    return document.querySelector('[name=csrfmiddlewaretoken]')?.value
+      || document.cookie.match(/(?:^|; )csrftoken=([^;]+)/)?.[1]
+      || ''
+  }
+
+  function clearAutoSave() {
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = null
+  }
+
+  function clearEditingSessionTimer() {
+    clearInterval(editSessionTimer)
+    editSessionTimer = null
+  }
+
+  async function updateEditingSession(action = 'heartbeat') {
+    if (!currentNoteId.value || currentNoteData.value.is_secret) return null
+
+    const sessionNoteId = currentNoteId.value
+    const isStatusRequest = action === 'status'
+    const response = await fetch(`/api/notes/${sessionNoteId}/editing-session/`, {
+      method: isStatusRequest ? 'GET' : 'POST',
+      headers: isStatusRequest ? {} : {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCsrfToken(),
+      },
+      body: isStatusRequest ? undefined : JSON.stringify({ action }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(extractApiErrorMessage(data, '无法更新协作编辑状态'))
+    }
+    if (currentNoteId.value === sessionNoteId) {
+      activeEditors.value = data.active_editors || []
+    }
+    return data
+  }
+
+  async function startEditingSession() {
+    if (!currentNoteId.value || !currentNoteData.value.permissions?.can_edit) return null
+    clearEditingSessionTimer()
+    const data = await updateEditingSession('enter')
+    editSessionTimer = window.setInterval(() => {
+      updateEditingSession('heartbeat').catch(() => {})
+    }, 20000)
+    return data
+  }
+
+  async function stopEditingSession() {
+    clearEditingSessionTimer()
+    clearAutoSave()
+    if (!currentNoteId.value || currentNoteData.value.is_secret) {
+      activeEditors.value = []
+      return
+    }
+    try {
+      await updateEditingSession('leave')
+    } catch (error) {
+      activeEditors.value = []
+    }
+  }
+
+  async function prepareEditMode() {
+    if (!currentNoteId.value || !currentNoteData.value.permissions?.can_edit) {
+      ElMessage.warning('你没有编辑此笔记的权限')
+      return false
+    }
+    try {
+      const status = await updateEditingSession('status')
+      if (status?.editing_by_others) {
+        await ElMessageBox.confirm(
+          `${status.editing_by} 正在编辑此笔记。继续编辑可能产生冲突，是否继续？`,
+          '协作编辑提醒',
+          {
+            confirmButtonText: '继续编辑',
+            cancelButtonText: '暂不编辑',
+            type: 'warning',
+          },
+        )
+      }
+      await startEditingSession()
+      viewMode.value = 'edit'
+      return true
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(error.message || '无法进入编辑模式')
+      }
+      return false
+    }
+  }
+
+  function scheduleAutoSave() {
+    clearAutoSave()
+    if (
+      viewMode.value !== 'edit'
+      || !hasUnsavedChanges.value
+      || !currentNoteId.value
+      || currentNoteData.value.is_secret
+    ) {
+      return
+    }
+    autoSaveTimer = window.setTimeout(() => {
+      handleSave({ automatic: true, keepEditing: true })
+    }, 12000)
+  }
 
   // ==================== 笔记操作 ====================
   // 解密笔记标题
@@ -156,9 +280,11 @@ export function useKnowledgeList() {
         is_secret: data.is_secret || false,
         is_trashed: data.is_trashed || false,
         public_url: data.public_url || '',
+        revision_token: data.revision_token || '',
         permissions: data.permissions || {}
       }
 
+      noteRevisionToken.value = data.revision_token || ''
       hasUnsavedChanges.value = false
     } catch (e) {
       ElMessage.error('无法加载笔记内容')
@@ -184,6 +310,7 @@ export function useKnowledgeList() {
       }
     }
 
+    await stopEditingSession()
     isLoadingNote.value = true
     await fetchNoteDetail(noteId)
     currentNoteId.value = noteId
@@ -302,6 +429,9 @@ export function useKnowledgeList() {
         currentNoteId.value = noteId
         sidebarStore.setCurrentNoteId(noteId)
         viewMode.value = 'edit'
+        if (!isVaultModule) {
+          await startEditingSession()
+        }
 
         const importedDraft = readImportedMessageDraft()
         if (importedDraft) {
@@ -329,6 +459,7 @@ export function useKnowledgeList() {
     if (content !== undefined) {
       currentNoteData.value.content = content
     }
+    scheduleAutoSave()
   }
 
   // 切换到阅读模式（带防呆检查）
@@ -350,15 +481,19 @@ export function useKnowledgeList() {
         }
         hasUnsavedChanges.value = false
         viewMode.value = 'read'
+        await stopEditingSession()
       }
     } else {
       viewMode.value = 'read'
+      await stopEditingSession()
     }
   }
 
   // 保存笔记
-  async function handleSave() {
+  async function handleSave(options = {}) {
     if (!currentNoteId.value) return
+    const { automatic = false, keepEditing = false } = options
+    if (isSaving.value) return
 
     isSaving.value = true
     try {
@@ -428,20 +563,30 @@ export function useKnowledgeList() {
         },
         body: JSON.stringify({
           title: titleToSave,
-          content: contentToSave
+          content: contentToSave,
+          base_revision_token: noteRevisionToken.value || currentNoteData.value.revision_token || ''
         })
       })
 
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(extractApiErrorMessage(data, '保存失败，请重试'))
+        const error = new Error(extractApiErrorMessage(data, '保存失败，请重试'))
+        error.data = data
+        throw error
       }
 
-      ElMessage.success('保存成功')
+      if (!automatic) {
+        ElMessage.success('保存成功')
+      }
       hasUnsavedChanges.value = false
+      clearAutoSave()
 
       if (data.updated_at) {
         currentNoteData.value.updated_at = data.updated_at
+      }
+      if (data.revision_token) {
+        noteRevisionToken.value = data.revision_token
+        currentNoteData.value.revision_token = data.revision_token
       }
 
       const note = sidebarStore.currentNotes.find(n => n.id === currentNoteId.value)
@@ -462,9 +607,16 @@ export function useKnowledgeList() {
         }
       }))
 
-      viewMode.value = 'read'
+      if (!keepEditing) {
+        viewMode.value = 'read'
+        await stopEditingSession()
+      }
     } catch (e) {
-      ElMessage.error(e.message || '保存失败，请重试')
+      if (e.data?.code === 'note_edit_conflict') {
+        ElMessage.warning('其他协作者已保存更新。请刷新笔记后合并你的修改。')
+      } else if (!automatic) {
+        ElMessage.error(e.message || '保存失败，请重试')
+      }
     } finally {
       isSaving.value = false
     }
@@ -725,6 +877,7 @@ export function useKnowledgeList() {
 
     if (newTitle !== oldTitle && originalTitle !== '' && newTitle !== originalTitle) {
       hasUnsavedChanges.value = true
+      scheduleAutoSave()
     }
   })
 
@@ -850,6 +1003,17 @@ export function useKnowledgeList() {
       }
     })
 
+    // 监听 wiki 双向链接 / 反链点击（NoteShadowViewer 内派发）
+    window.addEventListener('wiki-note-navigate', async (event) => {
+      const noteId = event.detail?.noteId
+      if (!noteId) return
+      try {
+        await handleNoteSelect(noteId)
+      } catch (e) {
+        ElMessage.error('加载笔记失败')
+      }
+    })
+
     // 全局监听 vault-verification-success 事件（DEK 已由 dialog 内部写入 vaultStore，此处仅保留钩子位以便扩展）
     const handleVaultVerificationSuccess = () => {
       // no-op: vaultStore.setDEK 已在 useVaultVerifyDialog 中执行
@@ -908,6 +1072,7 @@ export function useKnowledgeList() {
   })
 
   onUnmounted(() => {
+    void stopEditingSession()
     window.removeEventListener('beforeunload', handleBeforeUnload)
     window.removeEventListener('note-secret-toggled', handleNoteSecretToggled)
     window.removeEventListener('knowledge-preview-clear', clearCurrentPreview)
@@ -932,12 +1097,15 @@ export function useKnowledgeList() {
     noteEditorRef,
     decryptedTitle,
     currentNoteData,
+    activeEditors,
 
     // 计算属性
     showBreadcrumb,
     isDarkMode,
     displayTitle,
     canCreateNoteInCurrentContext,
+    otherActiveEditors,
+    activeEditorsLabel,
 
     // Stores
     sidebarStore,
@@ -947,6 +1115,7 @@ export function useKnowledgeList() {
     handleNoteSelect,
     handleCreateNote,
     handleEditorChange,
+    prepareEditMode,
     handleSwitchToReadMode,
     handleSave,
     handleDelete,

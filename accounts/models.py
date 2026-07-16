@@ -337,6 +337,53 @@ class PasswordResetAttempt(models.Model):
         return f'{self.email} - {self.ip_address} - {self.attempted_at.strftime("%Y-%m-%d %H:%M")}'
 
 
+class EmailDeliveryLog(models.Model):
+    """One privacy-preserving record for each email delivery attempt."""
+
+    STATUS_SUCCEEDED = 'succeeded'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_SUCCEEDED, '发送成功'),
+        (STATUS_FAILED, '发送失败'),
+    ]
+
+    CATEGORY_CHOICES = [
+        ('registration_code', '注册验证码'),
+        ('email_change_code', '邮箱修改验证码'),
+        ('password_change_code', '密码修改验证码'),
+        ('password_reset', '密码重置'),
+        ('login_2fa', '登录两步验证码'),
+        ('admin_login_2fa', '管理后台两步验证码'),
+        ('vault_code', '保密柜验证码'),
+        ('verification_code', '其他验证码'),
+        ('login_alert', '登录提醒'),
+        ('security_alert', '安全提醒'),
+        ('notification', '业务通知'),
+        ('other', '其他邮件'),
+    ]
+
+    category = models.CharField('邮件类型', max_length=32, choices=CATEGORY_CHOICES, default='other')
+    status = models.CharField('投递状态', max_length=16, choices=STATUS_CHOICES)
+    subject = models.CharField('主题', max_length=255, blank=True)
+    recipient_count = models.PositiveSmallIntegerField('收件人数', default=1)
+    provider = models.CharField('投递通道', max_length=64, blank=True)
+    error_message = models.CharField('失败原因', max_length=500, blank=True)
+    created_at = models.DateTimeField('记录时间', auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'accounts_emaildeliverylog'
+        verbose_name = '邮件投递日志'
+        verbose_name_plural = '邮件投递日志'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at'], name='accounts_email_status_idx'),
+            models.Index(fields=['category', '-created_at'], name='accounts_email_category_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.get_category_display()} - {self.get_status_display()}'
+
+
 class SecurityAuditLog(models.Model):
     """Durable audit trail for sensitive account operations."""
 

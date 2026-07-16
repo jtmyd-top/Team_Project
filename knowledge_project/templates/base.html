@@ -508,6 +508,11 @@ document.addEventListener("DOMContentLoaded", function() {
         scheduleLive2D();
       })();
     </script>
+    {% if user.is_authenticated %}
+    <!-- 全局命令面板 (Ctrl+K) -->
+    <link rel="stylesheet" href="{% static 'dist/assets/command-palette.css' %}">
+    <script type="module" src="{% static 'dist/command-palette.js' %}"></script>
+    {% endif %}
     {% block scripts %}{% endblock %}
 
 </body>

@@ -4,7 +4,30 @@
     <div v-if="showToc" class="reading-progress-bar" :style="{ width: scrollProgress + '%' }"></div>
 
     <!-- 主内容区 -->
-    <div ref="hostRef" class="shadow-host" @mouseup="captureSelection"></div>
+    <div class="shadow-host-column">
+      <div ref="hostRef" class="shadow-host" @mouseup="captureSelection"></div>
+
+      <!-- 反向链接：哪些笔记通过 [[标题]] 引用了当前笔记 -->
+      <div v-if="!isSecret && backlinks.length" class="backlinks-panel">
+        <div class="backlinks-title">
+          <i class="fas fa-link"></i>
+          链接到此笔记 ({{ backlinks.length }})
+        </div>
+        <ul class="backlinks-list">
+          <li v-for="link in backlinks" :key="link.id">
+            <a
+              :href="`/knowledge/?note=${link.id}`"
+              class="backlink-item"
+              @click.prevent="openBacklink(link.id)"
+            >
+              <i class="fas fa-file-alt"></i>
+              <span class="backlink-name">{{ link.title || '无标题' }}</span>
+              <i v-if="link.is_public" class="fas fa-globe backlink-public" title="公开笔记"></i>
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
 
     <!-- 目录侧边栏（阈值触发显示） -->
     <Transition name="slide-in">
@@ -64,8 +87,13 @@ const {
   tocItems,
   activeTocId,
   scrollProgress,
-  scrollToHeading
+  scrollToHeading,
+  backlinks
 } = useNoteShadowViewer(props)
+
+function openBacklink(noteId) {
+  window.dispatchEvent(new CustomEvent('wiki-note-navigate', { detail: { noteId } }))
+}
 
 function captureSelection() {
   const selection = window.getSelection?.()
@@ -103,13 +131,75 @@ function captureSelection() {
   overflow-x: hidden;
 }
 
-.shadow-host {
+.shadow-host-column {
   width: 100%;
   max-width: 800px;
   min-width: 0;
   box-sizing: border-box;
   overflow-x: hidden;
   transition: max-width 0.3s ease;
+}
+
+.shadow-host {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.backlinks-panel {
+  margin: 24px 0 8px;
+  padding: 14px 16px;
+  border: 1px solid v-bind(isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)');
+  border-radius: 10px;
+  background: v-bind(isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)');
+}
+
+.backlinks-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: v-bind(isDark ? '#999' : '#666');
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.backlinks-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.backlink-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #409eff;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.backlink-item:hover {
+  background: v-bind(isDark ? 'rgba(64,158,255,0.12)' : 'rgba(64,158,255,0.08)');
+}
+
+.backlink-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backlink-public {
+  font-size: 12px;
+  color: v-bind(isDark ? '#777' : '#aaa');
 }
 
 .note-viewer-container.has-toc {
@@ -120,7 +210,7 @@ function captureSelection() {
   padding: 0;
 }
 
-.note-viewer-container.has-toc .shadow-host {
+.note-viewer-container.has-toc .shadow-host-column {
   max-width: 100%;
   min-width: 0;
 }
@@ -221,7 +311,7 @@ function captureSelection() {
 }
 
 @media (max-width: 768px) {
-  .shadow-host {
+  .shadow-host-column {
     max-width: 100%;
   }
 

@@ -55,6 +55,14 @@ def get_group_messages_api(request, group_id):
         membership.force_unread = False
         membership.save(update_fields=['last_read_at', 'force_unread'])
 
+        from messaging.models import SavedMessage
+        bookmarked_message_ids = set(
+            SavedMessage.objects.filter(
+                user=request.user,
+                group_message_id__in=[message.id for message in messages],
+            ).values_list('group_message_id', flat=True)
+        )
+
         return JsonResponse({
             'status': 'success',
             'conversation_type': 'group',
@@ -70,7 +78,14 @@ def get_group_messages_api(request, group_id):
                 'mute_mode': group.mute_mode,
                 'allow_new_members_view_history': group.allow_new_members_view_history,
             },
-            'messages': [_group_message_payload(message, viewer=request.user) for message in messages],
+            'messages': [
+                _group_message_payload(
+                    message,
+                    viewer=request.user,
+                    is_bookmarked=message.id in bookmarked_message_ids,
+                )
+                for message in messages
+            ],
             'settings': _group_settings_payload(membership),
             'pagination': pagination,
         })

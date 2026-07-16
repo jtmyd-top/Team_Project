@@ -120,6 +120,33 @@ export function getShadowStyles(isDark) {
   .note-content a { color: #409eff; text-decoration: none; }
   .note-content a:hover { text-decoration: underline; }
 
+  /* Wiki 双向链接 [[标题]] */
+  .note-content a.wiki-link {
+    color: #409eff;
+    background: ${isDark ? 'rgba(64,158,255,0.12)' : 'rgba(64,158,255,0.08)'};
+    border-radius: 4px;
+    padding: 1px 5px;
+    cursor: pointer;
+  }
+  .note-content a.wiki-link::before { content: '\\1F517'; font-size: 0.8em; margin-right: 3px; }
+  .note-content a.wiki-link:hover { text-decoration: underline; }
+  .note-content span.wiki-link.is-unresolved {
+    color: ${isDark ? '#888' : '#999'};
+    background: ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'};
+    border-radius: 4px;
+    padding: 1px 5px;
+    border-bottom: 1px dashed ${isDark ? '#666' : '#bbb'};
+    cursor: help;
+  }
+
+  /* 搜索命中关键词高亮 */
+  .note-content mark.search-highlight {
+    background: ${isDark ? 'rgba(255,196,0,0.35)' : 'rgba(255,220,64,0.6)'};
+    color: inherit;
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+
   /* 列表 */
   .note-content ul, .note-content ol { margin: 1em 0; padding-left: 2em; }
   .note-content li { margin: 0.5em 0; line-height: 1.6; }

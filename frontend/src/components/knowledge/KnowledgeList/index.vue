@@ -56,7 +56,7 @@
                 <i class="fas fa-align-justify"></i>
               </button>
 
-              <span class="note-info" v-if="currentNoteData.updated_at">
+                <span class="note-info" v-if="currentNoteData.updated_at">
                 <span class="info-item title">{{ displayTitle }}</span>
                 <span v-if="hasUnsavedChanges && viewMode === 'edit'" class="unsaved-indicator" title="有未保存的更改">
                   <i class="fas fa-circle"></i> 未保存
@@ -64,8 +64,12 @@
                 <span class="separator">-</span>
                 <span class="info-item author">{{ currentNoteData.author?.username || '未知作者' }}</span>
                 <span class="separator">-</span>
-                <span class="info-item time">最后修改: {{ formatDate(currentNoteData.updated_at) }}</span>
-              </span>
+                  <span class="info-item time">最后修改: {{ formatDate(currentNoteData.updated_at) }}</span>
+                </span>
+                <span v-if="activeEditorsLabel" class="collaboration-presence">
+                  <i class="fas fa-pen-nib"></i>
+                  {{ activeEditorsLabel }} 正在编辑
+                </span>
             </div>
             <div class="toolbar-right">
               <!-- 模式切换 - 回收站中隐藏编辑按钮 -->
@@ -79,9 +83,10 @@
                   <i class="fas fa-book-open"></i>
                 </button>
                 <button
+                  v-if="canEditCurrentNote"
                   class="toolbar-btn"
                   :class="{ active: viewMode === 'edit' }"
-                  @click="viewMode = 'edit'"
+                  @click="prepareEditMode"
                   title="编辑模式"
                 >
                   <i class="fas fa-pen"></i>
@@ -323,6 +328,7 @@ const {
   showBreadcrumb,
   isDarkMode,
   displayTitle,
+  activeEditorsLabel,
   canCreateNoteInCurrentContext,
 
   // Stores
@@ -333,6 +339,7 @@ const {
   handleNoteSelect,
   handleCreateNote,
   handleEditorChange,
+  prepareEditMode,
   handleSwitchToReadMode,
   handleSave,
   handleDelete,
@@ -366,6 +373,12 @@ const canSendCurrentNote = computed(() => (
   !currentNoteData.value.is_trashed &&
   !currentNoteData.value.is_secret &&
   sidebarStore.activeModule !== 'vault'
+))
+
+const canEditCurrentNote = computed(() => (
+  !!currentNoteId.value &&
+  !currentNoteData.value.is_trashed &&
+  currentNoteData.value.permissions?.can_edit
 ))
 
 const canManageCurrentNote = computed(() => (

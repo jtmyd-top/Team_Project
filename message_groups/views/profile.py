@@ -214,6 +214,16 @@ def update_group_profile_api(request, group_id):
             changed_fields.append('allow_member_mention_all')
             metadata['allow_member_mention_all'] = group.allow_member_mention_all
         if avatar is not None:
+            allowed_avatar_types = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+            if avatar.size > 5 * 1024 * 1024:
+                return JsonResponse({'error': '群头像图片大小不能超过 5MB'}, status=400)
+            from core.utils.image_security import validate_image_upload
+            validation_error = validate_image_upload(
+                avatar,
+                allowed_mime_types=allowed_avatar_types,
+            )
+            if validation_error:
+                return JsonResponse({'error': validation_error}, status=400)
             group.avatar = avatar
             changed_fields.append('avatar')
 

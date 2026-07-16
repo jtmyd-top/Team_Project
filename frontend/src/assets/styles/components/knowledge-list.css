@@ -50,6 +50,22 @@
   gap: 12px;
 }
 
+.collaboration-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  color: #0f766e;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collaboration-presence .fa-pen-nib {
+  color: #14b8a6;
+}
+
 .last-modified {
   font-size: 12px;
   color: var(--text-tertiary, #999);

@@ -65,6 +65,7 @@ def delete_orphan_note_assets_api(request):
 
     deleted_ids = []
     freed_bytes = 0
+    files_to_delete = []
     with transaction.atomic():
         assets = list(
             Asset.objects.select_for_update()
@@ -73,9 +74,12 @@ def delete_orphan_note_assets_api(request):
         for asset in assets:
             freed_bytes += _asset_size(asset)
             if asset.file:
-                asset.file.delete(save=False)
+                files_to_delete.append(asset.file)
             deleted_ids.append(asset.id)
             asset.delete()
+        transaction.on_commit(
+            lambda: [file_field.delete(save=False) for file_field in files_to_delete]
+        )
 
     return JsonResponse({
         'status': 'deleted',

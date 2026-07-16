@@ -58,6 +58,7 @@ from messaging.models import (
     GroupJoinRequest,
     MessagePreference,
     NewConversationQuotaLog,
+    SavedMessage,
     UserBlocklist,
     UserFollow,
 )
@@ -1787,6 +1788,49 @@ class MessageGroupTests(_MessageTestBase):
         self.assertEqual(MessageGroupMember.objects.get(group=group, user=owner).role, 'admin')
         self.assertTrue(MessageGroupAuditLog.objects.filter(group=group, action='ownership_transfer').exists())
 
+    def test_group_avatar_rejects_non_image_content_with_image_mime_type(self):
+        owner = make_user('grp_invalid_avatar_owner')
+        group = self._create_group_directly(owner, [])
+        login(self.client, owner)
+        avatar = SimpleUploadedFile(
+            'group.png',
+            b'not an image',
+            content_type='image/png',
+        )
+
+        response = self.client.post(
+            reverse('update_group_profile_api', args=[group.id]),
+            {'avatar': avatar},
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        group.refresh_from_db()
+        self.assertFalse(group.avatar)
+
+    def test_group_member_can_save_visible_group_message(self):
+        owner = make_user('saved_group_owner')
+        member = make_user('saved_group_member')
+        group = self._create_group_directly(owner, [member])
+        message = GroupMessage.objects.create(group=group, sender=owner, content='group reminder')
+        login(self.client, member)
+
+        response = post_json(self.client, reverse('toggle_saved_message_api'), {
+            'message_id': message.id,
+            'group_id': group.id,
+            'conversation_type': 'group',
+        })
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertTrue(
+            SavedMessage.objects.filter(user=member, group_message=message).exists()
+        )
+
+        listing_response = self.client.get(reverse('list_saved_messages_api'))
+        self.assertEqual(listing_response.status_code, 200, listing_response.content)
+        items = parse(listing_response)['items']
+        self.assertEqual(items[0]['conversation_type'], 'group')
+        self.assertEqual(items[0]['group_id'], group.id)
+
     def test_group_member_visibility_hides_member_list_from_regular_members(self):
         owner = make_user('grp_vis_owner')
         member = make_user('grp_vis_member')
@@ -2068,6 +2112,60 @@ class ForwardMessageApiTests(_MessageTestBase):
 # =========================================================================
 # get_messages_api
 # =========================================================================
+class SavedMessageApiTests(_MessageTestBase):
+    def test_user_can_toggle_and_list_a_saved_direct_message(self):
+        sender = make_user('saved_sender')
+        recipient = make_user('saved_recipient')
+        message = Message.objects.create(sender=sender, recipient=recipient, content='remember this')
+        login(self.client, recipient)
+
+        create_response = post_json(self.client, reverse('toggle_saved_message_api'), {
+            'message_id': message.id,
+            'conversation_type': 'direct',
+        })
+
+        self.assertEqual(create_response.status_code, 201, create_response.content)
+        self.assertTrue(parse(create_response)['saved'])
+        self.assertTrue(SavedMessage.objects.filter(user=recipient, direct_message=message).exists())
+
+        listing_response = self.client.get(reverse('list_saved_messages_api'))
+        self.assertEqual(listing_response.status_code, 200, listing_response.content)
+        items = parse(listing_response)['items']
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['message_id'], message.id)
+        self.assertEqual(items[0]['peer_id'], sender.id)
+
+        conversation_response = self.client.get(
+            reverse('get_messages_api'),
+            {'user_id': sender.id},
+        )
+        self.assertEqual(conversation_response.status_code, 200, conversation_response.content)
+        self.assertTrue(parse(conversation_response)['messages'][0]['is_bookmarked'])
+
+        remove_response = post_json(self.client, reverse('toggle_saved_message_api'), {
+            'message_id': message.id,
+            'conversation_type': 'direct',
+        })
+        self.assertEqual(remove_response.status_code, 200, remove_response.content)
+        self.assertFalse(parse(remove_response)['saved'])
+        self.assertFalse(SavedMessage.objects.filter(user=recipient, direct_message=message).exists())
+
+    def test_user_cannot_save_another_users_direct_message(self):
+        sender = make_user('saved_private_sender')
+        recipient = make_user('saved_private_recipient')
+        outsider = make_user('saved_private_outsider')
+        message = Message.objects.create(sender=sender, recipient=recipient, content='private')
+        login(self.client, outsider)
+
+        response = post_json(self.client, reverse('toggle_saved_message_api'), {
+            'message_id': message.id,
+            'conversation_type': 'direct',
+        })
+
+        self.assertEqual(response.status_code, 404, response.content)
+        self.assertFalse(SavedMessage.objects.exists())
+
+
 class GetMessagesApiTests(_MessageTestBase):
     def test_get_messages_returns_both_directions(self):
         alice = make_user('gm01_a')
@@ -3647,6 +3745,36 @@ class UploadAttachmentApiTests(_MessageTestBase):
         response = self.client.post(reverse('upload_message_attachment_api'), {'file': bad})
         self.assertEqual(response.status_code, 400)
         self.assertFalse(MessageAttachment.objects.filter(uploader=user).exists())
+
+    def test_upload_rejects_spoofed_image_content(self):
+        user = make_user('ua_spoofed_image')
+        login(self.client, user)
+        upload = SimpleUploadedFile(
+            'looks-like-image.png',
+            b'<html><script>alert(1)</script></html>',
+            content_type='image/png',
+        )
+
+        response = self.client.post(reverse('upload_message_attachment_api'), {'file': upload})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(MessageAttachment.objects.filter(uploader=user).exists())
+
+    def test_upload_uses_verified_attachment_metadata(self):
+        user = make_user('ua_verified_image')
+        login(self.client, user)
+        upload = SimpleUploadedFile(
+            'image.png',
+            b'\x89PNG\r\n\x1a\nverified-content',
+            content_type='image/png',
+        )
+
+        response = self.client.post(reverse('upload_message_attachment_api'), {'file': upload})
+
+        self.assertEqual(response.status_code, 201)
+        attachment = MessageAttachment.objects.get(uploader=user)
+        self.assertEqual(attachment.attachment_type, 'image')
+        self.assertEqual(attachment.mime_type, 'image/png')
 
     @override_settings(USER_STORAGE_QUOTA_BYTES=8)
     def test_upload_storage_quota_exceeded_returns_413(self):

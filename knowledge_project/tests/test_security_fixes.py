@@ -1,6 +1,6 @@
-from unittest.mock import patch
-
 import json
+from io import BytesIO
+from unittest.mock import patch
 
 from django.contrib.auth import HASH_SESSION_KEY
 from django.contrib.auth.models import AnonymousUser
@@ -12,6 +12,7 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from PIL import Image
 
 from Team_Project.middleware import SessionTimeoutMiddleware, VaultLockMiddleware
 from messaging.models import MessageGroup
@@ -192,6 +193,51 @@ class ProfileUploadFixTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('15MB', parse(response)['message'])
+
+    def _image_upload(self, *, image_format, content_type):
+        buffer = BytesIO()
+        Image.new('RGB', (8, 8), color='white').save(buffer, format=image_format)
+        return SimpleUploadedFile(
+            f'avatar.{image_format.lower()}',
+            buffer.getvalue(),
+            content_type=content_type,
+        )
+
+    def test_avatar_rejects_non_image_content_with_image_mime_type(self):
+        user = make_user('invalid_avatar_user')
+        avatar = SimpleUploadedFile(
+            'avatar.png',
+            b'not an image',
+            content_type='image/png',
+        )
+        request = self.factory.post(reverse('upload_avatar'), {'avatar': avatar})
+        request.user = user
+
+        response = upload_avatar(request)
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_avatar_rejects_image_when_declared_mime_does_not_match_content(self):
+        user = make_user('mismatched_avatar_user')
+        avatar = self._image_upload(image_format='JPEG', content_type='image/png')
+        request = self.factory.post(reverse('upload_avatar'), {'avatar': avatar})
+        request.user = user
+
+        response = upload_avatar(request)
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_avatar_accepts_valid_image_with_matching_mime_type(self):
+        user = make_user('valid_avatar_user')
+        avatar = self._image_upload(image_format='PNG', content_type='image/png')
+        request = self.factory.post(reverse('upload_avatar'), {'avatar': avatar})
+        request.user = user
+
+        response = upload_avatar(request)
+
+        self.assertEqual(response.status_code, 200)
+        user.profile.refresh_from_db()
+        self.assertTrue(user.profile.avatar.name)
 
 
 class VaultLockMiddlewareFixTests(TestCase):

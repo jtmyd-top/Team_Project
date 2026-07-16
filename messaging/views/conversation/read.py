@@ -41,7 +41,21 @@ def get_messages_api(request):
         # 第 2 次清理：若任一方 TTL=0，则本次刚标记已读的消息立即销毁（下次打开不可见）
         _apply_disappearing(request.user, other_user, viewer_settings)
 
-        data = [_message_payload(m, viewer=request.user) for m in messages_list]
+        from messaging.models import SavedMessage
+        bookmarked_message_ids = set(
+            SavedMessage.objects.filter(
+                user=request.user,
+                direct_message_id__in=[message.id for message in messages_list],
+            ).values_list('direct_message_id', flat=True)
+        )
+        data = [
+            _message_payload(
+                message,
+                viewer=request.user,
+                is_bookmarked=message.id in bookmarked_message_ids,
+            )
+            for message in messages_list
+        ]
         settings = _conversation_settings_payload(viewer_settings)
         settings['direct_mute'] = _direct_message_mute_payload(
             _get_active_direct_message_mute(request.user, other_user)

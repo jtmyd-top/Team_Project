@@ -244,6 +244,15 @@ def upload_avatar(request):
                     "message": f"{'视频' if is_video else '图片'}大小不能超过 {max_size_mb}MB"
                 }, status=400)
 
+            if not is_video:
+                from core.utils.image_security import validate_image_upload
+                validation_error = validate_image_upload(
+                    banner_file,
+                    allowed_mime_types=set(allowed_image_types),
+                )
+                if validation_error:
+                    return JsonResponse({"status": "error", "message": validation_error}, status=400)
+
             # 【修复】先保存旧文件的路径，然后删除
             old_banner_path = None
             if user.profile.banner_image:
@@ -288,6 +297,14 @@ def upload_avatar(request):
                     "status": "error",
                     "message": "头像图片大小不能超过 5MB"
                 }, status=400)
+
+            from core.utils.image_security import validate_image_upload
+            validation_error = validate_image_upload(
+                avatar_file,
+                allowed_mime_types=set(allowed_avatar_types),
+            )
+            if validation_error:
+                return JsonResponse({"status": "error", "message": validation_error}, status=400)
 
             # 【修复】先保存旧文件的路径，然后删除
             old_avatar_path = None

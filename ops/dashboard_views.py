@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.db import connections
-from django.db.models import Count, F
+from django.db.models import Count, F, Q
 from django.db.models.functions import TruncDate
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import redirect, render
@@ -164,7 +164,7 @@ def dashboard_view(request):
 def dashboard_stats_api(request):
     """
     战情室数据 API，仅超级管理员可访问
-    支持 ?section=heartbeat|assets|operations|vault_alerts|trash_backlog|content_trend|login_monitor|audit_log|network|service_health|error_logs|all
+    支持 ?section=heartbeat|assets|operations|action_items|vault_alerts|trash_backlog|content_trend|login_monitor|audit_log|network|service_health|email_delivery|error_logs|all
     """
     if not request.user.is_superuser:
         return JsonResponse({'status': 'error', 'message': '权限不足'}, status=403)
@@ -295,6 +295,72 @@ def dashboard_stats_api(request):
         except Exception as exc:
             logger.error("Dashboard operations error: %s", exc)
             data['operations'] = None
+
+    # ---- action_items: 管理员优先处理事项 ----
+    if section in ('action_items', 'all'):
+        try:
+            from accounts.models import EmailDeliveryLog
+            from messaging.models import GroupJoinRequest
+            from moderation.models import (
+                AttachmentReport,
+                CommentReport,
+                MessageReport,
+                NoteReport,
+            )
+
+            now = timezone.now()
+            items = []
+            pending_reports = sum((
+                AttachmentReport.objects.filter(status='pending').count(),
+                CommentReport.objects.filter(status='pending').count(),
+                MessageReport.objects.filter(status='pending').count(),
+                NoteReport.objects.filter(status='pending').count(),
+            ))
+            if pending_reports:
+                items.append({
+                    'level': 'warning',
+                    'title': '内容举报待处理',
+                    'detail': f'{pending_reports} 条举报等待审核',
+                    'href': '/admin/',
+                })
+
+            pending_join_requests = GroupJoinRequest.objects.filter(status='pending').count()
+            if pending_join_requests:
+                items.append({
+                    'level': 'info',
+                    'title': '入群申请待审批',
+                    'detail': f'{pending_join_requests} 个申请等待群管理员处理',
+                    'href': '/messages/',
+                })
+
+            failed_emails = EmailDeliveryLog.objects.filter(
+                status=EmailDeliveryLog.STATUS_FAILED,
+                created_at__gte=now - timedelta(hours=24),
+            ).count()
+            if failed_emails:
+                items.append({
+                    'level': 'critical' if failed_emails >= 5 else 'warning',
+                    'title': '邮件投递异常',
+                    'detail': f'过去 24 小时有 {failed_emails} 次邮件发送失败',
+                    'href': '#email-delivery-overview',
+                })
+
+            stale_assets = Asset.objects.filter(
+                uploaded_at__lte=now - timedelta(days=30),
+                note_links__isnull=True,
+            ).count()
+            if stale_assets:
+                items.append({
+                    'level': 'info',
+                    'title': '孤岛附件可清理',
+                    'detail': f'{stale_assets} 个超过 30 天未引用的资产可检查清理',
+                    'href': '/knowledge/',
+                })
+
+            data['action_items'] = items[:6]
+        except Exception as exc:
+            logger.error("Dashboard action items error: %s", exc)
+            data['action_items'] = []
 
     # ---- vault_alerts: 保密柜安全告警（从数据库持久化读取） ----
     if section in ('vault_alerts', 'all'):
@@ -502,7 +568,6 @@ def dashboard_stats_api(request):
             } for s in suspicious]
 
             # IP 分布统计
-            from django.db.models import Count
             ip_stats = LoginDevice.objects.filter(
                 last_login_at__gte=seven_days_ago
             ).values('ip_location').annotate(
@@ -571,7 +636,6 @@ def dashboard_stats_api(request):
 
             # 补充：最近永久删除的笔记/文件夹（通过回收站清空时间推断）
             # 统计各类操作数量
-            from django.db.models import Count
             action_summary = LogEntry.objects.filter(
                 action_time__gte=seven_days_ago
             ).values('action_flag').annotate(count=Count('id'))
@@ -647,6 +711,51 @@ def dashboard_stats_api(request):
         }
 
         data['service_health'] = services
+
+    # ---- email_delivery: 邮件投递统计 ----
+    if section in ('email_delivery', 'all'):
+        try:
+            from accounts.models import EmailDeliveryLog
+
+            now = timezone.now()
+            cutoff = now - timedelta(days=7)
+            logs = EmailDeliveryLog.objects.filter(created_at__gte=cutoff)
+            total = logs.count()
+            succeeded = logs.filter(status=EmailDeliveryLog.STATUS_SUCCEEDED).count()
+            failed = logs.filter(status=EmailDeliveryLog.STATUS_FAILED).count()
+            by_category = list(
+                logs.values('category')
+                .annotate(
+                    total=Count('id'),
+                    succeeded=Count('id', filter=Q(status=EmailDeliveryLog.STATUS_SUCCEEDED)),
+                    failed=Count('id', filter=Q(status=EmailDeliveryLog.STATUS_FAILED)),
+                )
+                .order_by('-total')
+            )
+            recent_failures = [
+                {
+                    'category': item.get_category_display(),
+                    'provider': item.provider or '未知',
+                    'error': item.error_message or '邮件服务器未接受消息',
+                    'time': item.created_at.isoformat(),
+                }
+                for item in (
+                    logs.filter(status=EmailDeliveryLog.STATUS_FAILED)
+                    .order_by('-created_at')[:5]
+                )
+            ]
+            data['email_delivery'] = {
+                'window_days': 7,
+                'total': total,
+                'succeeded': succeeded,
+                'failed': failed,
+                'success_rate': round((succeeded / total) * 100, 1) if total else None,
+                'by_category': by_category,
+                'recent_failures': recent_failures,
+            }
+        except Exception as exc:
+            logger.error("Dashboard email delivery metrics error: %s", exc)
+            data['email_delivery'] = None
 
     # ---- error_logs: 系统异常日志流（优先从LogEntry读取最近10条） ----
     if section in ('error_logs', 'all'):

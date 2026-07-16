@@ -7,6 +7,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import DOMPurify from 'dompurify'
 import { useCodeEnhancer } from '@composables/useCodeEnhancer'
 import { useClientCrypto } from '@composables/useClientCrypto'
+import { useWikiLinks } from '@composables/useWikiLinks'
 import { useVaultStore } from '@/stores/vault'
 import { getShadowStyles, purifyConfig, TOC_THRESHOLD } from '@/components/knowledge/NoteShadowViewer/config.js'
 import { convertUbbMarkupInHtml, hydrateUbbDom } from '@/utils/ubb'
@@ -19,6 +20,7 @@ export function useNoteShadowViewer(props) {
   // ==================== Composables ====================
   const { enhance: enhanceCodeBlocks } = useCodeEnhancer()
   const { decryptContent, looksLikeEncrypted } = useClientCrypto()
+  const { backlinks, fetchLinks, decorateWikiLinks } = useWikiLinks()
   const vaultStore = useVaultStore()
 
   // ==================== 状态 ====================
@@ -156,6 +158,101 @@ export function useNoteShadowViewer(props) {
     }
   }
 
+  // ==================== Wiki 双向链接 ====================
+  function navigateToWikiNote(noteId) {
+    window.dispatchEvent(new CustomEvent('wiki-note-navigate', { detail: { noteId } }))
+  }
+
+  function decorateLinks() {
+    // 保密笔记不参与双链图，正文里的 [[]] 保持原样
+    if (props.isSecret || !shadowRoot.value) return
+    const content = shadowRoot.value.querySelector('.note-content')
+    if (content) {
+      decorateWikiLinks(content, navigateToWikiNote)
+    }
+  }
+
+  function refreshWikiLinks() {
+    if (props.isSecret || !props.noteId) {
+      backlinks.value = []
+      return
+    }
+    fetchLinks(props.noteId).then(() => {
+      // resolved 映射拿到后，把已渲染正文里的 [[]] 补成有效链接
+      decorateLinks()
+    })
+  }
+
+  // ==================== 搜索关键词高亮 ====================
+  // 事件可能先于正文渲染到达（搜索跳转触发笔记切换），先记下关键词，
+  // renderContent 的 rAF 回调里再补一次。
+  let pendingHighlightKeyword = ''
+
+  function applySearchHighlight() {
+    if (!pendingHighlightKeyword || !shadowRoot.value) return
+    const content = shadowRoot.value.querySelector('.note-content')
+    if (!content || !content.textContent) return
+
+    const keyword = pendingHighlightKeyword
+    const lowerKeyword = keyword.toLowerCase()
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || node.nodeValue.toLowerCase().indexOf(lowerKeyword) === -1) {
+          return NodeFilter.FILTER_REJECT
+        }
+        // 已高亮的不再嵌套
+        if (node.parentElement?.closest('mark.search-highlight')) {
+          return NodeFilter.FILTER_REJECT
+        }
+        return NodeFilter.FILTER_ACCEPT
+      },
+    })
+
+    const targets = []
+    let node = walker.nextNode()
+    while (node && targets.length < 200) {
+      targets.push(node)
+      node = walker.nextNode()
+    }
+    if (!targets.length) return
+
+    for (const textNode of targets) {
+      const text = textNode.nodeValue
+      const lowerText = text.toLowerCase()
+      const frag = document.createDocumentFragment()
+      let cursor = 0
+      let hit = lowerText.indexOf(lowerKeyword)
+      while (hit !== -1) {
+        if (hit > cursor) {
+          frag.appendChild(document.createTextNode(text.slice(cursor, hit)))
+        }
+        const mark = document.createElement('mark')
+        mark.className = 'search-highlight'
+        mark.textContent = text.slice(hit, hit + keyword.length)
+        frag.appendChild(mark)
+        cursor = hit + keyword.length
+        hit = lowerText.indexOf(lowerKeyword, cursor)
+      }
+      if (cursor < text.length) {
+        frag.appendChild(document.createTextNode(text.slice(cursor)))
+      }
+      textNode.parentNode.replaceChild(frag, textNode)
+    }
+
+    pendingHighlightKeyword = ''
+    const first = content.querySelector('mark.search-highlight')
+    if (first) {
+      requestAnimationFrame(() => first.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    }
+  }
+
+  function handleHighlightSearchText(event) {
+    const keyword = (event.detail?.keyword || '').trim()
+    if (!keyword) return
+    pendingHighlightKeyword = keyword.slice(0, 80)
+    requestAnimationFrame(applySearchHighlight)
+  }
+
   // ==================== Shadow DOM 渲染 ====================
   function renderContent(forceStyleUpdate = false) {
     if (!shadowRoot.value) return
@@ -259,6 +356,9 @@ export function useNoteShadowViewer(props) {
         enhanceCodeBlocks(content)
         console.log('[CodeEnhancer] Enhancement completed')
       }
+
+      decorateLinks()
+      applySearchHighlight()
     })
   }
 
@@ -387,9 +487,12 @@ export function useNoteShadowViewer(props) {
     if (props.isSecret && props.content && props.noteId) {
       decryptNoteContent()
     }
+    refreshWikiLinks()
+    window.addEventListener('highlight-search-text', handleHighlightSearchText)
   })
 
   onUnmounted(() => {
+    window.removeEventListener('highlight-search-text', handleHighlightSearchText)
     if (scrollParent) {
       scrollParent.removeEventListener('scroll', handleScroll)
     } else {
@@ -422,6 +525,7 @@ export function useNoteShadowViewer(props) {
     } else {
       renderContent(false)
     }
+    refreshWikiLinks()
   })
 
   watch(() => hasValidKey.value, (valid) => {
@@ -469,6 +573,7 @@ export function useNoteShadowViewer(props) {
     tocItems,
     activeTocId,
     scrollProgress,
-    scrollToHeading
+    scrollToHeading,
+    backlinks
   }
 }

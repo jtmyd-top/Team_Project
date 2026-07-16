@@ -45,6 +45,10 @@ def note_revisions_api(request, note_id):
     if not _history_permission(note, request.user):
         return JsonResponse({'error': '无权查看此笔记的版本历史'}, status=403)
 
+    # Existing notes predate the feature. Create their baseline lazily instead
+    # of shipping a long-running data migration against production content.
+    if not revision_qs.exists():
+        create_note_revision(note, note.last_modified_by or note.author, action=NoteRevision.ACTION_CREATED)
     revisions = revision_qs.order_by('-version_number')[:100]
     return JsonResponse({
         'note_id': note.id,

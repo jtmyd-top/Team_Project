@@ -8,6 +8,9 @@ urlpatterns = [
     path('knowledge/', note.knowledge_list, name='knowledge_list'),
     path('api/toggle-note-like/', note.toggle_note_like, name='toggle_note_like'),
     path('api/notes/search/', note.search_notes_api, name='api_search_notes'),
+    path('api/quick-search/', note.quick_search_api, name='api_quick_search'),
+    path('api/notes/<int:note_id>/export/', note.export_note_api, name='api_export_note'),
+    path('api/notes/<int:note_id>/links/', note.note_links_api, name='api_note_links'),
     path('api/notes/<int:note_id>/', note.note_detail_api, name='api_note_detail'),
     path('api/notes/all/', note.get_all_notes_api, name='get_all_notes_api'),
     path('api/notes/create/', note.create_note_api, name='create_note_api'),
@@ -37,6 +40,11 @@ urlpatterns = [
         name='delete_orphan_note_assets_api',
     ),
     path('api/notes/<int:note_id>/collaborators/', note.note_collaborators_api, name='note_collaborators_api'),
+    path(
+        'api/notes/<int:note_id>/editing-session/',
+        note.note_editing_session_api,
+        name='note_editing_session_api',
+    ),
     path(
         'api/notes/<int:note_id>/collaborators/<int:collaborator_id>/',
         note.note_collaborator_detail_api,

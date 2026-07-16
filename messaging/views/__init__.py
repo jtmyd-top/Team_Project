@@ -24,6 +24,7 @@ from .attachment import (
     message_attachment_file_api,
     upload_message_attachment_api,
 )
+from .bookmarks import list_saved_messages_api, toggle_saved_message_api
 from .conversation import (
     bulk_delete_messages_api,
     clear_conversation_api,
@@ -128,6 +129,9 @@ __all__ = [
     'list_my_message_attachments_api',
     'message_attachment_file_api',
     'upload_message_attachment_api',
+    # bookmarks
+    'list_saved_messages_api',
+    'toggle_saved_message_api',
     # conversation
     'bulk_delete_messages_api',
     'clear_conversation_api',

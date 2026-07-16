@@ -24,15 +24,20 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from notes.models import Asset, Folder, Note, NoteAsset, NoteCollaborator, NoteHistory
+from notes.models import Asset, Folder, Note, NoteAsset, NoteCollaborator, NoteHistory, NoteRevision
 
 from ._helpers import login, make_user, parse, post_json
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.db')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.db',
+    # API tests bypass the HTTPS reverse proxy used in production.
+    SECURE_SSL_REDIRECT=False,
+)
 class _NoteTestBase(TestCase):
     def setUp(self):
         cache.clear()
@@ -239,6 +244,113 @@ class NoteAssetSyncTests(_NoteTestBase):
         sync_mock.assert_not_called()
 
 
+class NoteRevisionApiTests(_NoteTestBase):
+    def test_create_and_update_generate_immutable_revisions(self):
+        user = make_user('revision_owner')
+        login(self.client, user)
+        created = post_json(self.client, reverse('create_note_api'), {
+            'title': 'first',
+            'content': '<p>one</p>',
+        })
+        self.assertEqual(created.status_code, 200)
+        note = Note.objects.get(id=parse(created)['id'])
+        self.assertEqual(NoteRevision.objects.filter(note=note).count(), 1)
+
+        updated = self.client.patch(
+            reverse('api_note_detail', args=[note.id]),
+            data=json.dumps({'title': 'second', 'content': '<p>two</p>'}),
+            content_type='application/json',
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        revisions = list(NoteRevision.objects.filter(note=note).order_by('version_number'))
+        self.assertEqual([(item.version_number, item.title) for item in revisions], [(1, 'first'), (2, 'second')])
+
+    def test_editor_can_compare_but_only_manager_can_restore(self):
+        owner = make_user('revision_owner2')
+        editor = make_user('revision_editor')
+        note = Note.objects.create(author=owner, title='one', content='<p>one</p>')
+        first = NoteRevision.objects.create(note=note, version_number=1, title='one', content='<p>one</p>', created_by=owner)
+        second = NoteRevision.objects.create(note=note, version_number=2, title='two', content='<p>two</p>', created_by=owner)
+        NoteCollaborator.objects.create(note=note, user=editor, role=NoteCollaborator.ROLE_EDITOR, added_by=owner)
+
+        login(self.client, editor)
+        listing = self.client.get(reverse('note_revisions_api', args=[note.id]))
+        self.assertEqual(listing.status_code, 200)
+        self.assertFalse(parse(listing)['can_restore'])
+        compare = self.client.get(reverse('note_revision_compare_api', args=[note.id]), {'from': first.id, 'to': second.id})
+        self.assertEqual(compare.status_code, 200)
+        self.assertIn('one', parse(compare)['diff'])
+        blocked = post_json(self.client, reverse('restore_note_revision_api', args=[note.id, first.id]))
+        self.assertEqual(blocked.status_code, 403)
+
+    def test_manager_restore_creates_a_new_revision(self):
+        owner = make_user('revision_owner3')
+        note = Note.objects.create(author=owner, title='current', content='<p>current</p>')
+        original = NoteRevision.objects.create(note=note, version_number=1, title='original', content='<p>original</p>', created_by=owner)
+        NoteRevision.objects.create(note=note, version_number=2, title='current', content='<p>current</p>', created_by=owner)
+        login(self.client, owner)
+        response = post_json(self.client, reverse('restore_note_revision_api', args=[note.id, original.id]))
+        self.assertEqual(response.status_code, 200, response.content)
+        note.refresh_from_db()
+        self.assertEqual(note.title, 'original')
+        self.assertEqual(NoteRevision.objects.filter(note=note).count(), 3)
+        self.assertEqual(NoteRevision.objects.get(note=note, version_number=3).action, NoteRevision.ACTION_RESTORED)
+
+
+class NoteAnnotationAndCleanupApiTests(_NoteTestBase):
+    def test_comment_can_include_a_text_anchor(self):
+        owner = make_user('annotation_owner')
+        note = Note.objects.create(author=owner, title='note', content='<p>selected text</p>')
+        login(self.client, owner)
+        response = post_json(self.client, reverse('note_comment_create_api', args=[note.id]), {
+            'content': 'Please refine this section.',
+            'anchor_text': 'selected text',
+            'anchor_start': 0,
+            'anchor_end': 13,
+            'anchor_context': 'selected text',
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        body = parse(response)
+        self.assertEqual(body['anchor_text'], 'selected text')
+        comments = self.client.get(reverse('note_comments_api', args=[note.id]))
+        self.assertEqual(parse(comments)['comments'][0]['anchor_start'], 0)
+
+    def test_orphan_cleanup_only_lists_and_deletes_the_current_users_unlinked_assets(self):
+        owner = make_user('cleanup_owner')
+        other = make_user('cleanup_other')
+        orphan = Asset.objects.create(
+            uploader=owner,
+            name='orphan.txt',
+            file=SimpleUploadedFile('orphan.txt', b'orphan'),
+        )
+        linked = Asset.objects.create(
+            uploader=owner,
+            name='linked.txt',
+            file=SimpleUploadedFile('linked.txt', b'linked'),
+        )
+        other_asset = Asset.objects.create(
+            uploader=other,
+            name='other.txt',
+            file=SimpleUploadedFile('other.txt', b'other'),
+        )
+        note = Note.objects.create(author=owner, title='linked', content='')
+        NoteAsset.objects.create(note=note, asset=linked)
+
+        login(self.client, owner)
+        listed = self.client.get(reverse('orphan_note_assets_api'))
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual([item['id'] for item in parse(listed)['assets']], [orphan.id])
+
+        deleted = post_json(self.client, reverse('delete_orphan_note_assets_api'), {
+            'asset_ids': [orphan.id, linked.id, other_asset.id],
+        })
+        self.assertEqual(deleted.status_code, 200, deleted.content)
+        self.assertEqual(parse(deleted)['deleted_ids'], [orphan.id])
+        self.assertFalse(Asset.objects.filter(id=orphan.id).exists())
+        self.assertTrue(Asset.objects.filter(id=linked.id).exists())
+        self.assertTrue(Asset.objects.filter(id=other_asset.id).exists())
+
+
 class TrashedFolderApiTests(_NoteTestBase):
     def test_trashed_items_api_reports_children_count_from_annotations(self):
         user = make_user('trash01')
@@ -322,6 +434,31 @@ class NoteDetailApiTests(_NoteTestBase):
         self.assertIn('public_url', body)
         self.assertIn('folder_id', body)
         self.assertIn('is_favorited', body)
+        self.assertIn('revision_token', body)
+
+    def test_stale_revision_token_rejects_content_overwrite(self):
+        user = make_user('detail05')
+        note = Note.objects.create(author=user, title='t', content='<p>first</p>')
+        login(self.client, user)
+        detail_url = reverse('api_note_detail', args=[note.id])
+
+        initial = parse(self.client.get(detail_url + '?full_content=true'))
+        note.content = '<p>changed elsewhere</p>'
+        note.save()
+
+        response = self.client.patch(
+            detail_url,
+            data=json.dumps({
+                'content': '<p>stale write</p>',
+                'base_revision_token': initial['revision_token'],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(parse(response)['code'], 'note_edit_conflict')
+        note.refresh_from_db()
+        self.assertEqual(note.content, '<p>changed elsewhere</p>')
 
 
 # =========================================================================
@@ -395,6 +532,60 @@ class NoteCollaborationApiTests(_NoteTestBase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(NoteCollaborator.objects.filter(note=note, user=collaborator).exists())
+
+    def test_editor_presence_requires_write_permission_and_reports_other_editor(self):
+        owner = make_user('presence_owner')
+        editor = make_user('presence_editor')
+        reader = make_user('presence_reader')
+        note = Note.objects.create(author=owner, title='shared', content='')
+        NoteCollaborator.objects.create(
+            note=note,
+            user=editor,
+            role=NoteCollaborator.ROLE_EDITOR,
+            added_by=owner,
+        )
+        NoteCollaborator.objects.create(
+            note=note,
+            user=reader,
+            role=NoteCollaborator.ROLE_READER,
+            added_by=owner,
+        )
+
+        login(self.client, editor)
+        response = post_json(
+            self.client,
+            reverse('note_editing_session_api', args=[note.id]),
+            {'action': 'enter'},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(parse(response)['editing_by_others'])
+
+        login(self.client, owner)
+        response = self.client.get(reverse('note_editing_session_api', args=[note.id]))
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        self.assertTrue(body['editing_by_others'])
+        self.assertEqual(body['editing_by'], editor.username)
+
+        login(self.client, reader)
+        response = post_json(
+            self.client,
+            reverse('note_editing_session_api', args=[note.id]),
+            {'action': 'enter'},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_editor_presence_leave_removes_current_user(self):
+        owner = make_user('presence_leave_owner')
+        note = Note.objects.create(author=owner, title='shared', content='')
+        login(self.client, owner)
+        url = reverse('note_editing_session_api', args=[note.id])
+
+        self.assertEqual(post_json(self.client, url, {'action': 'enter'}).status_code, 200)
+        response = post_json(self.client, url, {'action': 'leave'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(parse(response)['active_editors'], [])
 
 
 # =========================================================================

@@ -12,12 +12,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.core.cache import cache
+from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from accounts.models import EmailDeliveryLog
+from core.mailers.metrics import record_email_delivery
+from core.mailers.tracking_backend import TrackingEmailBackend
 from messaging.models import GroupMessage, Message, MessageGroup
 from ops.models import BackupRecord
 
@@ -112,6 +117,80 @@ class DashboardStatsApiTests(_DashboardTestBase):
         self.assertEqual(body['operations']['direct_messages_7d'], 1)
         self.assertEqual(body['operations']['group_messages_7d'], 1)
         self.assertIn('activity_trend', body['operations'])
+
+    def test_superuser_can_get_email_delivery_metrics(self):
+        admin = make_user('ds05_admin', is_superuser=True)
+        EmailDeliveryLog.objects.create(
+            category='login_2fa',
+            status=EmailDeliveryLog.STATUS_SUCCEEDED,
+            subject='登录验证码',
+            recipient_count=1,
+            provider='django_smtp',
+        )
+        EmailDeliveryLog.objects.create(
+            category='registration_code',
+            status=EmailDeliveryLog.STATUS_FAILED,
+            subject='注册验证码',
+            recipient_count=1,
+            provider='django_smtp',
+            error_message='Connection refused',
+        )
+        login(self.client, admin)
+
+        response = self.client.get(reverse('dashboard_stats_api') + '?section=email_delivery')
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        self.assertEqual(body['email_delivery']['total'], 2)
+        self.assertEqual(body['email_delivery']['succeeded'], 1)
+        self.assertEqual(body['email_delivery']['failed'], 1)
+        self.assertEqual(body['email_delivery']['success_rate'], 50.0)
+
+    def test_superuser_can_get_action_items(self):
+        admin = make_user('ds06_admin', is_superuser=True)
+        EmailDeliveryLog.objects.create(
+            category='login_2fa',
+            status=EmailDeliveryLog.STATUS_FAILED,
+            subject='登录验证码',
+            recipient_count=1,
+            provider='django_smtp',
+            error_message='Connection refused',
+        )
+        login(self.client, admin)
+
+        response = self.client.get(reverse('dashboard_stats_api') + '?section=action_items')
+
+        self.assertEqual(response.status_code, 200)
+        body = parse(response)
+        self.assertTrue(any(item['title'] == '邮件投递异常' for item in body['action_items']))
+
+
+class EmailDeliveryTrackingTests(_DashboardTestBase):
+    @patch('django.core.mail.backends.smtp.EmailBackend._send', return_value=True)
+    def test_tracking_backend_records_verification_delivery(self, mocked_send):
+        backend = TrackingEmailBackend()
+        message = EmailMessage('注册验证码', 'code', 'noreply@example.com', ['user@example.com'])
+
+        self.assertTrue(backend._send(message))
+
+        log = EmailDeliveryLog.objects.get()
+        self.assertEqual(log.category, 'registration_code')
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_SUCCEEDED)
+        self.assertEqual(log.recipient_count, 1)
+        mocked_send.assert_called_once_with(message)
+
+    def test_delivery_error_is_redacted_before_storage(self):
+        record_email_delivery(
+            subject='登录验证码',
+            recipient_count=1,
+            success=False,
+            provider='django_smtp',
+            error_message='Mailbox user@example.com at 203.0.113.8 refused the message',
+        )
+
+        log = EmailDeliveryLog.objects.get()
+        self.assertNotIn('user@example.com', log.error_message)
+        self.assertNotIn('203.0.113.8', log.error_message)
 
 
 # =========================================================================

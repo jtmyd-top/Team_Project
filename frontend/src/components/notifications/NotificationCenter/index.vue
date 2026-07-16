@@ -206,6 +206,7 @@ function kindIcon(kind) {
     report: 'fas fa-shield-halved',
     sanction: 'fas fa-ban',
     note_copied: 'fas fa-copy',
+    note_revision_restored: 'fas fa-clock-rotate-left',
     profile: 'fas fa-user',
   }
   return map[kind] || 'fas fa-bell'

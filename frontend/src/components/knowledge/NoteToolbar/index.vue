@@ -32,6 +32,20 @@
           <i class="fas fa-link"></i>
         </button>
 
+        <div v-if="!note.is_secret" class="toolbar-export" @click.stop>
+          <button class="icon-btn" title="导出笔记" @click="toggleExportMenu">
+            <i class="fas fa-download"></i>
+          </button>
+          <div v-if="showExportMenu" class="toolbar-export-menu">
+            <button type="button" @click="handleExport('md')">
+              <i class="fab fa-markdown"></i> 导出 Markdown
+            </button>
+            <button type="button" @click="handleExport('html')">
+              <i class="fas fa-code"></i> 导出 HTML
+            </button>
+          </div>
+        </div>
+
         <div class="divider-vertical"></div>
 
         <template v-if="!isEditing">
@@ -52,6 +66,7 @@
 </template>
 
 <script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useNoteToolbar } from '@composables/useNoteToolbar'
 import '@/assets/styles/components/note-toolbar.css'
 
@@ -101,4 +116,24 @@ const {
   handleSave,
   handleDelete
 } = useNoteToolbar(props, emit)
+
+const showExportMenu = ref(false)
+
+function toggleExportMenu() {
+  showExportMenu.value = !showExportMenu.value
+}
+
+function handleExport(format) {
+  showExportMenu.value = false
+  if (!props.note?.id) return
+  // Server sets Content-Disposition: attachment, so navigating triggers a download.
+  window.location.href = `/api/notes/${props.note.id}/export/?format=${format}`
+}
+
+function closeExportMenu() {
+  showExportMenu.value = false
+}
+
+onMounted(() => document.addEventListener('click', closeExportMenu))
+onBeforeUnmount(() => document.removeEventListener('click', closeExportMenu))
 </script>

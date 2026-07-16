@@ -8,12 +8,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const heartbeat = ref(null)
   const assets = ref(null)
   const operations = ref(null)
+  const actionItems = ref([])
   const vaultAlerts = ref([])
   const trashBacklog = ref(null)
   const contentTrend = ref(null)
   const loginMonitor = ref(null)
   const auditLog = ref(null)
   const serviceHealth = ref(null)
+  const emailDelivery = ref(null)
   const errorLogs = ref(null)
   const cpuHistory = ref([])
   const memHistory = ref([])
@@ -164,6 +166,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     const data6 = await fetchSection('error_logs')
     if (data6 && data6.error_logs) errorLogs.value = data6.error_logs
 
+    const data7 = await fetchSection('email_delivery')
+    if (data7 && data7.email_delivery) emailDelivery.value = data7.email_delivery
+
+    const data8 = await fetchSection('action_items')
+    if (data8 && data8.action_items) actionItems.value = data8.action_items
+
     await fetchOperations()
     lastUpdated.value = new Date()
   }
@@ -178,12 +186,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
       }
       if (data.assets) assets.value = data.assets
       if (data.operations) operations.value = data.operations
+      if (data.action_items) actionItems.value = data.action_items
       if (data.vault_alerts) vaultAlerts.value = data.vault_alerts
       if (data.trash_backlog) trashBacklog.value = data.trash_backlog
       if (data.content_trend) contentTrend.value = data.content_trend
       if (data.login_monitor) loginMonitor.value = data.login_monitor
       if (data.audit_log) auditLog.value = data.audit_log
       if (data.service_health) serviceHealth.value = data.service_health
+      if (data.email_delivery) emailDelivery.value = data.email_delivery
       if (data.error_logs) errorLogs.value = data.error_logs
       lastUpdated.value = new Date()
     }
@@ -229,9 +239,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
 
   return {
-    heartbeat, assets, operations, vaultAlerts,
+    heartbeat, assets, operations, actionItems, vaultAlerts,
     trashBacklog, contentTrend, loginMonitor, auditLog,
-    serviceHealth, errorLogs,
+    serviceHealth, emailDelivery, errorLogs,
     cpuHistory, memHistory, netSentHistory, netRecvHistory,
     loading, error, connected, lastUpdated, reconnectCountdown,
     alertCount, criticalCount, suspiciousCount,
