@@ -1,12 +1,63 @@
 from django import template
+import json
 import os
 import glob
 from django.conf import settings
+from django.templatetags.static import static as static_url
+from django.utils.safestring import mark_safe
 
 register = template.Library()
 
 # Vite 开发服务器地址
 VITE_DEV_SERVER = 'http://localhost:5173'
+
+# Vite manifest 缓存（按文件 mtime 失效）
+_manifest_cache = {'mtime': None, 'data': None}
+
+
+def _load_vite_manifest():
+    manifest_path = os.path.join(
+        settings.BASE_DIR, 'static', 'dist', '.vite', 'manifest.json'
+    )
+    try:
+        mtime = os.path.getmtime(manifest_path)
+    except OSError:
+        return {}
+    if _manifest_cache['mtime'] != mtime:
+        try:
+            with open(manifest_path, encoding='utf-8') as fh:
+                _manifest_cache['data'] = json.load(fh)
+            _manifest_cache['mtime'] = mtime
+        except (OSError, ValueError):
+            return {}
+    return _manifest_cache['data'] or {}
+
+
+@register.simple_tag
+def vite_entry_css(entry_name):
+    """输出某个 Vite 入口需要的全部 CSS <link> 标签。
+
+    element-plus 等共享依赖的样式会被拆分为独立的 chunk CSS
+    （el-select.css、el-input.css 等），只链接 assets/<entry>.css
+    会丢失组件样式。此标签读取构建 manifest，把入口 css 列表全部输出。
+
+    用法: {% vite_entry_css 'moderation' %}
+    """
+    if is_vite_dev_mode():
+        # 开发模式下 CSS 由 Vite 开发服务器注入
+        return ''
+    manifest = _load_vite_manifest()
+    entry = manifest.get(f'src/entries/{entry_name}.js') or {}
+    css_files = entry.get('css') or [f'assets/{entry_name}.css']
+    version = static_mtime(f'dist/{entry_name}.js')
+    links = []
+    for css in css_files:
+        href = static_url(f'dist/{css}')
+        if version:
+            href = f'{href}?v={version}'
+        links.append(f'<link rel="stylesheet" href="{href}">')
+    return mark_safe('\n'.join(links))
+
 
 
 @register.simple_tag
